@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import importlib
 import importlib.util
+import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
@@ -106,7 +107,12 @@ def load_config(config_path: str | Path) -> dict[str, Any]:
     if not text.strip():
         raise ConfigError(f"Configuration file is empty: {path}")
 
-    if importlib.util.find_spec("yaml") is not None:
+    if text.lstrip().startswith(("{", "[")):
+        try:
+            loaded = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ConfigError(f"Invalid JSON-compatible YAML in configuration file {path}: {exc}") from exc
+    elif importlib.util.find_spec("yaml") is not None:
         yaml = importlib.import_module("yaml")
         try:
             loaded = yaml.safe_load(text)
