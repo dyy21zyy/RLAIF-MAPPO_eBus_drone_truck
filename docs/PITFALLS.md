@@ -48,3 +48,31 @@
   test missing, blank, empty-mapping, malformed, non-mapping, and valid inputs.
   The fallback parser remains intentionally limited to two-space nested mappings
   and inline scalar lists; use PyYAML for advanced YAML syntax.
+
+## Stage 2 data-pipeline guardrails
+
+- Keep the fallback path independent of internet access and optional OSM tooling.
+- Never replace synthetic parcels with scraped private order data, and do not
+  scrape sites whose terms or robots policy prohibit it.
+- Treat the fallback grid and generated corridor as smoke-test fixtures, not as
+  validated representations of Shanghai traffic or public-transport operations.
+- Preserve explicit physical units in CSV columns and instance metadata.
+- Matrix consumers must use `instance.json` or `instance.yaml` index metadata;
+  row order must not be inferred from CSV sorting.
+- Full mode can legitimately degrade to fallback mode when `osmnx`, internet
+  access, or an OSM response is unavailable; inspect manifest warnings and mode.
+- Stage 2 produces static instance data only. Do not add event progression,
+  dispatch decisions, rewards, PPO/MAPPO, preference data, or reward models here.
+
+## Stage 2 gate remediation: JSON-compatible YAML
+
+- **Issue:** The first Stage 2 smoke run built every artifact but failed while
+  loading `instance.yaml` in an environment without PyYAML.
+- **Root cause:** JSON is valid YAML and was used to keep manifest serialization
+  dependency-light, but the Stage 1 fallback YAML parser supported only nested
+  `key: value` mappings and inline scalar lists.
+- **Minimal fix:** Detect JSON-looking documents and parse them with the standard
+  library before selecting PyYAML or the simple YAML parser.
+- **Regression prevention:** The Stage 2 offline instance-loading test reads both
+  manifests, and the full Stage 1 suite continues to test malformed, blank,
+  empty-root, non-mapping, and valid configuration behavior.
