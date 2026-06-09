@@ -1,0 +1,16 @@
+# Stage 1 configuration template only; reward-model training is not implemented.
+seed: 42
+data:
+  preference_dataset: data/processed/preferences.jsonl
+  validation_ratio: 0.1
+model:
+  hidden_sizes: [256, 256]
+  dropout: 0.1
+training:
+  epochs: 50
+  batch_size: 64
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+output:
+  directory: checkpoints/reward_model
+  log_file: logs/train_reward_model.log

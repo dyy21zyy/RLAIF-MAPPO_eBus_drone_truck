@@ -1,0 +1,97 @@
+project:
+  name: rlaif_mappo_dynamic_delivery
+  seed: 42
+  output_dir: outputs
+  log_dir: logs
+  checkpoint_dir: checkpoints
+
+city:
+  name: shanghai_yangpu
+  bbox:
+    north: 31.35
+    south: 31.25
+    east: 121.60
+    west: 121.45
+
+network:
+  num_integrated_stations: 6
+  drone_radius_km: 8.0
+  drone_speed_kmph: 40.0
+  drone_payload_kg: 5.0
+  max_drone_round_trip_min: 120.0
+  customer_service_time_min: 1.0
+  drone_turnaround_time_min: 1.0
+
+bus:
+  horizon_min: 360
+  delivery_horizon_min: 480
+  headway_min: 10
+  bus_speed_kmph: 25.0
+  bus_capacity_passenger: 80
+  bus_battery_kwh: 160.0
+  bus_min_soc_kwh: 40.0
+  bus_energy_kwh_per_km: 1.6
+  freight_capacity_kg: 20.0
+  terminal_loading_time_min_per_kg: 0.1
+  station_unloading_time_min_per_kg: 0.1
+  charging_power_kw: 500.0
+  charging_efficiency: 0.95
+  charging_actions_sec: [0, 15, 30, 45, 60, 75, 90, 105, 120]
+  freight_trip_frequency: 3
+
+truck:
+  num_trucks: 1
+  capacity_kg: 100.0
+  speed_kmph: 25.0
+  fixed_dispatch_cost: 20.0
+  cost_per_km: 2.0
+  cost_per_min: 0.1
+  loading_time_min_per_kg: 0.5
+  unloading_time_min_per_kg: 0.4
+  return_to_depot: true
+  one_parcel_per_trip_mvp: true
+
+station:
+  chargers_per_station: 2
+  locker_capacity_kg: 30.0
+  drones_per_station: 3
+  initial_full_batteries: 6
+  max_simultaneous_battery_charging: 6
+  battery_charging_power_kw: 2.0
+  battery_charging_duration_min: 45.0
+  power_capacity_kw: 1100.0
+  base_load_kw: 100.0
+
+parcel:
+  num_parcels: 60
+  heavy_ratio: 0.15
+  tight_deadline_ratio: 0.3
+  moderate_deadline_ratio: 0.5
+  loose_deadline_ratio: 0.2
+
+reward:
+  passenger_delay: 1.0
+  bus_operating_delay: 1.0
+  parcel_lateness: 1.0
+  energy_cost: 0.2
+  power_overload: 1.0
+  bus_battery_violation: 5.0
+  locker_overflow: 1.0
+  truck_cost: 0.5
+  undelivered: 10.0
+  battery_shortage: 1.0
+  infeasible_action: 5.0
+  rlaif_lambda: 0.2
+
+ppo:
+  episodes: 5000
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  lr: 0.0003
+  batch_size: 2048
+  minibatch_size: 256
+  update_epochs: 5
+  entropy_coef: 0.01
+  value_coef: 0.5
+  max_grad_norm: 0.5
