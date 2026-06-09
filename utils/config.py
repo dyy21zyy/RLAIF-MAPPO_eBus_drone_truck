@@ -103,6 +103,8 @@ def load_config(config_path: str | Path) -> dict[str, Any]:
     if not path.is_file():
         raise ConfigError(f"Configuration file does not exist: {path}")
     text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        raise ConfigError(f"Configuration file is empty: {path}")
 
     if importlib.util.find_spec("yaml") is not None:
         yaml = importlib.import_module("yaml")
@@ -117,6 +119,8 @@ def load_config(config_path: str | Path) -> dict[str, Any]:
         raise ConfigError(f"Configuration file is empty: {path}")
     if not isinstance(loaded, Mapping):
         raise ConfigError(f"Configuration root must be a mapping: {path}")
+    if not loaded:
+        raise ConfigError(f"Configuration file has an empty root mapping: {path}")
 
     return deepcopy(dict(loaded))
 

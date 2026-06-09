@@ -3,6 +3,11 @@
 ## Stage gates
 
 Each stage must pass its own offline smoke test before downstream work begins.
+A stage gate is mandatory at the end of every stage. If it finds a blocker, fix
+the current stage immediately, add regression coverage, and rerun the complete
+gate. Do not begin the next stage until the gate passes. Automatic remediation
+may run for at most three rounds before the remaining blockers are escalated for
+manual intervention.
 
 1. **Stage 1 — project foundation (implemented)**
    - Load YAML configuration.
