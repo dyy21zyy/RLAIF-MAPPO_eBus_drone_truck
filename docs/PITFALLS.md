@@ -32,3 +32,19 @@
 - Use only approved public, synthetic, or user-provided route/order data.
 - Keep a small deterministic fallback instance for CI and offline use.
 - Validate physical units and state invariants before training an agent.
+
+## Stage-gate remediation: empty configurations
+
+- **Issue:** The dependency-free YAML path accepted a blank file as an empty
+  dictionary, while the public loader contract required empty configurations to
+  raise `ConfigError`.
+- **Root cause:** `_load_simple_yaml` naturally returns an empty mapping when it
+  sees no mapping entries, and `load_config` rejected only `None` and non-mapping
+  roots—not empty mappings.
+- **Fix:** Reject whitespace-only input before parser selection and reject an
+  empty root mapping after either parser returns. Missing files, malformed input,
+  and non-mapping roots continue to raise `ConfigError`.
+- **Prevention:** Keep parser-independent validation around parser selection, and
+  test missing, blank, empty-mapping, malformed, non-mapping, and valid inputs.
+  The fallback parser remains intentionally limited to two-space nested mappings
+  and inline scalar lists; use PyYAML for advanced YAML syntax.
