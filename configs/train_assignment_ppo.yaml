@@ -1,0 +1,19 @@
+# Stage 1 configuration template only; assignment PPO is not implemented.
+seed: 42
+base_config: configs/shanghai_small.yaml
+agent: assignment
+training:
+  episodes: 5000
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  learning_rate: 0.0003
+  batch_size: 2048
+  minibatch_size: 256
+  update_epochs: 5
+  entropy_coef: 0.01
+  value_coef: 0.5
+  max_grad_norm: 0.5
+output:
+  directory: checkpoints/assignment_ppo
+  log_file: logs/train_assignment_ppo.log
