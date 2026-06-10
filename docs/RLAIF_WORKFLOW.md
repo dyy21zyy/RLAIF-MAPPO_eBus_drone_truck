@@ -230,3 +230,31 @@ intervening processing under the fixed bus baseline). Optimized episode-end
 ledger attribution remains future work and is not claimed here. Final
 RLAIF-enabled PPO experiments remain blocked until the Stage 5 Runtime Gate has
 produced and validated `reward_model.pt` in a PyTorch environment.
+
+# Stage 7 Asynchronous MAPPO Integration
+
+Stage 7 has two decentralized, mask-aware actors and one shared centralized
+critic. It is asynchronous: a parcel-arrival event produces one assignment
+transition, while an integrated-station bus-arrival event produces one bus
+transition. There is no inactive-agent padding and no simultaneous joint action.
+The assignment action IDs remain `0=TD`, `1..H=TBD_h`, and `H+1..2H=TLD_h`; bus
+action IDs map to `[0, 15, 30, 45, 60, 75, 90, 105, 120]` seconds. The critic sees
+the fixed-size vector returned by `env.get_global_state()`.
+
+When `rlaif.enabled: false`, the assignment reward is its event-to-event environment
+reward and the wrapper does not access a checkpoint. When enabled, the wrapper must
+load a valid Stage 5 `reward_model.pt`, and the normalized learned score is added
+only to assignment transitions. Bus transitions always use environment reward.
+There is deliberately no rule-based, reason-text, or fabricated reward fallback.
+The current event-to-event reward attribution and logged cumulative decomposition
+are first-implementation limitations, not final delayed credit assignment.
+
+```bash
+python -m experiments.train_mappo_async --config configs/train_mappo_async.yaml
+python -m experiments.evaluate_mappo_async --config configs/train_mappo_async.yaml --checkpoint results/checkpoints/mappo_async.pt
+python -m experiments.smoke_test_mappo_async
+```
+
+PyTorch is required to execute actors, critic, PPO updates, and checkpoint loading.
+Final RLAIF-enabled MAPPO runs remain blocked until the Stage 5 Runtime Gate has
+validated a trained checkpoint in such an environment.

@@ -1,0 +1,30 @@
+# Stage 7 asynchronous event-driven MAPPO. This is not a simultaneous MARL loop.
+env:
+  config_path: configs/shanghai_small.yaml
+  fallback: true
+training:
+  seed: 42
+  total_episodes: 20
+  rollout_episodes: 5
+  ppo_epochs: 4
+  batch_size: 128
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  lr_actor: 0.0003
+  lr_critic: 0.0003
+  vf_coef: 0.5
+  ent_coef: 0.01
+  max_grad_norm: 0.5
+networks:
+  assignment_hidden_dims: [256, 256]
+  bus_hidden_dims: [256, 256]
+  critic_hidden_dims: [256, 256]
+rlaif:
+  enabled: false
+  lambda_rlaif: 1.0
+  reward_model_checkpoint: results/checkpoints/reward_model.pt
+output:
+  checkpoint_path: results/checkpoints/mappo_async.pt
+  training_log_path: results/metrics/mappo_async_training.csv
+  eval_path: results/metrics/mappo_async_eval.json

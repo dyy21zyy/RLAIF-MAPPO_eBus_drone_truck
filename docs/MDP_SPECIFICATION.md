@@ -79,3 +79,27 @@ resulting power overload is charged by overload energy. `info` exposes cumulativ
 negative `reward_components`, positive audit `cost_components`, and metrics for
 decision counts, delivery counts, drone deliveries, total reward, and corrected
 infeasible actions. No learned/RLAIF reward is present in Stage 3.
+
+## Stage 7 asynchronous MAPPO interface
+
+The Stage 7 learner consumes the Stage 3 decision sequence without changing its
+semantics. Observations expose `agent_id` and `event_type` aliases: `assignment` is
+paired only with `PARCEL_ARRIVAL`, `bus` only with integrated-station `BUS_ARRIVAL`,
+and terminal observations identify neither active actor. One `step` therefore
+creates at most one transition, never a joint action or an inactive-agent row.
+
+Assignment local observations use the existing six assignment features and a
+`1 + 2H` mask. Bus local observations use the six bus/station features and a
+nine-action mask for charging seconds `[0, 15, 30, 45, 60, 75, 90, 105, 120]`.
+Truck and drone behavior remains deterministic. The shared critic state is a
+fixed-size aggregate of time, parcel status, decision progress, bus energy/delay/
+freight, station locker/battery resources, truck availability, infeasible-action
+rate, and terminal flags returned by `get_global_state()`.
+
+The asynchronous transition schema is `agent_id`, `local_obs`, `global_state`,
+`action`, `action_mask`, old `log_prob`, old global value, reward, done,
+`next_global_state`, `event_type`, `event_time`, and audit `info`. GAE follows this
+actual event order and resets at episode boundaries. Initially, each transition
+uses the event-to-event environment reward. Optional learned reward is added only
+to assignment rows after strict Stage 5 checkpoint loading; bus rows never receive
+RLAIF.

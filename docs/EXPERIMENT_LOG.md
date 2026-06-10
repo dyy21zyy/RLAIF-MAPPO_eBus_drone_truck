@@ -168,3 +168,13 @@ error. No Stage 7 MAPPO, Stage 8 experiment orchestration, or final RLAIF-enable
 experiment was added. The Stage 5 Runtime Gate remains deferred to the operator's
 PyTorch environment; therefore this entry records implementation verification,
 not learned-reward experimental evidence.
+
+## Stage 7 Code Gate — 2026-06-10
+
+Implemented asynchronous event-driven MAPPO with separate assignment and bus
+actors, per-agent masks, a shared global-state critic, an asynchronous transition
+buffer, PPO/GAE updates, checkpoint/evaluation CLIs, and a temporary-artifact smoke
+test. Disabled RLAIF does not require a model. Enabled RLAIF strictly loads the
+Stage 5 checkpoint and is assignment-only; bus reward has no learned component.
+No Stage 8 experiment suite or final RLAIF-enabled run was performed. Final such
+runs remain blocked on the deferred Stage 5 PyTorch Runtime Gate.

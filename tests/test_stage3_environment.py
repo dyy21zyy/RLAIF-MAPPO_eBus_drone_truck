@@ -31,7 +31,10 @@ def test_reset_exposes_stable_assignment_schema(environment: DynamicDeliveryEnv)
     observation, info = environment.reset(seed=7)
 
     assert observation["agent"] == "assignment"
+    assert observation["agent_id"] == "assignment"
+    assert observation["event_type"] == "PARCEL_ARRIVAL"
     assert len(observation["features"]) == 6
+    assert len(environment.get_global_state()) == 15
     assert len(observation["action_mask"]) == environment.assignment_action_size
     assert environment.assignment_action_size == 1 + 2 * len(environment.station_ids)
     assert observation["action_mask"][0]

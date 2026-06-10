@@ -55,3 +55,23 @@ runtime output. Enabling RLAIF requires a valid trained checkpoint and never
 activates a rule fallback. Training CSVs, evaluation JSON, and checkpoints under
 `results/` are runtime artifacts and are not committed. These commands are code
 and runtime checks, not Stage 8 experiments or final RLAIF-enabled validation.
+
+## Stage 7 code-gate runs (not Stage 8 experiments)
+
+Use `configs/train_mappo_async.yaml` for asynchronous MAPPO implementation checks:
+
+```bash
+python -m experiments.smoke_test_mappo_async
+python -m experiments.train_mappo_async --config configs/train_mappo_async.yaml
+python -m experiments.evaluate_mappo_async --config configs/train_mappo_async.yaml --checkpoint results/checkpoints/mappo_async.pt
+```
+
+Training logs the assignment and bus decision counts and separate policy/entropy/KL
+metrics, plus shared critic loss and delivery, lateness, charging, delay, overload,
+and locker metrics. Evaluation uses deterministic masked actions. Runtime files go
+under ignored `results/` paths. The smoke test uses temporary paths, one rollout
+episode, one PPO epoch, disabled RLAIF, and skips cleanly without PyTorch.
+
+These commands are code and interface validation only. Do not report them as final
+Stage 8 comparisons. In particular, do not enable RLAIF unless the Stage 5 Runtime
+Gate has produced and validated the configured `reward_model.pt`.

@@ -155,8 +155,9 @@ smoke test requires a network request.
 - Stage 5: Code Gate complete; PyTorch Runtime Gate deferred.
 - Stage 6: assignment-only PPO code and dependency-light Code Gate implemented.
   The bus uses a fixed baseline; Stage 6 contains no MAPPO or centralized critic.
-- Stage 7: not implemented. Final RLAIF-enabled experiments remain blocked until
-  `reward_model.pt` has passed the deferred Stage 5 Runtime Gate.
+- Stage 7: asynchronous MAPPO code and dependency-light Code Gate implemented.
+  Final RLAIF-enabled experiments remain blocked until `reward_model.pt` has passed
+  the deferred Stage 5 Runtime Gate.
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the staged workflow and
 [docs/PITFALLS.md](docs/PITFALLS.md) for scope guardrails.
@@ -186,3 +187,33 @@ normalization statistics are applied. Missing or invalid checkpoints fail clearl
 rule-based, reason-text, and fabricated RLAIF rewards are prohibited. PyTorch is
 required for model training, updates, checkpoint round trips, and evaluation. A
 skipped PyTorch smoke test is only a Code Gate result, not experimental validation.
+
+## Stage 7 asynchronous MAPPO
+
+Stage 7 follows the simulator's event queue rather than inventing simultaneous
+multi-agent timesteps. Exactly one decentralized actor is active at a decision:
+the assignment actor at `PARCEL_ARRIVAL`, or the bus actor at an integrated-station
+`BUS_ARRIVAL`. Truck routing and drone dispatch remain deterministic environment
+modules, and no transition is fabricated for the inactive actor.
+
+The assignment policy is a masked categorical distribution with `1 + 2H` actions.
+The bus policy is a separate masked categorical distribution over
+`[0, 15, 30, 45, 60, 75, 90, 105, 120]` charging seconds. Both actors train against
+one shared centralized critic using `env.get_global_state()`. The buffer records
+one row per real decision event and computes normalized GAE over that asynchronous
+event stream.
+
+```bash
+python -m experiments.train_mappo_async --config configs/train_mappo_async.yaml
+python -m experiments.evaluate_mappo_async --config configs/train_mappo_async.yaml --checkpoint results/checkpoints/mappo_async.pt
+python -m experiments.smoke_test_mappo_async
+```
+
+`rlaif.enabled: false` is the dependency-light smoke mode and never requires
+`reward_model.pt`. `rlaif.enabled: true` strictly requires a valid trained Stage 5
+checkpoint; learned reward is added only to assignment transitions. Bus rewards
+never include RLAIF. Rule scores, evaluator text, and fabricated fallback rewards
+are prohibited. PyTorch is required for networks, optimization, and checkpoint
+round trips, so a clean skip without PyTorch is not experimental validation.
+Final RLAIF-enabled MAPPO experiments remain blocked until the Stage 5 Runtime
+Gate passes in a PyTorch environment. Stage 8 experiments are not part of Stage 7.

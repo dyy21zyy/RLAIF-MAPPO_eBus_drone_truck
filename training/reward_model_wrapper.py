@@ -1,4 +1,4 @@
-"""Strict Stage 5 learned-reward checkpoint adapter for Stage 6 PPO."""
+"""Strict Stage 5 learned-reward checkpoint adapter for Stage 6 PPO and Stage 7 MAPPO."""
 
 from __future__ import annotations
 
