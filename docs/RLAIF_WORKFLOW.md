@@ -258,3 +258,9 @@ python -m experiments.smoke_test_mappo_async
 PyTorch is required to execute actors, critic, PPO updates, and checkpoint loading.
 Final RLAIF-enabled MAPPO runs remain blocked until the Stage 5 Runtime Gate has
 validated a trained checkpoint in such an environment.
+
+## Stage 8 evaluation boundary
+
+Stage 8 registers `assignment_ppo_rlaif` and `mappo_async_rlaif`, but runs them only when their learned-policy checkpoint, a valid Stage 5 `reward_model.pt`, and PyTorch are available. Disabled-RLAIF baselines do not touch the reward checkpoint. The rule-based Stage 8 policy must never be converted into preference labels or reward supervision: doing so would be a fabricated, circular substitute for AI feedback.
+
+Final RLAIF-enabled benchmark, ablation, and sensitivity runs remain deferred until the Stage 5 Runtime Gate and Stage 6/7 runtime training have completed.

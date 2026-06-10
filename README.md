@@ -217,3 +217,22 @@ are prohibited. PyTorch is required for networks, optimization, and checkpoint
 round trips, so a clean skip without PyTorch is not experimental validation.
 Final RLAIF-enabled MAPPO experiments remain blocked until the Stage 5 Runtime
 Gate passes in a PyTorch environment. Stage 8 experiments are not part of Stage 7.
+
+## Stage 8 experiment framework
+
+Stage 8 adds dependency-light baselines, fair seed-controlled evaluation, benchmark/ablation/sensitivity runners, and CSV/JSON aggregation. Validate the wiring without trained models or large experiments:
+
+```bash
+python -m experiments.smoke_test_experiments
+```
+
+Run configured workflows later in the proper experiment environment:
+
+```bash
+python -m experiments.run_benchmark --config configs/experiments.yaml
+python -m experiments.run_ablation --config configs/ablation.yaml
+python -m experiments.run_sensitivity --config configs/sensitivity.yaml
+python -m experiments.aggregate_results --input results/raw --output results/summary
+```
+
+Outputs live under the configured `results/` directory and are ignored by Git. Missing learned checkpoints and PyTorch dependencies are explicit skips; no heuristic substitution occurs. `rlaif_enabled=false` does not require `reward_model.pt`, while enabled RLAIF requires a valid trained Stage 5 checkpoint. Baseline heuristics are comparisons only and must never become RLAIF labels. Current smoke outputs are code-validation artifacts, not final experimental results; final experiments remain deferred pending the Stage 5 Runtime Gate and trained Stage 6/7 policies. See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).

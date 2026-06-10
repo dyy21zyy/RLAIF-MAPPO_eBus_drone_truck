@@ -190,3 +190,12 @@
   smoke test must use temporary storage and may skip only PyTorch-dependent work.
 - Stage 7 Code Gate passing does not unblock final RLAIF-enabled experiments; that
   still requires the Stage 5 Runtime Gate. Do not implement Stage 8 here.
+
+## Stage 8 experiment pitfalls
+
+- A deterministic heuristic is a baseline, not an AI preference label and not reward-model supervision.
+- Never replace a missing PPO/MAPPO/reward-model checkpoint with a heuristic while retaining the learned method name; the harness records an explicit skip.
+- `rlaif_enabled=false` must not load or require `reward_model.pt`; `true` must validate a real Stage 5 checkpoint.
+- Smoke output validates wiring only. It is neither a performance estimate nor a paper-ready table.
+- Compare methods only on the identical Stage 2 instance and identical seed list.
+- Keep generated `results/`, `runs/`, checkpoints, and preference artifacts out of Git.
