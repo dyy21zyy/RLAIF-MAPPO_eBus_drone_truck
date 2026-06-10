@@ -205,3 +205,28 @@ Stage 6 code development may proceed before the Runtime Gate. Stage 6 must suppo
 `rlaif_enabled=false` for dependency-light code smoke tests. It may accept
 `rlaif_enabled=true` only when a valid, trained `reward_model.pt` is available; final
 RLAIF-enabled PPO/MAPPO experiments remain deferred until then.
+
+# Stage 6 Assignment PPO Reward Integration
+
+Stage 6 has one learned actor-critic: the assignment policy at parcel-arrival
+choices. It does not learn bus charging and does not introduce MAPPO or a
+centralized critic. Bus events are resolved by a configured fixed baseline
+(`no_charge`, `uniform_30`, or `battery_threshold`) while Stage 3 continues to
+handle truck, drone, locker, battery, and station operations deterministically.
+
+When `rlaif.enabled: false`, the assignment transition uses
+`R_total = R_env_assignment`; constructing the trainer does not load or require a
+reward-model checkpoint. When enabled, it uses
+`R_total = R_env_assignment + lambda_rlaif * R_RLAIF`. `R_RLAIF` comes only from
+`RewardModelWrapper.score(state_features, action_features, action_id)`, using the
+Stage 5 model weights and saved state-feature, action-feature, and score
+normalization. AI reason text is not an input. A missing, malformed, or
+incompatible checkpoint is an error—objective rules must never be substituted,
+because doing so would change the provenance and meaning of the learned reward.
+
+The Stage 6 implementation initially attributes finite environment reward from an
+assignment event through the next assignment event (including deterministic
+intervening processing under the fixed bus baseline). Optimized episode-end
+ledger attribution remains future work and is not claimed here. Final
+RLAIF-enabled PPO experiments remain blocked until the Stage 5 Runtime Gate has
+produced and validated `reward_model.pt` in a PyTorch environment.

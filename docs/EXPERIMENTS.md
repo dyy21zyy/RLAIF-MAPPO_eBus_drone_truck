@@ -30,3 +30,28 @@ Store the resolved configuration and a metadata manifest with every run.
 - Metrics with definitions
 - Artifact paths
 - Known limitations
+
+## Stage 6 assignment PPO commands
+
+```bash
+# Dependency-light code smoke test; uses rlaif.enabled=false and a temporary directory.
+python -m experiments.smoke_test_assignment_ppo
+
+# Training (requires PyTorch).
+python -m experiments.train_assignment_ppo --config configs/train_assignment_ppo.yaml
+
+# Deterministic evaluation with the same fixed bus baseline (requires PyTorch).
+python -m experiments.evaluate_assignment_ppo --config configs/train_assignment_ppo.yaml --checkpoint results/checkpoints/assignment_ppo.pt
+```
+
+The actor and critic are separate `[256, 256]` ReLU MLPs. The actor samples a
+masked categorical distribution over `1 + 2H` assignment actions; the critic is a
+local state-value model, not a centralized critic. PPO uses normalized GAE,
+clipped likelihood ratios, MSE value loss, entropy regularization, and gradient
+clipping. Rollout storage contains assignment transitions only.
+
+The default config disables RLAIF, so smoke testing does not require Stage 5
+runtime output. Enabling RLAIF requires a valid trained checkpoint and never
+activates a rule fallback. Training CSVs, evaluation JSON, and checkpoints under
+`results/` are runtime artifacts and are not committed. These commands are code
+and runtime checks, not Stage 8 experiments or final RLAIF-enabled validation.

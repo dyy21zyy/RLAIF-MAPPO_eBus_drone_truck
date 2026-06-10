@@ -1,1 +1,1 @@
-"""Training package placeholder for the staged implementation."""
+"""Training components for the staged delivery-learning workflow."""

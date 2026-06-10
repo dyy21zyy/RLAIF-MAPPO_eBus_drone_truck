@@ -156,3 +156,15 @@ python -m pytest -q
 Stage 6 code implementation may proceed with `rlaif_enabled=false` smoke coverage.
 `rlaif_enabled=true` and final RLAIF-enabled PPO/MAPPO experiments require a valid
 trained `reward_model.pt` from the deferred Runtime Gate.
+
+## Stage 6 Code Gate — 2026-06-10
+
+Implemented assignment-only masked categorical PPO, assignment rollout/GAE
+storage, fixed mask-aware bus charging baselines, strict optional Stage 5 reward
+loading, training/evaluation CLIs, a temporary-directory smoke test, configuration,
+and focused tests. The Code Gate permits `rlaif.enabled=false` without a reward
+checkpoint and treats `rlaif.enabled=true` without a valid checkpoint as a hard
+error. No Stage 7 MAPPO, Stage 8 experiment orchestration, or final RLAIF-enabled
+experiment was added. The Stage 5 Runtime Gate remains deferred to the operator's
+PyTorch environment; therefore this entry records implementation verification,
+not learned-reward experimental evidence.
