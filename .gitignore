@@ -21,5 +21,18 @@ data/processed/*
 .DS_Store
 .idea/
 .vscode/
-data/preference/*
+# Stage 4 preference-generation artifacts (keep local, never commit)
+data/preference/*.jsonl
+data/preference/*.json
+data/preference/*.csv
+data/preference/*.npy
+data/preference/*.pt
 !data/preference/.gitkeep
+
+# Experiment outputs and model checkpoints
+results/
+runs/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
