@@ -36,6 +36,9 @@ def test_reset_exposes_stable_assignment_schema(environment: DynamicDeliveryEnv)
     assert environment.assignment_action_size == 1 + 2 * len(environment.station_ids)
     assert observation["action_mask"][0]
     assert info["total_parcels"] == 60
+    assert "reward_components" in info
+    assert set(info["metrics"]) >= {"decision_events", "assignment_events", "bus_charging_events", "delivered_parcels", "undelivered_parcels", "drone_deliveries", "total_reward", "infeasible_action_corrections"}
+    assert environment.config["bus"]["charging_actions_sec"] == [0, 15, 30, 45, 60, 75, 90, 105, 120]
     assert environment.check_invariants() == []
 
 
@@ -86,3 +89,32 @@ def test_rejects_non_stage2_manifest(tmp_path: Path) -> None:
 
     with pytest.raises(InstanceValidationError, match="stage: 2"):
         DynamicDeliveryEnv(manifest)
+
+
+def test_station_power_overload_is_soft_penalty(environment: DynamicDeliveryEnv) -> None:
+    observation = advance_to_agent(environment, "bus")
+    station_id = str(observation["entity_id"]).split(":", 1)[1]
+    station = environment.stations[station_id]
+    station.power_capacity_kw = 1.0
+    mask = environment._bus_mask(environment.current_decision.event)
+
+    assert mask[1] is True
+    _next, reward, *_rest, info = environment.step(1)
+    assert reward < 0
+    assert info["cost_components"]["power_overload"] > 0
+
+
+def test_station_drone_cycle_preserves_non_negative_resources(environment: DynamicDeliveryEnv) -> None:
+    observation, _ = environment.reset()
+    station_action = 1 + len(environment.station_ids)
+    while observation["agent"] != "terminal":
+        if observation["agent"] == "assignment" and observation["action_mask"][station_action]:
+            action = station_action
+        else:
+            action = first_feasible_policy(observation)
+        observation, *_ = environment.step(action)
+
+    assert any(parcel.mode == "TLD" for parcel in environment.parcels.values())
+    assert all(station.locker_load_kg >= 0 for station in environment.stations.values())
+    assert all(station.full_batteries >= 0 for station in environment.stations.values())
+    assert environment.check_invariants() == []

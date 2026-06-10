@@ -99,3 +99,28 @@ their stable location.
 - **Rerun command:**
   `python -m data_pipeline.build_instance --config configs/shanghai_small.yaml --fallback`
 - **Status:** passed after one auto-remediation round.
+
+## Stage 3 gate review before Stage 4 — 2026-06-10
+
+- **Initial result:** failed because the required
+  `experiments.smoke_test_env` module did not exist. Inspection also found the
+  required reward-component/metrics interface absent and station power enforced
+  as a hard charging mask rather than a soft penalty.
+- **Remediation:** added the stable fallback gate CLI, exposed reward components
+  and sanity metrics, converted station overload to a soft penalty, and added
+  station-power/resource regression tests.
+- **Final fallback metrics:** 79 decisions (60 assignment, 19 bus), 7 delivered,
+  53 undelivered, 0 drone deliveries under the first-feasible policy, reward
+  `-6561.086226965998`, 0 corrected actions, and no NaN or negative resources.
+- **Result:** Stage 3 passed and Stage 4 was authorized.
+
+## Stage 4 RLAIF data gate — 2026-06-10
+
+- **50-episode output:** 3,000 assignment states and 3,150 pairwise prompts.
+- **Offline labels:** 0; no API was used and no rule labels were generated.
+- **Smoke output:** 60 states, 63 prompts, 0 labels, and 0 failures.
+- **Coverage:** assignment/candidate schema, JSON-only prompt contract, pair
+  selection, malformed AI output, low confidence, replay validation, and offline
+  no-label behavior.
+- **Scope:** no reward-model training, PPO, MAPPO, baselines, or sensitivity
+  experiments were added.

@@ -3,7 +3,7 @@
 This repository is being developed in explicit stages for parcel assignment and
 scheduling across trucks, electric buses, integrated stations, and drones.
 
-## Current status: Stage 3
+## Current status: Stage 4
 
 Stage 2 provides a reproducible Shanghai instance data pipeline with two road
 network modes:
@@ -16,10 +16,10 @@ network modes:
   internet access.
 
 Stage 3 adds the deterministic event-driven assignment and electric-bus charging
-MDP. It consumes Stage 2 manifests, exposes stable action masks and feature
-schemas, tracks delayed parcel costs and physical resources, and retains an
-offline end-to-end smoke gate. PPO, MAPPO, preference generation, reward
-modeling, and RLAIF are intentionally **not implemented**.
+MDP. Stage 4 adds assignment-state collection, objective candidate features,
+versioned pairwise AI prompts, and offline/API/replay preference validation.
+Offline mode creates no labels, and invalid responses are retained for audit.
+Reward-model training, PPO, and MAPPO are intentionally **not implemented**.
 
 ## Repository layout
 
@@ -30,11 +30,12 @@ data_pipeline/  Stage 2 road, bus, facility, parcel, matrix, and instance builde
 checkpoints/    Future model artifacts
 docs/           Design, guardrail, and experiment documentation
 envs/           Stage 3 event-driven assignment and bus environment
-experiments/    Offline stage-gate smoke tests
+experiments/    Offline gates and Stage 4 data-workflow CLIs
 logs/           Runtime logs
 models/         Future model placeholder
 outputs/        Future experiment outputs
-tests/          Stage 1 through Stage 3 regression tests
+rlaif/          Stage 4 collection, prompts, evaluator, and JSONL validation
+tests/          Stage 1 through Stage 4 regression tests
 training/       Future optimization-loop placeholder
 utils/          Config, logging, and reproducibility utilities
 ```
@@ -85,18 +86,30 @@ signatures without requiring Gymnasium itself. For an end-to-end deterministic
 episode, run:
 
 ```bash
-python -m experiments.smoke_test_environment --config configs/shanghai_small.yaml
+python -m experiments.smoke_test_env --config configs/shanghai_small.yaml --fallback
 ```
 
 See [docs/MDP_SPECIFICATION.md](docs/MDP_SPECIFICATION.md) for event, action,
 transition, reward, and termination semantics.
+
+## Build Stage 4 RLAIF data
+
+```bash
+python -m experiments.collect_assignment_states --config configs/shanghai_small.yaml --episodes 50 --output data/preference/assignment_states.jsonl --fallback
+python -m experiments.build_ai_preference_prompts --states data/preference/assignment_states.jsonl --output data/preference/ai_preference_prompts.jsonl
+python -m experiments.build_ai_preferences --mode offline --prompts data/preference/ai_preference_prompts.jsonl
+python -m experiments.smoke_test_rlaif_data --config configs/shanghai_small.yaml --fallback
+```
+
+Offline mode deliberately writes no preference labels. For manual labels or a
+configured external evaluator, see [docs/RLAIF_WORKFLOW.md](docs/RLAIF_WORKFLOW.md).
 
 ## Verification
 
 ```bash
 python -m experiments.smoke_test_project --config configs/shanghai_small.yaml
 python -m experiments.smoke_test_data_pipeline --config configs/shanghai_small.yaml --fallback
-python -m experiments.smoke_test_environment --config configs/shanghai_small.yaml
+python -m experiments.smoke_test_env --config configs/shanghai_small.yaml --fallback
 python -m pytest -q
 python -m compileall -q .
 git diff --check
@@ -112,7 +125,8 @@ smoke test requires a network request.
 - Stage 1: foundation and documentation (complete).
 - Stage 2: offline-capable Shanghai instance data pipeline (complete).
 - Stage 3: event-driven MDP environment (complete).
-- Later stages: PPO/MAPPO and RLAIF components (not started).
+- Stage 4: RLAIF state/prompt collection and AI-label interface (complete).
+- Stage 5 and later: reward-model training and PPO/MAPPO (not started).
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the staged workflow and
 [docs/PITFALLS.md](docs/PITFALLS.md) for scope guardrails.
