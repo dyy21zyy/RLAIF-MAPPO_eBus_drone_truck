@@ -135,13 +135,24 @@ intended only for pipeline validation; reported one-example validation/test
 accuracies must not be interpreted as model-quality estimates. Runtime outputs
 are written below `results/` and remain ignored by Git.
 
-### 2026-06-10 gate execution note
+### 2026-06-10 Stage 5 Code Gate
 
-`python -m pytest -q` completed with 48 passing tests and the PyTorch-dependent
-reward-model test module skipped because this execution container does not have
-PyTorch. `python -m compileall -q .` and `git diff --check` passed. The Stage 5
-smoke/train/evaluate commands could not execute in this container for the same
-missing dependency; an attempted `pip install 'torch>=2.0,<3.0'` was blocked by
-the environment's package-index proxy (HTTP 403). These commands remain the
-required runtime gate in an environment with dependencies from
-`requirements.txt` installed. No API access is used by the smoke test.
+The Stage 5 gate is now split into a dependency-light **Code Gate** and a PyTorch
+**Runtime Gate**. The Code Gate passed in the current environment: Stage 5 source
+and interfaces exist, dataset/missing-label checks run without PyTorch, runtime
+commands report a clear installation requirement, PyTorch-dependent tests skip,
+and generated labels/checkpoints/results remain ignored. No model was trained and
+no training success is claimed.
+
+The Runtime Gate is deferred to the operator's local/AutoDL PyTorch environment:
+
+```bash
+python -m experiments.smoke_test_reward_model
+python -m experiments.train_reward_model --config configs/train_reward_model.yaml --data data/preference/ai_preferences.jsonl
+python -m experiments.evaluate_reward_model --config configs/train_reward_model.yaml --checkpoint results/checkpoints/reward_model.pt
+python -m pytest -q
+```
+
+Stage 6 code implementation may proceed with `rlaif_enabled=false` smoke coverage.
+`rlaif_enabled=true` and final RLAIF-enabled PPO/MAPPO experiments require a valid
+trained `reward_model.pt` from the deferred Runtime Gate.

@@ -178,3 +178,30 @@ A later stage may normalize a score as
 The current ten-label replay set supports pipeline validation only. Its
 validation/test partitions contain one label each and cannot establish reward
 model quality or generalization.
+
+## Stage 5 gates and Stage 6 handoff
+
+Stage 5 has two independent gates:
+
+- **Code Gate (passed in the current dependency-light environment):** verifies the
+  source interfaces, dataset filtering and missing-label behavior, graceful
+  missing-PyTorch handling, clean test skips, absence of fabricated/rule-based
+  labels, ignored runtime artifacts, and all non-runtime checks.
+- **Runtime Gate (deferred):** proves actual reward-model training, checkpoint
+  loading, and evaluation in an environment with `torch>=2.0,<3.0`. Run exactly:
+
+  ```bash
+  python -m experiments.smoke_test_reward_model
+  python -m experiments.train_reward_model --config configs/train_reward_model.yaml --data data/preference/ai_preferences.jsonl
+  python -m experiments.evaluate_reward_model --config configs/train_reward_model.yaml --checkpoint results/checkpoints/reward_model.pt
+  python -m pytest -q
+  ```
+
+A missing PyTorch installation does not fail the Code Gate. Runtime commands must
+report the required dependency instead of emitting an import traceback, and tests
+that exercise the PyTorch model use `pytest.importorskip("torch")`.
+
+Stage 6 code development may proceed before the Runtime Gate. Stage 6 must support
+`rlaif_enabled=false` for dependency-light code smoke tests. It may accept
+`rlaif_enabled=true` only when a valid, trained `reward_model.pt` is available; final
+RLAIF-enabled PPO/MAPPO experiments remain deferred until then.

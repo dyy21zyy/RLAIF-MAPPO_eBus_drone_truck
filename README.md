@@ -3,7 +3,7 @@
 This repository is being developed in explicit stages for parcel assignment and
 scheduling across trucks, electric buses, integrated stations, and drones.
 
-## Current status: Stage 5
+## Current status: Stage 5 Code Gate complete; Runtime Gate deferred
 
 Stage 2 provides a reproducible Shanghai instance data pipeline with two road
 network modes:
@@ -19,7 +19,9 @@ Stage 3 adds the deterministic event-driven assignment and electric-bus charging
 MDP. Stage 4 adds assignment-state collection, objective candidate features,
 versioned pairwise AI prompts, and offline/API/replay preference validation.
 Stage 5 adds a learned assignment reward model trained only from approved
-pairwise labels. PPO and MAPPO remain intentionally **not implemented**.
+pairwise labels. Its dependency-light Code Gate passes in the current environment;
+the Runtime Gate is deferred to an environment with PyTorch. PPO and MAPPO remain
+intentionally **not implemented**.
 
 ## Repository layout
 
@@ -107,13 +109,20 @@ configured external evaluator, see [docs/RLAIF_WORKFLOW.md](docs/RLAIF_WORKFLOW.
 
 ## Train and evaluate the Stage 5 reward model
 
-After producing valid Stage 4 API or replay labels, run:
+The Stage 5 Code Gate is dependency-light and passes without PyTorch. The separate
+Runtime Gate is deferred and must be run after producing valid Stage 4 API or replay
+labels in a local/AutoDL environment with `torch>=2.0,<3.0`:
 
 ```bash
+python -m experiments.smoke_test_reward_model
 python -m experiments.train_reward_model --config configs/train_reward_model.yaml --data data/preference/ai_preferences.jsonl
 python -m experiments.evaluate_reward_model --config configs/train_reward_model.yaml --checkpoint results/checkpoints/reward_model.pt
-python -m experiments.smoke_test_reward_model
+python -m pytest -q
 ```
+
+When PyTorch is unavailable, Stage 5 runtime commands exit cleanly with an
+installation message and PyTorch-dependent tests are skipped. This is not evidence
+that a reward model has been trained or evaluated.
 
 Training accepts only valid, usable pairwise labels and never creates or falls
 back to rule labels. Missing, empty, or unusable preference input stops with an
@@ -143,8 +152,11 @@ smoke test requires a network request.
 - Stage 2: offline-capable Shanghai instance data pipeline (complete).
 - Stage 3: event-driven MDP environment (complete).
 - Stage 4: RLAIF state/prompt collection and AI-label interface (complete).
-- Stage 5: learned pairwise assignment reward model (complete).
-- Stage 6 and later: PPO/MAPPO (not started).
+- Stage 5: Code Gate complete; PyTorch Runtime Gate deferred.
+- Stage 6: code implementation may proceed. It must support `rlaif_enabled=false`
+  for code smoke tests and permit `rlaif_enabled=true` only with a valid
+  `reward_model.pt`. Final RLAIF-enabled PPO/MAPPO experiments remain blocked until
+  that checkpoint has passed the Stage 5 Runtime Gate.
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the staged workflow and
 [docs/PITFALLS.md](docs/PITFALLS.md) for scope guardrails.
