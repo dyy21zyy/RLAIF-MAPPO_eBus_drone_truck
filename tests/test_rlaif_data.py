@@ -158,7 +158,13 @@ def test_offline_creates_only_blank_templates(states: list[dict[str, object]], t
     assert not output.exists()
     assert len(read_jsonl(template)) == len(prompts)
     assert len(read_jsonl(small)) == 1
-    assert all(record["chosen"] is None and record["rejected"] is None for record in read_jsonl(template))
+    assert all(
+        record["chosen"] is None
+        and record["rejected"] is None
+        and record["confidence"] is None
+        and record["reason"] is None
+        for record in read_jsonl(template)
+    )
 
 
 def test_api_without_configuration_does_not_create_labels(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
