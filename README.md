@@ -3,7 +3,7 @@
 This repository is being developed in explicit stages for parcel assignment and
 scheduling across trucks, electric buses, integrated stations, and drones.
 
-## Current status: Stage 2
+## Current status: Stage 3
 
 Stage 2 provides a reproducible Shanghai instance data pipeline with two road
 network modes:
@@ -15,9 +15,11 @@ network modes:
   20-stop corridor route, a synthetic timetable and parcels, and requires no
   internet access.
 
-Stage 1 configuration, logging, seeding, and project-foundation utilities remain
-available. The event-driven simulator, PPO, MAPPO, preference generation,
-reward modeling, and RLAIF are intentionally **not implemented**.
+Stage 3 adds the deterministic event-driven assignment and electric-bus charging
+MDP. It consumes Stage 2 manifests, exposes stable action masks and feature
+schemas, tracks delayed parcel costs and physical resources, and retains an
+offline end-to-end smoke gate. PPO, MAPPO, preference generation, reward
+modeling, and RLAIF are intentionally **not implemented**.
 
 ## Repository layout
 
@@ -27,12 +29,12 @@ data/           Raw inputs and ignored generated instances
 data_pipeline/  Stage 2 road, bus, facility, parcel, matrix, and instance builders
 checkpoints/    Future model artifacts
 docs/           Design, guardrail, and experiment documentation
-envs/           Stage 3 placeholder only
-experiments/    Stage 1 and Stage 2 smoke tests
+envs/           Stage 3 event-driven assignment and bus environment
+experiments/    Offline stage-gate smoke tests
 logs/           Runtime logs
 models/         Future model placeholder
 outputs/        Future experiment outputs
-tests/          Stage 1 and Stage 2 regression tests
+tests/          Stage 1 through Stage 3 regression tests
 training/       Future optimization-loop placeholder
 utils/          Config, logging, and reproducibility utilities
 ```
@@ -75,25 +77,41 @@ A user-provided route can be supplied with `--bus-route path/to/route.csv`. Its
 required columns are `route_id`, `stop_id`, `stop_name`, `stop_sequence`, `lat`,
 `lon`, `first_departure`, `last_departure`, and `headway_min`.
 
+## Run the Stage 3 environment
+
+Build an instance as above, then initialize `DynamicDeliveryEnv` with its
+`instance.json`. The dependency-light API follows Gymnasium reset/step return
+signatures without requiring Gymnasium itself. For an end-to-end deterministic
+episode, run:
+
+```bash
+python -m experiments.smoke_test_environment --config configs/shanghai_small.yaml
+```
+
+See [docs/MDP_SPECIFICATION.md](docs/MDP_SPECIFICATION.md) for event, action,
+transition, reward, and termination semantics.
+
 ## Verification
 
 ```bash
 python -m experiments.smoke_test_project --config configs/shanghai_small.yaml
 python -m experiments.smoke_test_data_pipeline --config configs/shanghai_small.yaml --fallback
+python -m experiments.smoke_test_environment --config configs/shanghai_small.yaml
 python -m pytest -q
 python -m compileall -q .
 git diff --check
 ```
 
-The Stage 2 smoke test forces fallback mode and validates the complete artifact
-set, route/station/parcel invariants, matrix shapes, and both manifests without
-making any network request.
+The Stage 2 smoke test validates the complete fallback artifact set. The Stage 3
+smoke test builds that instance in a temporary directory, runs a complete
+event-driven episode, and checks state invariants after every decision. Neither
+smoke test requires a network request.
 
 ## Development boundaries
 
 - Stage 1: foundation and documentation (complete).
 - Stage 2: offline-capable Shanghai instance data pipeline (complete).
-- Stage 3: event-driven MDP environment (not started).
+- Stage 3: event-driven MDP environment (complete).
 - Later stages: PPO/MAPPO and RLAIF components (not started).
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the staged workflow and
