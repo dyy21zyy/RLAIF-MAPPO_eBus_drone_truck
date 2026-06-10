@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from rlaif.preference_dataset import NoUsablePreferencesError
-from rlaif.train_reward_model import train_from_config
+from rlaif.torch_runtime import PYTORCH_REQUIRED_MESSAGE, is_missing_torch_error
 
 
 def main() -> int:
@@ -13,6 +14,14 @@ def main() -> int:
     parser.add_argument("--config", default="configs/train_reward_model.yaml")
     parser.add_argument("--data", help="override preference JSONL path")
     args = parser.parse_args()
+    try:
+        # Keep the PyTorch-dependent implementation lazy so importing this CLI remains safe.
+        from rlaif.train_reward_model import train_from_config
+    except ModuleNotFoundError as exc:
+        if not is_missing_torch_error(exc):
+            raise
+        print(PYTORCH_REQUIRED_MESSAGE, file=sys.stderr)
+        return 3
     try:
         result = train_from_config(args.config, args.data)
     except NoUsablePreferencesError as exc:

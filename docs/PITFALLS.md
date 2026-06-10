@@ -133,3 +133,16 @@
   later consumers can use the checkpoint's exact normalization convention.
 - Reward-model checkpoints and metric files are runtime artifacts and must remain
   ignored. Stage 5 contains no PPO or MAPPO update path.
+
+### Stage 5 Code Gate versus Runtime Gate
+
+- Do not install PyTorch merely to satisfy the dependency-light Code Gate, and do
+  not represent a skipped Runtime Gate as successful training.
+- Keep CLI imports dependency-light. Commands that truly require PyTorch must exit
+  with the documented installation message when it is absent; PyTorch-only tests
+  must skip explicitly.
+- Stage 6 smoke tests may disable learned rewards with `rlaif_enabled=false`. Never
+  enable RLAIF or silently substitute a heuristic when `reward_model.pt` is missing,
+  invalid, or untrained.
+- Generated preference JSONL, `results/`, `runs/`, checkpoint directories, and
+  `*.pt`, `*.pth`, or `*.ckpt` files are runtime artifacts and must not be committed.

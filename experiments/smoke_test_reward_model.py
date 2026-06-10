@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 import tempfile
 from pathlib import Path
 
 from rlaif.preference_dataset import (ACTION_FEATURE_KEYS, NO_USABLE_LABELS_MESSAGE,
                                       NoUsablePreferencesError, write_jsonl)
+from rlaif.torch_runtime import PYTORCH_REQUIRED_MESSAGE, is_missing_torch_error
 
 
 def _action(action_id: int, name: str, offset: float) -> dict[str, object]:
@@ -56,11 +58,17 @@ def _config(directory: Path, states: Path, preferences: Path) -> dict[str, objec
 
 
 def main() -> int:
-    import torch
+    try:
+        import torch
 
-    from rlaif.evaluate_reward_model import evaluate_reward_model
-    from rlaif.reward_model import AssignmentRewardModel, normalize_reward
-    from rlaif.train_reward_model import load_checkpoint, train_reward_model
+        from rlaif.evaluate_reward_model import evaluate_reward_model
+        from rlaif.reward_model import AssignmentRewardModel, normalize_reward
+        from rlaif.train_reward_model import load_checkpoint, train_reward_model
+    except ModuleNotFoundError as exc:
+        if not is_missing_torch_error(exc):
+            raise
+        print(PYTORCH_REQUIRED_MESSAGE, file=sys.stderr)
+        return 3
 
     with tempfile.TemporaryDirectory(prefix="stage5-smoke-") as temporary:
         directory = Path(temporary)

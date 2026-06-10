@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from rlaif.preference_dataset import NoUsablePreferencesError
-from rlaif.evaluate_reward_model import evaluate_from_config
+from rlaif.torch_runtime import PYTORCH_REQUIRED_MESSAGE, is_missing_torch_error
 
 
 def main() -> int:
@@ -15,6 +16,14 @@ def main() -> int:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--data", help="override preference JSONL path")
     args = parser.parse_args()
+    try:
+        # Keep the PyTorch-dependent implementation lazy so importing this CLI remains safe.
+        from rlaif.evaluate_reward_model import evaluate_from_config
+    except ModuleNotFoundError as exc:
+        if not is_missing_torch_error(exc):
+            raise
+        print(PYTORCH_REQUIRED_MESSAGE, file=sys.stderr)
+        return 3
     try:
         result = evaluate_from_config(args.config, args.checkpoint, args.data)
     except NoUsablePreferencesError as exc:
