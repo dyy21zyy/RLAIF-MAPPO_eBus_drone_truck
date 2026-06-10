@@ -1,1 +1,1 @@
-"""Stage 4 RLAIF data collection and preference-label interfaces."""
+"""Stage 4 preference-data interfaces and Stage 5 learned reward model."""

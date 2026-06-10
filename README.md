@@ -3,7 +3,7 @@
 This repository is being developed in explicit stages for parcel assignment and
 scheduling across trucks, electric buses, integrated stations, and drones.
 
-## Current status: Stage 4
+## Current status: Stage 5
 
 Stage 2 provides a reproducible Shanghai instance data pipeline with two road
 network modes:
@@ -18,8 +18,8 @@ network modes:
 Stage 3 adds the deterministic event-driven assignment and electric-bus charging
 MDP. Stage 4 adds assignment-state collection, objective candidate features,
 versioned pairwise AI prompts, and offline/API/replay preference validation.
-Offline mode creates no labels, and invalid responses are retained for audit.
-Reward-model training, PPO, and MAPPO are intentionally **not implemented**.
+Stage 5 adds a learned assignment reward model trained only from approved
+pairwise labels. PPO and MAPPO remain intentionally **not implemented**.
 
 ## Repository layout
 
@@ -34,8 +34,8 @@ experiments/    Offline gates and Stage 4 data-workflow CLIs
 logs/           Runtime logs
 models/         Future model placeholder
 outputs/        Future experiment outputs
-rlaif/          Stage 4 collection, prompts, evaluator, and JSONL validation
-tests/          Stage 1 through Stage 4 regression tests
+rlaif/          Stage 4 preference workflow and Stage 5 reward-model training
+tests/          Stage 1 through Stage 5 regression tests
 training/       Future optimization-loop placeholder
 utils/          Config, logging, and reproducibility utilities
 ```
@@ -104,6 +104,23 @@ python -m experiments.smoke_test_rlaif_data --config configs/shanghai_small.yaml
 Offline mode deliberately writes no preference labels. For manual labels or a
 configured external evaluator, see [docs/RLAIF_WORKFLOW.md](docs/RLAIF_WORKFLOW.md).
 
+
+## Train and evaluate the Stage 5 reward model
+
+After producing valid Stage 4 API or replay labels, run:
+
+```bash
+python -m experiments.train_reward_model --config configs/train_reward_model.yaml --data data/preference/ai_preferences.jsonl
+python -m experiments.evaluate_reward_model --config configs/train_reward_model.yaml --checkpoint results/checkpoints/reward_model.pt
+python -m experiments.smoke_test_reward_model
+```
+
+Training accepts only valid, usable pairwise labels and never creates or falls
+back to rule labels. Missing, empty, or unusable preference input stops with an
+actionable message. Checkpoints save feature normalization and training-score
+mean/std. The current ten-label replay data is for pipeline validation only, not
+final reward-model quality. See [docs/RLAIF_WORKFLOW.md](docs/RLAIF_WORKFLOW.md).
+
 ## Verification
 
 ```bash
@@ -126,7 +143,8 @@ smoke test requires a network request.
 - Stage 2: offline-capable Shanghai instance data pipeline (complete).
 - Stage 3: event-driven MDP environment (complete).
 - Stage 4: RLAIF state/prompt collection and AI-label interface (complete).
-- Stage 5 and later: reward-model training and PPO/MAPPO (not started).
+- Stage 5: learned pairwise assignment reward model (complete).
+- Stage 6 and later: PPO/MAPPO (not started).
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the staged workflow and
 [docs/PITFALLS.md](docs/PITFALLS.md) for scope guardrails.

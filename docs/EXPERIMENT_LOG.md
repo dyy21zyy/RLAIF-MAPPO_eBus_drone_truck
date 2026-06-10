@@ -124,3 +124,24 @@ their stable location.
   no-label behavior.
 - **Scope:** no reward-model training, PPO, MAPPO, baselines, or sensitivity
   experiments were added.
+
+## Stage 5 — learned assignment reward model
+
+Implemented the offline pairwise dataset join/filter, deterministic tiny-data
+split, training-only feature normalization, action-embedding MLP, Bradley–Terry
+loss, early-stopped training, checkpoint round-trip, evaluation CLI, and an
+API-free temporary-fixture smoke test. The local ten-label replay dataset is
+intended only for pipeline validation; reported one-example validation/test
+accuracies must not be interpreted as model-quality estimates. Runtime outputs
+are written below `results/` and remain ignored by Git.
+
+### 2026-06-10 gate execution note
+
+`python -m pytest -q` completed with 48 passing tests and the PyTorch-dependent
+reward-model test module skipped because this execution container does not have
+PyTorch. `python -m compileall -q .` and `git diff --check` passed. The Stage 5
+smoke/train/evaluate commands could not execute in this container for the same
+missing dependency; an attempted `pip install 'torch>=2.0,<3.0'` was blocked by
+the environment's package-index proxy (HTTP 403). These commands remain the
+required runtime gate in an environment with dependencies from
+`requirements.txt` installed. No API access is used by the smoke test.

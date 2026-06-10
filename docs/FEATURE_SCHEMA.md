@@ -58,3 +58,19 @@ Prompt records use `prompt_version=v1` and store the state/pair IDs, prompt text
 and pair-selection metadata. Validated preference records add evaluator model,
 temperature, parser/validation status, raw response, and training usability;
 confidence below `0.6` is retained but unusable by default.
+
+## Stage 5 reward-model input schema (`v1`)
+
+Stage 5 joins each valid preference to its Stage 4 `state_id`. Both alternatives
+reuse the six-element `assignment_features` vector. Per-action input is the
+following ordered numeric vector from `candidate_action_features[ACTION_NAME]`:
+`feasible_flag`, `estimated_delivery_time`, `estimated_lateness`,
+`estimated_truck_distance`, `estimated_truck_time`, `estimated_bus_wait_time`,
+`estimated_bus_linehaul_time`, `estimated_drone_time`,
+`estimated_locker_load_after_assignment`, and
+`estimated_station_power_margin`. `action_id` is embedded separately. Textual
+reasons and `infeasibility_reasons` are not model inputs.
+
+State and action means and population standard deviations are fitted using both
+alternatives in the training split only. Validation and test data reuse those
+statistics with an epsilon of `1e-6`; non-finite normalized values are rejected.
