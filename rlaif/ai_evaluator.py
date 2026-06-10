@@ -122,7 +122,7 @@ def _manual_template(prompt: dict[str, Any]) -> dict[str, Any]:
         "chosen": None,
         "rejected": None,
         "confidence": None,
-        "reason": "",
+        "reason": None,
         "evaluator_model": "",
         "temperature": 0.0,
     }
