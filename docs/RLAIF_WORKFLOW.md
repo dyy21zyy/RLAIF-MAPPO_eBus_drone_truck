@@ -146,3 +146,35 @@ The fallback instance is synthetic, candidate estimates are myopic, API mode
 supports an OpenAI-compatible chat-completions response shape, and Stage 4 makes
 no claim about evaluator quality or agreement. Credentials and model selection
 remain an operator responsibility at execution time.
+
+# Stage 5 Learned Assignment Reward Model
+
+Stage 5 trains a scalar `AssignmentRewardModel` for one `(state, action)` pair.
+An action-ID embedding is concatenated with normalized Stage 4 state and action
+features and processed by a ReLU MLP. For each approved pair, training minimizes
+`-logsigmoid(r_chosen - r_rejected).mean()`. Reason text is not used.
+
+Only `validation_status=valid`, `usable_for_training=true` records (by default),
+valid opposite choices, and confidence at or above the configured threshold are
+accepted. There is no rule-label, synthetic-label, or objective-feature fallback.
+If the preference file is missing, empty, or yields no usable records, training
+prints: `No usable AI/human preference labels found. Run Stage 4 in API mode or
+replay mode with valid labels before training the reward model.`
+
+Run training and evaluation with:
+
+```bash
+python -m experiments.train_reward_model --config configs/train_reward_model.yaml --data data/preference/ai_preferences.jsonl
+python -m experiments.evaluate_reward_model --config configs/train_reward_model.yaml --checkpoint results/checkpoints/reward_model.pt
+python -m experiments.smoke_test_reward_model
+```
+
+The checkpoint contains model/config/schema metadata, dimensions, the action
+mapping, training-only feature normalization statistics, split metrics, and the
+mean and population standard deviation of chosen plus rejected training scores.
+A later stage may normalize a score as
+`(r_ai - reward_mean) / (reward_std + 1e-6)`; Stage 5 does not call PPO.
+
+The current ten-label replay set supports pipeline validation only. Its
+validation/test partitions contain one label each and cannot establish reward
+model quality or generalization.

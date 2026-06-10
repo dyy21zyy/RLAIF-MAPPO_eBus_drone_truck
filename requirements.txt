@@ -2,3 +2,6 @@ PyYAML>=6.0,<7.0
 numpy>=1.24,<3.0
 # Optional for full OSM mode; fallback mode intentionally does not require it.
 # osmnx>=2.0,<3.0
+
+# Stage 5 learned reward model
+torch>=2.0,<3.0

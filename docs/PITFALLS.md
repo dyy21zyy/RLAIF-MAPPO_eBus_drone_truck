@@ -121,3 +121,15 @@
   label for a missing prompt or repair an invalid choice with a heuristic.
 - Reward-model training must stop when no valid record has
   `usable_for_training=true`; do not substitute rules or synthetic preferences.
+
+## Stage 5 reward-model guardrails
+
+- Fit feature normalization only on the deterministic training split; applying
+  independently fitted validation/test statistics leaks information.
+- Treat tiny 8/1/1 splits as pipeline smoke tests, not model-quality evidence.
+- Never repair an unknown or tied choice, infer a missing preference from action
+  features, consume reason text as a first-pass feature, or fall back to rules.
+- Preserve `reward_mean` and `reward_std` from all training alternative scores so
+  later consumers can use the checkpoint's exact normalization convention.
+- Reward-model checkpoints and metric files are runtime artifacts and must remain
+  ignored. Stage 5 contains no PPO or MAPPO update path.

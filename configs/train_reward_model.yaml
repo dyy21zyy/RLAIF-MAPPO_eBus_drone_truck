@@ -1,16 +1,24 @@
-# Stage 1 configuration template only; reward-model training is not implemented.
-seed: 42
-data:
-  preference_dataset: data/processed/preferences.jsonl
-  validation_ratio: 0.1
-model:
-  hidden_sizes: [256, 256]
-  dropout: 0.1
+reward_model:
+  action_emb_dim: 16
+  hidden_dims: [256, 256, 128]
+  dropout: 0.0
 training:
+  batch_size: 256
   epochs: 50
-  batch_size: 64
-  learning_rate: 0.0001
+  lr: 0.0001
   weight_decay: 0.00001
+  seed: 42
+  early_stopping_patience: 8
+  min_delta: 0.0001
+data:
+  preferences_path: data/preference/ai_preferences.jsonl
+  assignment_states_path: data/preference/assignment_states.jsonl
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  min_confidence: 0.6
+  use_only_usable_for_training: true
 output:
-  directory: checkpoints/reward_model
-  log_file: logs/train_reward_model.log
+  checkpoint_path: results/checkpoints/reward_model.pt
+  training_log_path: results/metrics/reward_model_training.csv
+  eval_path: results/metrics/reward_model_eval.json
