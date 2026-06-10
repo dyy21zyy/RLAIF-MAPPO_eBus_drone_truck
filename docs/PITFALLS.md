@@ -102,3 +102,22 @@
 - Generated preference data is reproducible runtime output and is ignored by
   Git; the code, schemas, prompts, tests, and provenance documentation are the
   committed Stage 4 artifacts.
+
+### API configuration and label provenance
+
+- Empty API configuration is acceptable in a development checkout. Keep private
+  keys out of source control and provide them through the environment variable
+  selected by `rlaif.api_key_env` (normally `RLAIF_API_KEY`). Base URL and model
+  may come from `RLAIF_API_BASE_URL` / `RLAIF_MODEL_NAME` or the config file.
+- Missing API settings must stop API mode; they must never activate a fallback
+  based on earliest deadline, shortest distance, lowest cost, feasibility, or
+  another candidate feature.
+- Objective candidate features are valid state/action context and may be shown to
+  an evaluator. They must never be converted directly into `chosen`/`rejected`.
+- Offline mode creates blank manual-label templates and removes stale preference
+  output. Null template fields are not labels and must pass through replay
+  validation only after a user or external evaluator fills them.
+- Replay validates only records in the explicitly supplied file. Never infer a
+  label for a missing prompt or repair an invalid choice with a heuristic.
+- Reward-model training must stop when no valid record has
+  `usable_for_training=true`; do not substitute rules or synthetic preferences.

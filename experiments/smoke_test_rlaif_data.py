@@ -23,6 +23,8 @@ def run_smoke_test(config_path: str | Path, fallback: bool = True,
         prompts_path = root / "ai_preference_prompts.jsonl"
         preferences_path = root / "ai_preferences.jsonl"
         failed_path = root / "failed_preferences.jsonl"
+        template_path = root / "manual_labels_template.jsonl"
+        small_template_path = root / "manual_labels_template_small.jsonl"
         states = collect_assignment_states(config_path, 1, states_path, fallback=fallback)
         if len(states) < 20:
             raise AssertionError("Stage 4 smoke test collected fewer than 20 assignment states")
@@ -35,9 +37,17 @@ def run_smoke_test(config_path: str | Path, fallback: bool = True,
         for prompt in prompts:
             validate_prompt(prompt)
         write_jsonl(prompts_path, prompts)
-        offline = run_offline(prompts, preferences_path)
+        offline = run_offline(
+            prompts, preferences_path, template_path, small_template_path
+        )
         if offline["preferences"] != 0 or preferences_path.exists():
             raise AssertionError("offline mode invented preference labels")
+        templates = read_jsonl(template_path)
+        small_templates = read_jsonl(small_template_path)
+        if len(templates) != len(prompts) or len(small_templates) != min(10, len(prompts)):
+            raise AssertionError("offline mode did not create the required templates")
+        if any(item["chosen"] is not None or item["rejected"] is not None for item in templates):
+            raise AssertionError("offline templates contain fabricated labels")
         replay = {"preferences": 0, "failed": 0}
         if replay_labels is not None:
             replay = run_replay(prompts, replay_labels, preferences_path, failed_path)
@@ -46,6 +56,8 @@ def run_smoke_test(config_path: str | Path, fallback: bool = True,
         return {
             "assignment_states_file": str(states_path), "assignment_states": len(states),
             "prompts_file": str(prompts_path), "prompts": len(prompts),
+            "manual_labels_template_file": str(template_path),
+            "manual_labels_template_small_file": str(small_template_path),
             "offline_preferences": offline["preferences"], "replay_preferences": replay["preferences"],
             "failed_preferences": replay["failed"], "external_api_used": False,
         }

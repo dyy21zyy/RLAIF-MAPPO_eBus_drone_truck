@@ -1,0 +1,7 @@
+# Stage 4 external evaluator placeholder. Do not commit private credentials.
+rlaif:
+  api_key_env: RLAIF_API_KEY
+  api_base_url: ""
+  model_name: ""
+  temperature: 0.0
+  max_retries: 3
