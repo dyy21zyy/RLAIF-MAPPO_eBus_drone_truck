@@ -178,3 +178,12 @@ test. Disabled RLAIF does not require a model. Enabled RLAIF strictly loads the
 Stage 5 checkpoint and is assignment-only; bus reward has no learned component.
 No Stage 8 experiment suite or final RLAIF-enabled run was performed. Final such
 runs remain blocked on the deferred Stage 5 PyTorch Runtime Gate.
+
+
+# Experiment log
+
+## Stage 8 code validation — 2026-06-10
+
+Implemented baseline policies, seed-controlled evaluation, benchmark/ablation/sensitivity entry points, result schema, aggregation, and temporary-artifact smoke testing. Any smoke outputs are code-validation artifacts only; they are generated in temporary or ignored result directories and are not experimental findings.
+
+No large-scale benchmark was run. No checkpoint, preference label, result table, or RLAIF reward was fabricated. Final RLAIF-enabled PPO/MAPPO work remains blocked on the Stage 5 Runtime Gate and trained Stage 6/7 checkpoints.

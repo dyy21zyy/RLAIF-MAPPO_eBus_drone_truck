@@ -1,0 +1,9 @@
+{
+  "experiment":{"name":"stage8_sensitivity","instance_name":"shanghai_small","base_config":"configs/shanghai_small.yaml","seeds":[0],"output_dir":"results/sensitivity","fail_fast":false,"smoke":true},
+  "methods":[{"name":"rule_based","assignment_policy":"rule_based","bus_policy":"battery_threshold","rlaif_enabled":false}],
+  "dimensions":{
+    "parcel_demand_level":[10,60,100], "truck_fleet_size":[1,2,4], "integrated_station_count":[2,4,6],
+    "locker_capacity":[15.0,30.0,60.0], "initial_full_batteries":[2,6,12], "station_power_capacity":[600.0,1100.0,1600.0],
+    "bus_headway":[5,10,20], "drone_radius":[4.0,8.0,12.0], "urgent_parcel_ratio":[0.1,0.3,0.5]
+  }
+}

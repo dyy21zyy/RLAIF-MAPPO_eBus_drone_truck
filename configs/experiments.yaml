@@ -1,0 +1,25 @@
+{
+  "experiment": {
+    "name": "shanghai_small_benchmark",
+    "instance_name": "shanghai_small",
+    "base_config": "configs/shanghai_small.yaml",
+    "fallback": true,
+    "seeds": [0, 1, 2],
+    "output_dir": "results/benchmark",
+    "max_episodes_per_method": 3,
+    "fail_fast": false,
+    "skip_missing_checkpoints": true,
+    "smoke": true
+  },
+  "methods": [
+    {"name":"truck_only","assignment_policy":"truck_only","bus_policy":"no_charge","rlaif_enabled":false},
+    {"name":"random_feasible","assignment_policy":"random_feasible","bus_policy":"uniform_30","rlaif_enabled":false},
+    {"name":"bus_drone_only","assignment_policy":"bus_drone_only","bus_policy":"uniform_30","rlaif_enabled":false},
+    {"name":"truck_drone","assignment_policy":"truck_drone","bus_policy":"uniform_30","rlaif_enabled":false},
+    {"name":"rule_based","assignment_policy":"rule_based","bus_policy":"battery_threshold","rlaif_enabled":false},
+    {"name":"assignment_ppo","assignment_policy":"assignment_ppo","checkpoint":"results/checkpoints/assignment_ppo.pt","bus_policy":"uniform_30","rlaif_enabled":false},
+    {"name":"assignment_ppo_rlaif","assignment_policy":"assignment_ppo","checkpoint":"results/checkpoints/assignment_ppo.pt","reward_model_checkpoint":"results/checkpoints/reward_model.pt","bus_policy":"uniform_30","rlaif_enabled":true},
+    {"name":"mappo_async","assignment_policy":"mappo_async","checkpoint":"results/checkpoints/mappo_async.pt","bus_policy":"learned_bus_actor","rlaif_enabled":false},
+    {"name":"mappo_async_rlaif","assignment_policy":"mappo_async","checkpoint":"results/checkpoints/mappo_async.pt","reward_model_checkpoint":"results/checkpoints/reward_model.pt","bus_policy":"learned_bus_actor","rlaif_enabled":true}
+  ]
+}

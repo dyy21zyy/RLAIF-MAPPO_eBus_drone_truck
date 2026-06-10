@@ -75,3 +75,31 @@ episode, one PPO epoch, disabled RLAIF, and skips cleanly without PyTorch.
 These commands are code and interface validation only. Do not report them as final
 Stage 8 comparisons. In particular, do not enable RLAIF unless the Stage 5 Runtime
 Gate has produced and validated the configured `reward_model.pt`.
+
+
+# Stage 8 experiment framework
+
+Stage 8 implements experiment code and dependency-light validation only. Its generated files are **not paper-ready results**, and no performance claim should be inferred from smoke runs.
+
+## Commands
+
+```bash
+python -m experiments.smoke_test_experiments
+python -m experiments.run_baselines --config configs/experiments.yaml
+python -m experiments.run_benchmark --config configs/experiments.yaml
+python -m experiments.run_ablation --config configs/ablation.yaml
+python -m experiments.run_sensitivity --config configs/sensitivity.yaml
+python -m experiments.aggregate_results --input results/raw --output results/summary
+```
+
+The smoke test builds one deterministic Stage 2 fallback instance, uses one seed, runs `truck_only`, `random_feasible`, `bus_drone_only`, `truck_drone`, and `rule_based`, explicitly skips an unavailable learned checkpoint, and aggregates temporary output. It does not need PyTorch or `reward_model.pt` for `rlaif_enabled=false` methods.
+
+## Fairness and outputs
+
+Every method in one benchmark receives the same Stage 2 instance and seed list. Per-episode JSON is written below `<output_dir>/raw/<method>/`, while `<output_dir>/episodes.csv` and `<output_dir>/summary/{summary_metrics.csv,summary_metrics.json,method_status.csv}` are plotting/table inputs. The entire `results/` tree is ignored by Git.
+
+Missing Stage 6/7 checkpoints produce `skipped_missing_checkpoint`; missing PyTorch produces `skipped_missing_dependency`. No heuristic is silently substituted. An RLAIF method additionally requires a valid Stage 5 `reward_model.pt`; disabled RLAIF never loads that file. Invalid present checkpoints fail clearly rather than producing fabricated rewards.
+
+Ablations are declarations of checkpoint-backed variants. Sensitivity dimensions are config-driven and smoke mode deliberately evaluates only a tiny subset. Full benchmark, ablation, and sensitivity execution remains deferred until PyTorch is available and valid Stage 5, Stage 6, and Stage 7 checkpoints have been trained in the proper runtime environment.
+
+The rule-based policy is an interpretable comparison baseline only. Reusing it for preference labels or reward-model supervision would create circular, fabricated RLAIF evidence and is prohibited.

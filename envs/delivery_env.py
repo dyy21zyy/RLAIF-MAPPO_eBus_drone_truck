@@ -204,6 +204,7 @@ class DynamicDeliveryEnv:
         self.reward_total = 0.0
         self.decision_counts = {"assignment": 0, "bus": 0}
         self.infeasible_action_corrections = 0
+        self.peak_station_load_kw = max((float(row["base_load_kw"]) if "base_load_kw" in row else float(self.config["station"]["base_load_kw"]) for row in self.station_rows), default=0.0)
         self.cost_components = {name: 0.0 for name in (
             "passenger_delay", "bus_operating_delay", "parcel_lateness", "energy_cost", "power_overload",
             "bus_battery_violation", "locker_overflow", "truck_cost", "undelivered", "battery_shortage", "infeasible_action")}
@@ -429,7 +430,9 @@ class DynamicDeliveryEnv:
             base_load = float(self.config["station"]["base_load_kw"])
             battery_load = len(station.battery_ready_min) * station.battery_power_kw
             concurrent_bus_load = len(station.active_bus_charges) * float(self.config["bus"]["charging_power_kw"])
-            overload_kw = max(0.0, base_load + battery_load + concurrent_bus_load - station.power_capacity_kw)
+            station_load_kw = base_load + battery_load + concurrent_bus_load
+            self.peak_station_load_kw = max(self.peak_station_load_kw, station_load_kw)
+            overload_kw = max(0.0, station_load_kw - station.power_capacity_kw)
             reward += self._charge_cost("power_overload", overload_kw * duration_min / 60.0)
         delay = duration_min + unloading
         self.bus_delay_min[trip_id] += delay
@@ -564,6 +567,10 @@ class DynamicDeliveryEnv:
             "delivered_parcels": delivered,
             "total_parcels": len(self.parcels),
         }
+
+    def get_metrics(self) -> dict[str, Any]:
+        """Return the current dependency-light environment metric snapshot."""
+        return dict(self._info(0.0)["metrics"])
 
     def check_invariants(self) -> list[str]:
         """Return invariant violations; an empty list means the state is valid."""
