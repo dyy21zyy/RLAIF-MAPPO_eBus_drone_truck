@@ -69,3 +69,13 @@ bus minimum-SoC violation, locker overflow, monetary truck cost, priority-weight
 undelivered parcels, battery shortage, and infeasible actions. Costs are exposed
 individually in `info["cost_components"]`. `rlaif_lambda` is intentionally unused;
 learned preference rewards belong to a later stage.
+
+## Stage 3 gate compatibility clarification (2026-06-10)
+
+Station power capacity and locker capacity are soft constraints: overload and
+overflow remain operationally representable and incur weighted penalties. A bus
+charging action is masked only when no physical charger is available; any
+resulting power overload is charged by overload energy. `info` exposes cumulative
+negative `reward_components`, positive audit `cost_components`, and metrics for
+decision counts, delivery counts, drone deliveries, total reward, and corrected
+infeasible actions. No learned/RLAIF reward is present in Stage 3.

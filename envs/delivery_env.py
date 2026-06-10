@@ -16,6 +16,7 @@ from typing import Any
 
 import numpy as np
 
+from envs.state_builder import build_assignment_features
 from utils.config import load_config
 
 EPSILON = 1e-9
@@ -201,6 +202,8 @@ class DynamicDeliveryEnv:
         self.bus_segment_index: dict[str, int] = {trip_id: 0 for trip_id in self.trip_rows}
         self.pending_bus_parcels: dict[tuple[str, str], list[str]] = {}
         self.reward_total = 0.0
+        self.decision_counts = {"assignment": 0, "bus": 0}
+        self.infeasible_action_corrections = 0
         self.cost_components = {name: 0.0 for name in (
             "passenger_delay", "bus_operating_delay", "parcel_lateness", "energy_cost", "power_overload",
             "bus_battery_violation", "locker_overflow", "truck_cost", "undelivered", "battery_shortage", "infeasible_action")}
@@ -247,6 +250,7 @@ class DynamicDeliveryEnv:
             raise RuntimeError("No decision is pending")
         decision = self.current_decision
         self.current_decision = None
+        self.decision_counts[decision.agent] += 1
         reward = 0.0
         if not isinstance(action, (int, np.integer)) or action < 0 or action >= len(decision.action_mask):
             raise ValueError(f"Action must be an integer in [0, {len(decision.action_mask) - 1}]")
@@ -256,6 +260,7 @@ class DynamicDeliveryEnv:
             selected = next(index for index, feasible in enumerate(decision.action_mask) if feasible)
             reward += self._charge_cost("infeasible_action", 1.0)
             corrected = True
+            self.infeasible_action_corrections += 1
         if decision.agent == "assignment":
             reward += self._apply_assignment(decision.event.payload["parcel_id"], selected)
         else:
@@ -406,11 +411,9 @@ class DynamicDeliveryEnv:
         station = self.stations[event.payload["station_id"]]
         station.active_bus_charges = [end for end in station.active_bus_charges if end > self.now_min + EPSILON]
         charger_available = len(station.active_bus_charges) < int(next(row["charger_num"] for row in self.station_rows if row["station_id"] == station.station_id))
-        base = float(self.config["station"]["base_load_kw"])
-        bus_power = float(self.config["bus"]["charging_power_kw"])
-        battery_power = len(station.battery_ready_min) * station.battery_power_kw
-        power_available = base + battery_power + bus_power <= station.power_capacity_kw + EPSILON
-        return [True] + [charger_available and power_available] * (self.bus_action_size - 1)
+        # Power capacity is a soft constraint: expose charging whenever a physical
+        # charger is available, then price any overload in ``_apply_bus_action``.
+        return [True] + [charger_available] * (self.bus_action_size - 1)
 
     def _apply_bus_action(self, event: Event, action: int) -> float:
         trip_id, stop_index = event.payload["trip_id"], event.payload["stop_index"]
@@ -423,6 +426,11 @@ class DynamicDeliveryEnv:
             energy = float(self.config["bus"]["charging_power_kw"]) * duration_min / 60
             self.bus_soc_kwh[trip_id] = min(float(self.config["bus"]["bus_battery_kwh"]), self.bus_soc_kwh[trip_id] + energy * float(self.config["bus"]["charging_efficiency"]))
             reward += self._charge_cost("energy_cost", energy)
+            base_load = float(self.config["station"]["base_load_kw"])
+            battery_load = len(station.battery_ready_min) * station.battery_power_kw
+            concurrent_bus_load = len(station.active_bus_charges) * float(self.config["bus"]["charging_power_kw"])
+            overload_kw = max(0.0, base_load + battery_load + concurrent_bus_load - station.power_capacity_kw)
+            reward += self._charge_cost("power_overload", overload_kw * duration_min / 60.0)
         delay = duration_min + unloading
         self.bus_delay_min[trip_id] += delay
         reward += self._charge_cost("passenger_delay", duration_min)
@@ -484,14 +492,7 @@ class DynamicDeliveryEnv:
         event = self.current_decision.event
         if self.current_decision.agent == "assignment":
             parcel = self.parcels[event.payload["parcel_id"]]
-            features = [
-                self.now_min / max(self.horizon_min, 1.0),
-                parcel.weight_kg / max(float(self.config["truck"]["capacity_kg"]), 1.0),
-                max(0.0, parcel.deadline_min - self.now_min) / max(self.horizon_min, 1.0),
-                parcel.priority / 3.0,
-                float(parcel.drone_feasible),
-                min(self.truck_available_min) / max(self.horizon_min, 1.0),
-            ]
+            features = build_assignment_features(self, parcel)
             entity_id = parcel.parcel_id
         else:
             trip_id, station_id = event.payload["trip_id"], event.payload["station_id"]
@@ -509,13 +510,30 @@ class DynamicDeliveryEnv:
                 "features": features, "action_mask": list(self.current_decision.action_mask)}
 
     def _info(self, step_reward: float) -> dict[str, Any]:
+        delivered = sum(parcel.status == "delivered" for parcel in self.parcels.values())
+        drone_deliveries = sum(
+            parcel.status == "delivered" and parcel.mode in {"TBD", "TLD"}
+            for parcel in self.parcels.values()
+        )
+        metrics = {
+            "decision_events": sum(self.decision_counts.values()),
+            "assignment_events": self.decision_counts["assignment"],
+            "bus_charging_events": self.decision_counts["bus"],
+            "delivered_parcels": delivered,
+            "undelivered_parcels": len(self.parcels) - delivered,
+            "drone_deliveries": drone_deliveries,
+            "total_reward": self.reward_total,
+            "infeasible_action_corrections": self.infeasible_action_corrections,
+        }
         return {
             "time_min": self.now_min,
             "decision_agent": self.current_decision.agent if self.current_decision else None,
             "step_reward": step_reward,
             "episode_reward": self.reward_total,
+            "reward_components": {name: -value for name, value in self.cost_components.items()},
             "cost_components": dict(self.cost_components),
-            "delivered_parcels": sum(parcel.status == "delivered" for parcel in self.parcels.values()),
+            "metrics": metrics,
+            "delivered_parcels": delivered,
             "total_parcels": len(self.parcels),
         }
 

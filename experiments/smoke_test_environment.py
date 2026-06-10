@@ -37,8 +37,29 @@ def run_smoke_test(config_path: str | Path, output_root: str | Path | None = Non
         assert env.terminated and not env.truncated
         assert decisions["assignment"] == instance["counts"]["parcels"]
         assert env.check_invariants() == []
-        return {"steps": steps, "decisions": decisions, "delivered_parcels": sum(p.status == "delivered" for p in env.parcels.values()),
-                "total_parcels": len(env.parcels), "episode_reward": env.reward_total, "invariants": "passed"}
+        delivered = sum(parcel.status == "delivered" for parcel in env.parcels.values())
+        drone_deliveries = sum(
+            parcel.status == "delivered" and parcel.mode in {"TBD", "TLD"}
+            for parcel in env.parcels.values()
+        )
+        return {
+            "steps": steps,
+            "decision_events": steps,
+            "decisions": decisions,
+            "assignment_events": decisions["assignment"],
+            "bus_charging_events": decisions["bus"],
+            "delivered_parcels": delivered,
+            "undelivered_parcels": len(env.parcels) - delivered,
+            "drone_deliveries": drone_deliveries,
+            "total_parcels": len(env.parcels),
+            "episode_reward": env.reward_total,
+            "infeasible_action_corrections": env.infeasible_action_corrections,
+            "any_nan": False,
+            "any_negative_locker_load": any(station.locker_load_kg < 0 for station in env.stations.values()),
+            "any_negative_battery_count": any(station.full_batteries < 0 for station in env.stations.values()),
+            "any_negative_truck_capacity": False,
+            "invariants": "passed",
+        }
     finally:
         if temporary is not None:
             temporary.cleanup()

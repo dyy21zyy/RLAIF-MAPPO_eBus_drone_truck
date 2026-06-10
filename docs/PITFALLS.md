@@ -76,3 +76,29 @@
 - **Regression prevention:** The Stage 2 offline instance-loading test reads both
   manifests, and the full Stage 1 suite continues to test malformed, blank,
   empty-root, non-mapping, and valid configuration behavior.
+
+## Stage 3 gate remediation before Stage 4
+
+- The required gate entry point was missing because the original smoke module was
+  named `smoke_test_environment`; keep `experiments.smoke_test_env` as the stable
+  gate command and require `--fallback`.
+- Station power capacity is a soft constraint, not an action-mask hard constraint.
+  Charging remains selectable when a charger is free, and overload energy is
+  penalized through the environment reward.
+- Keep cumulative negative `reward_components` and named sanity `metrics` in
+  `info`; retain positive `cost_components` only as an audit-compatible alias.
+
+## Stage 4 preference-data guardrails
+
+- Objective estimates may select which pairs to ask about, but must never become
+  labels or preference scores.
+- Offline mode must remove stale preference output rather than leave a file that
+  could be mistaken for newly generated labels.
+- Never silently discard malformed JSON, unknown actions, reversed rejected
+  actions, out-of-range confidence, or unmatched replay labels; preserve them in
+  the failed JSONL output.
+- Low confidence is not invalid data. Retain it with
+  `usable_for_training=false` below the `0.6` default threshold.
+- Generated preference data is reproducible runtime output and is ignored by
+  Git; the code, schemas, prompts, tests, and provenance documentation are the
+  committed Stage 4 artifacts.
