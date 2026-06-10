@@ -14,10 +14,10 @@ manual intervention.
    - Create runtime folders.
    - Configure deterministic seeds and logs.
    - Verify placeholder imports.
-2. **Stage 2 — data pipeline (planned)**
+2. **Stage 2 — data pipeline (implemented)**
    - Build a Shanghai Yangpu instance from approved public/custom inputs.
    - Always retain a deterministic fallback instance that needs no network.
-3. **Stage 3 — event-driven MDP (planned)**
+3. **Stage 3 — event-driven MDP (implemented)**
    - Consume a validated Stage 2 instance.
    - Implement event/state/action/reward behavior and invariant tests.
 4. **Later stages — learning and RLAIF (planned)**
@@ -40,3 +40,15 @@ python -m experiments.smoke_test_project --config configs/shanghai_small.yaml
 ```
 
 This check is local-only and performs no downloads.
+
+
+## Stage 3 verification
+
+```bash
+python -m experiments.smoke_test_environment --config configs/shanghai_small.yaml
+python -m pytest -q tests/test_stage3_environment.py
+```
+
+The smoke gate forces the deterministic Stage 2 fallback build, completes an
+episode with the first-feasible baseline, and checks simulator invariants after
+every assignment and bus decision.

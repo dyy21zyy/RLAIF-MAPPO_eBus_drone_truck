@@ -107,7 +107,6 @@ def test_seed_everything_is_deterministic() -> None:
     "module_name",
     [
         "data_pipeline.placeholder",
-        "envs.placeholder",
         "models.placeholder",
         "training.placeholder",
     ],
