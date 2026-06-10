@@ -153,10 +153,36 @@ smoke test requires a network request.
 - Stage 3: event-driven MDP environment (complete).
 - Stage 4: RLAIF state/prompt collection and AI-label interface (complete).
 - Stage 5: Code Gate complete; PyTorch Runtime Gate deferred.
-- Stage 6: code implementation may proceed. It must support `rlaif_enabled=false`
-  for code smoke tests and permit `rlaif_enabled=true` only with a valid
-  `reward_model.pt`. Final RLAIF-enabled PPO/MAPPO experiments remain blocked until
-  that checkpoint has passed the Stage 5 Runtime Gate.
+- Stage 6: assignment-only PPO code and dependency-light Code Gate implemented.
+  The bus uses a fixed baseline; Stage 6 contains no MAPPO or centralized critic.
+- Stage 7: not implemented. Final RLAIF-enabled experiments remain blocked until
+  `reward_model.pt` has passed the deferred Stage 5 Runtime Gate.
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the staged workflow and
 [docs/PITFALLS.md](docs/PITFALLS.md) for scope guardrails.
+
+
+## Stage 6 assignment PPO
+
+Stage 6 learns only parcel assignment decisions at `PARCEL_ARRIVAL` events. Its
+categorical action space is `1 + 2H` (`TD`, `TBD_h`, and `TLD_h`), and infeasible
+logits are masked before sampling. Bus charging is never learned in this stage;
+choose `no_charge`, `uniform_30`, or `battery_threshold` in the configuration.
+
+The clipped objective uses `ratio = exp(new_log_prob - old_log_prob)`, normalized
+GAE advantages, clipped policy loss, MSE value loss, entropy regularization, and
+gradient clipping. Train, evaluate, or run the temporary-artifact smoke test with:
+
+```bash
+python -m experiments.train_assignment_ppo --config configs/train_assignment_ppo.yaml
+python -m experiments.evaluate_assignment_ppo --config configs/train_assignment_ppo.yaml --checkpoint results/checkpoints/assignment_ppo.pt
+python -m experiments.smoke_test_assignment_ppo
+```
+
+With `rlaif.enabled: false`, total reward is the finite event-to-event environment
+assignment reward and no `reward_model.pt` is required. With `rlaif.enabled: true`,
+the configured Stage 5 checkpoint is mandatory and its saved feature and reward
+normalization statistics are applied. Missing or invalid checkpoints fail clearly;
+rule-based, reason-text, and fabricated RLAIF rewards are prohibited. PyTorch is
+required for model training, updates, checkpoint round trips, and evaluation. A
+skipped PyTorch smoke test is only a Code Gate result, not experimental validation.

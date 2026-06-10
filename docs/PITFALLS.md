@@ -146,3 +146,27 @@
   invalid, or untrained.
 - Generated preference JSONL, `results/`, `runs/`, checkpoint directories, and
   `*.pt`, `*.pth`, or `*.ckpt` files are runtime artifacts and must not be committed.
+
+## Stage 6 assignment-PPO guardrails
+
+- Store and optimize only assignment transitions. Bus events must be resolved by
+  a fixed, mask-aware baseline and must never enter the PPO buffer.
+- Mask assignment logits before constructing/sampling the categorical policy.
+  Stage 3 normally keeps `TD` feasible; count and expose any all-zero-mask fallback
+  rather than hiding it.
+- Do not add a bus actor, parameter sharing, centralized observations, a
+  centralized critic, or MAPPO behavior under Stage 6 names.
+- With RLAIF disabled, do not touch `reward_model.pt`; total reward is the finite
+  environment assignment reward. With RLAIF enabled, fail on a missing or invalid
+  checkpoint and apply its saved normalization exactly.
+- Candidate objective features and evaluator reason text are not replacement
+  rewards. A rule score would be fabricated RLAIF provenance and is prohibited.
+- Event-to-event assignment attribution is an initial implementation limitation.
+  Do not describe it as optimized delayed ledger credit assignment.
+- PyTorch-dependent smoke/tests may skip when PyTorch is absent. `compileall`,
+  non-PyTorch tests, documentation checks, and artifact checks must still pass.
+- Keep `results/`, `runs/`, checkpoint directories, preference JSONL, and model
+  files out of Git. A checkpoint round trip in the smoke test must use a temporary
+  directory.
+- Final RLAIF-enabled PPO experiments remain blocked until the deferred Stage 5
+  Runtime Gate validates a trained reward model.
