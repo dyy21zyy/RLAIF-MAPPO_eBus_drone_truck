@@ -488,7 +488,7 @@ class DynamicDeliveryEnv:
 
     def _observation(self) -> dict[str, Any]:
         if self.current_decision is None:
-            return {"agent": "terminal", "features": [1.0], "action_mask": []}
+            return {"agent": "terminal", "agent_id": "terminal", "event_type": "TERMINAL", "features": [1.0], "action_mask": []}
         event = self.current_decision.event
         if self.current_decision.agent == "assignment":
             parcel = self.parcels[event.payload["parcel_id"]]
@@ -506,8 +506,36 @@ class DynamicDeliveryEnv:
                 self.bus_freight_kg[trip_id] / max(float(self.config["bus"]["freight_capacity_kg"]), 1.0),
             ]
             entity_id = f"{trip_id}:{station_id}"
-        return {"agent": self.current_decision.agent, "entity_id": entity_id, "time_min": self.now_min,
+        event_type = "PARCEL_ARRIVAL" if self.current_decision.agent == "assignment" else "BUS_ARRIVAL"
+        return {"agent": self.current_decision.agent, "agent_id": self.current_decision.agent,
+                "event_type": event_type, "entity_id": entity_id, "time_min": self.now_min,
                 "features": features, "action_mask": list(self.current_decision.action_mask)}
+
+    def get_global_state(self) -> list[float]:
+        """Return a fixed-size centralized state shared by both Stage 7 agents."""
+        parcel_count = max(len(self.parcels), 1)
+        station_count = max(len(self.stations), 1)
+        trip_count = max(len(self.bus_soc_kwh), 1)
+        delivered = sum(parcel.status == "delivered" for parcel in self.parcels.values())
+        awaiting = sum(parcel.status == "awaiting_assignment" for parcel in self.parcels.values())
+        in_transit = sum(parcel.status == "in_transit" for parcel in self.parcels.values())
+        battery_capacity = max(float(self.config["bus"]["bus_battery_kwh"]), 1.0)
+        locker_ratios = [station.locker_load_kg / max(station.locker_capacity_kg, 1.0) for station in self.stations.values()]
+        battery_counts = [station.full_batteries / max(float(self.config["station"]["initial_full_batteries"]), 1.0) for station in self.stations.values()]
+        return [
+            self.now_min / max(self.horizon_min, 1.0),
+            delivered / parcel_count, awaiting / parcel_count, in_transit / parcel_count,
+            self.decision_counts["assignment"] / parcel_count,
+            self.decision_counts["bus"] / max(trip_count * station_count, 1),
+            sum(self.bus_soc_kwh.values()) / (trip_count * battery_capacity),
+            sum(self.bus_delay_min.values()) / (trip_count * max(self.horizon_min, 1.0)),
+            sum(self.bus_freight_kg.values()) / (trip_count * max(float(self.config["bus"]["freight_capacity_kg"]), 1.0)),
+            sum(locker_ratios) / station_count,
+            sum(battery_counts) / station_count,
+            sum(self.truck_available_min) / (max(len(self.truck_available_min), 1) * max(self.horizon_min, 1.0)),
+            self.infeasible_action_corrections / max(sum(self.decision_counts.values()), 1),
+            float(self.terminated), float(self.truncated),
+        ]
 
     def _info(self, step_reward: float) -> dict[str, Any]:
         delivered = sum(parcel.status == "delivered" for parcel in self.parcels.values())

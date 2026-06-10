@@ -170,3 +170,23 @@
   directory.
 - Final RLAIF-enabled PPO experiments remain blocked until the deferred Stage 5
   Runtime Gate validates a trained reward model.
+
+## Stage 7 asynchronous MAPPO guardrails
+
+- Do not convert the event queue into simultaneous assignment/bus timesteps. Store
+  only the actor that actually received the decision event.
+- Do not add dummy rewards, no-op transitions, or inactive-agent observations.
+- Apply the environment mask before categorical sampling for both actors; bus
+  action IDs are indices, not raw charging seconds.
+- The centralized critic receives `get_global_state()`; actors receive only their
+  local event observation. Do not replace this with QMIX or independent Q-learning.
+- Never score bus transitions with the RLAIF model. Never use objective rules or
+  evaluator explanations as a learned-reward substitute.
+- Disabled RLAIF must not inspect `reward_model.pt`; enabled RLAIF must fail clearly
+  if the trained checkpoint is missing or invalid.
+- Event-to-event environment reward is acceptable for this first code stage, but
+  its cumulative decomposition must not be described as exact per-event causality.
+- Keep `results/`, logs, preference data, and `*.pt` checkpoints outside Git. The
+  smoke test must use temporary storage and may skip only PyTorch-dependent work.
+- Stage 7 Code Gate passing does not unblock final RLAIF-enabled experiments; that
+  still requires the Stage 5 Runtime Gate. Do not implement Stage 8 here.
