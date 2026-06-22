@@ -88,6 +88,14 @@
 - Keep cumulative negative `reward_components` and named sanity `metrics` in
   `info`; retain positive `cost_components` only as an audit-compatible alias.
 
+## Stage 3 MVP simplifications replaced by hardening
+
+- Permissive assignment checks were replaced by hard-feasibility action masks covering truck capacity and horizon, station-specific drone range, freight-bus reachability/capacity/deadline, and TLD locker capacity. The TD fallback remains explicit and penalized when every physical action is infeasible.
+- The six-value assignment observation was replaced by the shared `17 + 10H` schema. Station blocks are sorted by `station_id`, feature names are exported, and unavailable volume semantics use a documented normalization approximation.
+- Candidate actions now share one ordered 14-value normalized schema across Stage 4 prompts and Stage 5 reward-model data. Objective context remains context—not a label.
+- Point-event overload charges were replaced by piecewise-constant interval integration for power and locker amount/duration. Delayed drone dispatch retains locker mass until the dispatch event.
+- Availability-only trucks were replaced by explicit per-truck state with capacity, onboard parcel, distance, travel time, status, location, and route history. The scheduling policy may remain one parcel per trip, but metrics now come from truck state.
+
 ## Stage 4 preference-data guardrails
 
 - Objective estimates may select which pairs to ask about, but must never become
@@ -189,7 +197,8 @@
 - Keep `results/`, logs, preference data, and `*.pt` checkpoints outside Git. The
   smoke test must use temporary storage and may skip only PyTorch-dependent work.
 - Stage 7 Code Gate passing does not unblock final RLAIF-enabled experiments; that
-  still requires the Stage 5 Runtime Gate. Do not implement Stage 8 here.
+  still requires the Stage 5 Runtime Gate. Stage 8 is now implemented separately
+  as evaluation code and does not retroactively broaden Stage 7 semantics.
 
 ## Stage 8 experiment pitfalls
 

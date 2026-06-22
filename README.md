@@ -3,7 +3,7 @@
 This repository is being developed in explicit stages for parcel assignment and
 scheduling across trucks, electric buses, integrated stations, and drones.
 
-## Current status: Stage 5 Code Gate complete; Runtime Gate deferred
+## Current status: Stage 8 framework implemented; runtime experiments deferred
 
 Stage 2 provides a reproducible Shanghai instance data pipeline with two road
 network modes:
@@ -15,29 +15,29 @@ network modes:
   20-stop corridor route, a synthetic timetable and parcels, and requires no
   internet access.
 
-Stage 3 adds the deterministic event-driven assignment and electric-bus charging
-MDP. Stage 4 adds assignment-state collection, objective candidate features,
-versioned pairwise AI prompts, and offline/API/replay preference validation.
-Stage 5 adds a learned assignment reward model trained only from approved
-pairwise labels. Its dependency-light Code Gate passes in the current environment;
-the Runtime Gate is deferred to an environment with PyTorch. PPO and MAPPO remain
-intentionally **not implemented**.
+Stage 3 provides the hardened deterministic event-driven assignment and
+electric-bus charging MDP. Stage 4 provides assignment-state collection,
+objective candidate features, versioned pairwise AI prompts, and
+offline/API/replay preference validation. Stages 5–7 implement the reward-model,
+assignment-PPO, and asynchronous-MAPPO code gates; their runtime training is
+deferred. Stage 8 implements the experiment framework, while final experiments
+remain deferred.
 
 ## Repository layout
 
 ```text
-configs/        Scenario and future training configuration templates
+configs/        Scenario, training, and experiment configurations
 data/           Raw inputs and ignored generated instances
 data_pipeline/  Stage 2 road, bus, facility, parcel, matrix, and instance builders
-checkpoints/    Future model artifacts
+checkpoints/    Ignored runtime model artifacts
 docs/           Design, guardrail, and experiment documentation
 envs/           Stage 3 event-driven assignment and bus environment
-experiments/    Offline gates and Stage 4 data-workflow CLIs
+experiments/    Offline gates, training/evaluation, and Stage 8 runners
 logs/           Runtime logs
 models/         Future model placeholder
 outputs/        Future experiment outputs
 rlaif/          Stage 4 preference workflow and Stage 5 reward-model training
-tests/          Stage 1 through Stage 5 regression tests
+tests/          Stage 1 through Stage 8 regression and hardening tests
 training/       Future optimization-loop placeholder
 utils/          Config, logging, and reproducibility utilities
 ```
@@ -150,14 +150,23 @@ smoke test requires a network request.
 
 - Stage 1: foundation and documentation (complete).
 - Stage 2: offline-capable Shanghai instance data pipeline (complete).
-- Stage 3: event-driven MDP environment (complete).
+- Stage 3: event-driven MDP environment (implemented and hardened).
 - Stage 4: RLAIF state/prompt collection and AI-label interface (complete).
 - Stage 5: Code Gate complete; PyTorch Runtime Gate deferred.
-- Stage 6: assignment-only PPO code and dependency-light Code Gate implemented.
+- Stage 6: Code Gate complete; runtime training deferred.
   The bus uses a fixed baseline; Stage 6 contains no MAPPO or centralized critic.
-- Stage 7: asynchronous MAPPO code and dependency-light Code Gate implemented.
+- Stage 7: Code Gate complete; runtime training deferred.
   Final RLAIF-enabled experiments remain blocked until `reward_model.pt` has passed
   the deferred Stage 5 Runtime Gate.
+- Stage 8: experiment framework implemented; final experiments deferred.
+
+Final RLAIF-enabled runtime experiments require all of the following:
+
+1. a working PyTorch environment;
+2. completion of the Stage 5 Runtime Gate;
+3. a valid trained `reward_model.pt`;
+4. trained `assignment_ppo.pt` and/or `mappo_async.pt`; and
+5. benchmark/ablation/sensitivity runs in the intended AutoDL experiment environment.
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the staged workflow and
 [docs/PITFALLS.md](docs/PITFALLS.md) for scope guardrails.

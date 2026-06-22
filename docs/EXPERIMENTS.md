@@ -1,22 +1,24 @@
 # Experiment Catalog
 
-> Stage 1 supplies planning templates only; no training experiment is implemented.
+> Stages 1–8 have passed their dependency-light code gates. PyTorch training and
+> final benchmark execution remain deferred runtime work.
 
 ## Naming convention
 
 Use `<stage>_<purpose>_<city>_<seed>_<timestamp>` for artifact directories.
 Store the resolved configuration and a metadata manifest with every run.
 
-## Planned experiment families
+## Implemented experiment families and deferred runtime work
 
 | Family | Config | Status | Primary purpose |
 | --- | --- | --- | --- |
 | Project smoke | `configs/shanghai_small.yaml` | Implemented | Validate Stage 1 foundation |
-| Data pipeline smoke | `configs/shanghai_small.yaml` | Stage 2 planned | Validate fallback instance |
-| Environment smoke | `configs/shanghai_small.yaml` | Stage 3 planned | Complete one valid episode |
-| Reward model | `configs/train_reward_model.yaml` | Future template | Fit preference reward |
-| Assignment PPO | `configs/train_assignment_ppo.yaml` | Future template | Assignment-only baseline |
-| MAPPO | `configs/train_mappo.yaml` | Future template | Cooperative assignment/bus policy |
+| Data pipeline smoke | `configs/shanghai_small.yaml` | Stage 2 implemented | Validate fallback instance |
+| Environment smoke | `configs/shanghai_small.yaml` | Stage 3 implemented and hardened | Complete one valid episode |
+| Reward model | `configs/train_reward_model.yaml` | Stage 5 Code Gate complete; runtime deferred | Fit preference reward |
+| Assignment PPO | `configs/train_assignment_ppo.yaml` | Stage 6 Code Gate complete; runtime training deferred | Assignment-only policy |
+| MAPPO | `configs/train_mappo_async.yaml` | Stage 7 Code Gate complete; runtime training deferred | Cooperative assignment/bus policy |
+| Benchmark, ablation, sensitivity | `configs/{experiments,ablation,sensitivity}.yaml` | Stage 8 experiment framework implemented; final experiments deferred | Fair evaluation and aggregation |
 
 ## Minimum reporting checklist
 
