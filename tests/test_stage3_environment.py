@@ -60,6 +60,121 @@ def test_infeasible_assignment_is_corrected_and_penalized(environment: DynamicDe
     assert environment.check_invariants() == []
 
 
+def _current_parcel(environment: DynamicDeliveryEnv):
+    assert environment.current_decision is not None
+    return environment.parcels[environment.current_decision.event.payload["parcel_id"]]
+
+
+def _make_station_drone_reachable(
+    environment: DynamicDeliveryEnv, parcel_id: str, station_id: str
+) -> None:
+    environment.drone_distance_m[
+        environment.drone_row_index[station_id], environment.drone_column_index[parcel_id]
+    ] = 0.0
+
+
+def test_heavy_parcel_masks_all_drone_paths(environment: DynamicDeliveryEnv) -> None:
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.drone_feasible = True
+    parcel.weight_kg = float(environment.config["network"]["drone_payload_kg"]) + 0.1
+
+    mask = environment._assignment_mask(parcel)
+
+    assert mask[0] is True
+    assert not any(mask[1:])
+
+
+def test_tld_is_masked_when_locker_remaining_capacity_is_insufficient(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.drone_feasible = True
+    parcel.weight_kg = 1.0
+    station_id = environment.station_ids[0]
+    station = environment.stations[station_id]
+    _make_station_drone_reachable(environment, parcel.parcel_id, station_id)
+    station.locker_load_kg = station.locker_capacity_kg - parcel.weight_kg + 0.01
+
+    mask = environment._assignment_mask(parcel)
+
+    tld_action = 1 + len(environment.station_ids)
+    assert mask[tld_action] is False
+
+
+def test_tbd_is_masked_when_no_feasible_freight_bus_exists(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.drone_feasible = True
+    parcel.weight_kg = 1.0
+    station_id = environment.station_ids[0]
+    _make_station_drone_reachable(environment, parcel.parcel_id, station_id)
+    for trip in environment.trip_rows.values():
+        trip["freight_allowed"] = "False"
+
+    mask = environment._assignment_mask(parcel)
+
+    assert mask[1] is False
+
+
+def test_tbd_is_masked_when_bus_arrival_misses_parcel_deadline(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.drone_feasible = True
+    parcel.weight_kg = 1.0
+    parcel.deadline_min = environment.now_min + 1.0
+    station_id = environment.station_ids[0]
+    _make_station_drone_reachable(environment, parcel.parcel_id, station_id)
+
+    mask = environment._assignment_mask(parcel)
+
+    assert mask[1] is False
+
+
+def test_tld_is_masked_when_truck_arrival_exceeds_delivery_horizon(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.drone_feasible = True
+    parcel.weight_kg = 1.0
+    station_id = environment.station_ids[0]
+    _make_station_drone_reachable(environment, parcel.parcel_id, station_id)
+    depot = environment.truck_location_index["depot_01"]
+    station = environment.truck_location_index[station_id]
+    environment.truck_time_min[depot, station] = environment.horizon_min + 1.0
+
+    mask = environment._assignment_mask(parcel)
+
+    tld_action = 1 + len(environment.station_ids)
+    assert mask[tld_action] is False
+
+
+def test_all_infeasible_actions_use_penalized_td_fallback(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.config["truck"]["num_trucks"] = 0
+    environment.parcel_rows[0]["weight"] = str(
+        float(environment.config["truck"]["capacity_kg"]) + 1.0
+    )
+    observation, reset_info = environment.reset()
+
+    assert observation["action_mask"] == [True] + [False] * (environment.assignment_action_size - 1)
+    assert reset_info["metrics"]["fallback_feasibility_events"] == 1
+
+    _next, reward, _terminated, _truncated, info = environment.step(0)
+
+    assert info["action_corrected"] is True
+    assert reward <= -float(environment.config["reward"]["infeasible_action"])
+    assert info["metrics"]["fallback_feasibility_events"] >= 1
+    assert environment.cost_components["infeasible_action"] > 0
+
+
 def test_bus_decision_uses_configured_charging_actions(environment: DynamicDeliveryEnv) -> None:
     observation = advance_to_agent(environment, "bus")
 
@@ -108,11 +223,27 @@ def test_station_power_overload_is_soft_penalty(environment: DynamicDeliveryEnv)
 
 
 def test_station_drone_cycle_preserves_non_negative_resources(environment: DynamicDeliveryEnv) -> None:
+    first_parcel = environment.parcel_rows[0]
+    first_parcel["weight"] = "1.0"
+    first_parcel["drone_feasible"] = "True"
+    _make_station_drone_reachable(environment, first_parcel["parcel_id"], environment.station_ids[0])
     observation, _ = environment.reset()
-    station_action = 1 + len(environment.station_ids)
+    first_tld_action = 1 + len(environment.station_ids)
     while observation["agent"] != "terminal":
-        if observation["agent"] == "assignment" and observation["action_mask"][station_action]:
-            action = station_action
+        feasible_tld = (
+            next(
+                (
+                    action_id
+                    for action_id in range(first_tld_action, environment.assignment_action_size)
+                    if observation["action_mask"][action_id]
+                ),
+                None,
+            )
+            if observation["agent"] == "assignment"
+            else None
+        )
+        if feasible_tld is not None:
+            action = feasible_tld
         else:
             action = first_feasible_policy(observation)
         observation, *_ = environment.step(action)

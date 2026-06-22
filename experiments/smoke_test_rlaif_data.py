@@ -25,7 +25,10 @@ def run_smoke_test(config_path: str | Path, fallback: bool = True,
         failed_path = root / "failed_preferences.jsonl"
         template_path = root / "manual_labels_template.jsonl"
         small_template_path = root / "manual_labels_template_small.jsonl"
-        states = collect_assignment_states(config_path, 1, states_path, fallback=fallback)
+        # Hard feasibility can leave only one cross-mode comparison in a single
+        # fallback episode. Ten tiny deterministic episodes retain the original
+        # prompt-volume gate without relaxing masks or manufacturing candidates.
+        states = collect_assignment_states(config_path, 10, states_path, fallback=fallback)
         if len(states) < 20:
             raise AssertionError("Stage 4 smoke test collected fewer than 20 assignment states")
         loaded_states = read_jsonl(states_path)

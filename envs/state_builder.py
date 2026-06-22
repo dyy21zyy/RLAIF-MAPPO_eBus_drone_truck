@@ -25,7 +25,7 @@ def build_assignment_features(env: Any, parcel: Any) -> list[float]:
         max(0.0, parcel.deadline_min - env.now_min) / horizon,
         parcel.priority / 3.0,
         float(parcel.drone_feasible),
-        min(env.truck_available_min) / horizon,
+        min(env.truck_available_min, default=env.horizon_min) / horizon,
     ]
 
 

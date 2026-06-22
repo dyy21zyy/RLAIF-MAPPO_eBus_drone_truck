@@ -83,6 +83,7 @@ class Decision:
     agent: str
     event: Event
     action_mask: list[bool]
+    fallback_feasibility: bool = False
 
 
 class DynamicDeliveryEnv:
@@ -204,6 +205,7 @@ class DynamicDeliveryEnv:
         self.reward_total = 0.0
         self.decision_counts = {"assignment": 0, "bus": 0}
         self.infeasible_action_corrections = 0
+        self.fallback_feasibility_events = 0
         self.peak_station_load_kw = max((float(row["base_load_kw"]) if "base_load_kw" in row else float(self.config["station"]["base_load_kw"]) for row in self.station_rows), default=0.0)
         self.cost_components = {name: 0.0 for name in (
             "passenger_delay", "bus_operating_delay", "parcel_lateness", "energy_cost", "power_overload",
@@ -262,7 +264,14 @@ class DynamicDeliveryEnv:
             reward += self._charge_cost("infeasible_action", 1.0)
             corrected = True
             self.infeasible_action_corrections += 1
-        if decision.agent == "assignment":
+        if decision.fallback_feasibility:
+            if not corrected:
+                reward += self._charge_cost("infeasible_action", 1.0)
+                corrected = True
+                self.infeasible_action_corrections += 1
+            parcel = self.parcels[decision.event.payload["parcel_id"]]
+            parcel.action_id, parcel.mode, parcel.status = 0, "TD", "undelivered"
+        elif decision.agent == "assignment":
             reward += self._apply_assignment(decision.event.payload["parcel_id"], selected)
         else:
             reward += self._apply_bus_action(decision.event, selected)
@@ -283,7 +292,10 @@ class DynamicDeliveryEnv:
             if event.kind == "parcel_release":
                 parcel = self.parcels[event.payload["parcel_id"]]
                 parcel.status = "awaiting_assignment"
-                self.current_decision = Decision("assignment", event, self._assignment_mask(parcel))
+                mask, fallback = self._assignment_feasibility(parcel)
+                if fallback:
+                    self.fallback_feasibility_events += 1
+                self.current_decision = Decision("assignment", event, mask, fallback)
             elif event.kind == "bus_arrival":
                 reward += self._handle_bus_arrival(event)
                 self.current_decision = Decision("bus", event, self._bus_mask(event))
@@ -308,17 +320,91 @@ class DynamicDeliveryEnv:
         return reward
 
     def _assignment_mask(self, parcel: ParcelState) -> list[bool]:
-        mask = [parcel.weight_kg <= float(self.config["truck"]["capacity_kg"])]
-        for station_id in self.station_ids:
-            mask.append(parcel.drone_feasible and parcel.weight_kg <= float(self.config["bus"]["freight_capacity_kg"]) and self._next_freight_trip(parcel.release_time_min, station_id, parcel.weight_kg) is not None)
-        for station_id in self.station_ids:
-            mask.append(parcel.drone_feasible and parcel.weight_kg <= float(self.config["truck"]["capacity_kg"]))
-        if not any(mask):
-            mask[0] = True  # The correction path can still record an eventual undelivered parcel.
-        return mask
+        """Return hard-feasibility mask with TD exposed as the last-resort fallback."""
+        return self._assignment_feasibility(parcel)[0]
 
-    def _next_freight_trip(self, ready_min: float, station_id: str, weight_kg: float) -> tuple[str, float] | None:
-        station_stop = self.stations[station_id].stop_id
+    def _assignment_feasibility(self, parcel: ParcelState) -> tuple[list[bool], bool]:
+        truck_capacity = float(self.config["truck"]["capacity_kg"])
+        has_capable_truck = bool(self.truck_available_min) and parcel.weight_kg <= truck_capacity + EPSILON
+        depot = self.truck_location_index["depot_01"]
+        customer = self.truck_location_index[parcel.parcel_id]
+        loading = parcel.weight_kg * float(self.config["truck"]["loading_time_min_per_kg"])
+        earliest_start = max(self.now_min, min(self.truck_available_min)) + loading if has_capable_truck else float("inf")
+        direct_completion = earliest_start + float(self.truck_time_min[depot, customer]) + float(
+            self.config["network"]["customer_service_time_min"]
+        )
+        direct_return = (
+            float(self.truck_time_min[customer, depot])
+            if self.config["truck"]["return_to_depot"]
+            else 0.0
+        )
+        mask = [has_capable_truck and direct_completion + direct_return <= self.horizon_min + EPSILON]
+        for station_id in self.station_ids:
+            drone_feasible = self._station_can_serve_by_drone(parcel, station_id)
+            latest_arrival = min(parcel.deadline_min, self.horizon_min)
+            mask.append(
+                has_capable_truck
+                and drone_feasible
+                and self._next_freight_trip(
+                    self.now_min, station_id, parcel.weight_kg, latest_arrival
+                ) is not None
+            )
+        for station_id in self.station_ids:
+            station_state = self.stations.get(station_id)
+            station_location = self.truck_location_index.get(station_id)
+            truck_arrival = (
+                earliest_start
+                + float(self.truck_time_min[depot, station_location])
+                + parcel.weight_kg * float(self.config["truck"]["unloading_time_min_per_kg"])
+                if has_capable_truck and station_location is not None
+                else float("inf")
+            )
+            locker_remaining = (
+                station_state.locker_capacity_kg - station_state.locker_load_kg
+                if station_state is not None
+                else -1.0
+            )
+            mask.append(
+                station_state is not None
+                and self._station_can_serve_by_drone(parcel, station_id)
+                and locker_remaining + EPSILON >= parcel.weight_kg
+                and truck_arrival <= self.horizon_min + EPSILON
+            )
+        fallback = not any(mask)
+        if fallback:
+            mask[0] = True  # The correction path can still record an eventual undelivered parcel.
+        return mask, fallback
+
+    def _station_can_serve_by_drone(self, parcel: ParcelState, station_id: str) -> bool:
+        if station_id not in self.stations or station_id not in self.drone_row_index:
+            return False
+        if not parcel.drone_feasible or parcel.weight_kg > float(self.config["network"]["drone_payload_kg"]) + EPSILON:
+            return False
+        distance_km = float(
+            self.drone_distance_m[
+                self.drone_row_index[station_id], self.drone_column_index[parcel.parcel_id]
+            ]
+        ) / 1000.0
+        round_trip_min = (
+            2.0 * distance_km / max(float(self.config["network"]["drone_speed_kmph"]), EPSILON) * 60.0
+            + float(self.config["network"]["customer_service_time_min"])
+        )
+        return (
+            distance_km <= float(self.config["network"]["drone_radius_km"]) + EPSILON
+            and round_trip_min <= float(self.config["network"]["max_drone_round_trip_min"]) + EPSILON
+        )
+
+    def _next_freight_trip(
+        self,
+        ready_min: float,
+        station_id: str,
+        weight_kg: float,
+        latest_arrival_min: float | None = None,
+    ) -> tuple[str, float] | None:
+        station = self.stations.get(station_id)
+        if station is None or not self.truck_available_min or weight_kg > float(self.config["truck"]["capacity_kg"]) + EPSILON:
+            return None
+        station_stop = station.stop_id
         loading = weight_kg * float(self.config["bus"]["terminal_loading_time_min_per_kg"])
         candidates = []
         for trip_id, trip in self.trip_rows.items():
@@ -326,9 +412,27 @@ class DynamicDeliveryEnv:
                 continue
             rows = self.trip_stop_times[trip_id]
             terminal_time = float(rows[0]["departure_time"])
+            terminal_location = self.truck_location_index.get(rows[0]["stop_id"])
+            if terminal_location is None:
+                continue
+            truck_loading = weight_kg * float(self.config["truck"]["loading_time_min_per_kg"])
+            depot = self.truck_location_index["depot_01"]
+            terminal_ready = (
+                max(ready_min, min(self.truck_available_min))
+                + truck_loading
+                + float(self.truck_time_min[depot, terminal_location])
+            )
             target = next((row for row in rows if row["stop_id"] == station_stop), None)
-            if target and ready_min + loading <= terminal_time + EPSILON and self.bus_freight_kg[trip_id] + weight_kg <= float(self.config["bus"]["freight_capacity_kg"]) + EPSILON:
-                candidates.append((float(target["arrival_time"]), trip_id))
+            target_arrival = float(target["arrival_time"]) if target else float("inf")
+            if (
+                target
+                and terminal_ready + loading <= terminal_time + EPSILON
+                and target_arrival <= self.horizon_min + EPSILON
+                and (latest_arrival_min is None or target_arrival <= latest_arrival_min + EPSILON)
+                and self.bus_freight_kg[trip_id] + weight_kg
+                <= float(self.config["bus"]["freight_capacity_kg"]) + EPSILON
+            ):
+                candidates.append((target_arrival, trip_id))
         candidates.sort()
         return (candidates[0][1], candidates[0][0]) if candidates else None
 
@@ -357,7 +461,12 @@ class DynamicDeliveryEnv:
         if station_offset < len(self.station_ids):
             parcel.mode = "TBD"
             station_id = self.station_ids[station_offset]
-            trip = self._next_freight_trip(self.now_min, station_id, parcel.weight_kg)
+            trip = self._next_freight_trip(
+                self.now_min,
+                station_id,
+                parcel.weight_kg,
+                min(parcel.deadline_min, self.horizon_min),
+            )
             if trip is None:  # Defensive; masks normally prevent this.
                 parcel.status = "undelivered"
                 return self._charge_cost("infeasible_action", 1.0)
@@ -555,6 +664,7 @@ class DynamicDeliveryEnv:
             "drone_deliveries": drone_deliveries,
             "total_reward": self.reward_total,
             "infeasible_action_corrections": self.infeasible_action_corrections,
+            "fallback_feasibility_events": self.fallback_feasibility_events,
         }
         return {
             "time_min": self.now_min,
