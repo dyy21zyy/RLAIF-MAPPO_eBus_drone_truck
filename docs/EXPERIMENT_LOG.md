@@ -187,3 +187,12 @@ runs remain blocked on the deferred Stage 5 PyTorch Runtime Gate.
 Implemented baseline policies, seed-controlled evaluation, benchmark/ablation/sensitivity entry points, result schema, aggregation, and temporary-artifact smoke testing. Any smoke outputs are code-validation artifacts only; they are generated in temporary or ignored result directories and are not experimental findings.
 
 No large-scale benchmark was run. No checkpoint, preference label, result table, or RLAIF reward was fabricated. Final RLAIF-enabled PPO/MAPPO work remains blocked on the Stage 5 Runtime Gate and trained Stage 6/7 checkpoints.
+
+# Loop Engineering + TDD Hardening Gate — 2026-06-22
+
+- **Scope:** Code hardening only; no training, checkpoint fabrication, preference-label generation, large-scale benchmark, or performance claim.
+- **TDD coverage:** Assignment masks, `17 + 10H` assignment features, the shared 14-value candidate schema, interval station penalties, explicit truck state, and documentation consistency were implemented through recorded RED/GREEN cycles.
+- **Dependency-light gate:** `117 passed, 6 skipped`; PyTorch-dependent tests skipped because no working PyTorch runtime was available after isolating the broken user-site installation.
+- **Smoke gates:** Stage 3 environment, Stage 4 RLAIF data, and Stage 8 experiment-framework smoke tests passed. Stage 4 offline mode produced prompts/templates but zero labels.
+- **Artifact audit:** No generated `results/`, `runs/`, preference records, or model checkpoint files are tracked. Runtime logs remain ignored.
+- **Boundary:** These are code-validation artifacts, not experimental results. Reward-model and learned-policy training plus benchmark/ablation/sensitivity execution remain AutoDL runtime work.
