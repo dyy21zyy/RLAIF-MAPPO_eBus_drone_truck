@@ -51,6 +51,7 @@ class ParcelState:
     release_time_min: float
     deadline_min: float
     weight_kg: float
+    volume: float
     priority: int
     nearest_station_id: str
     drone_feasible: bool
@@ -214,6 +215,7 @@ class DynamicDeliveryEnv:
             row["parcel_id"]: ParcelState(
                 parcel_id=row["parcel_id"], release_time_min=float(row["release_time"]),
                 deadline_min=float(row["deadline"]), weight_kg=float(row["weight"]),
+                volume=float(row["volume"]),
                 priority=int(row["priority"]), nearest_station_id=row["nearest_station_id"],
                 drone_feasible=self._as_bool(row["drone_feasible"]),
             ) for row in self.parcel_rows

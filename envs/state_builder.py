@@ -6,6 +6,50 @@ from statistics import fmean
 from typing import Any
 
 
+ASSIGNMENT_GLOBAL_FEATURE_NAMES = (
+    "time_norm",
+    "deadline_remaining_norm",
+    "weight_norm",
+    "volume_norm",
+    "priority_urgent",
+    "priority_normal",
+    "priority_low",
+    "drone_feasible_global",
+    "depot_to_customer_time_norm",
+    "nearest_station_distance_norm",
+    "idle_truck_count_norm",
+    "earliest_truck_available_time_norm",
+    "avg_truck_capacity_remaining_norm",
+    "terminal_queue_length_norm",
+    "next_freight_bus_arrival_time_norm",
+    "feasible_freight_bus_count_norm",
+    "avg_bus_freight_remaining_capacity_norm",
+)
+
+ASSIGNMENT_STATION_FEATURE_NAMES = (
+    "station_customer_distance_norm",
+    "station_drone_round_trip_time_norm",
+    "station_drone_feasible",
+    "locker_remaining_capacity_norm",
+    "locker_occupancy_ratio",
+    "idle_drones_norm",
+    "full_batteries_norm",
+    "station_power_margin_norm",
+    "next_feasible_bus_wait_time_norm",
+    "bus_freight_remaining_capacity_to_station_norm",
+)
+
+
+def assignment_feature_names(station_ids: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    """Return the ordered shared assignment schema for sorted station IDs."""
+    station_names = tuple(
+        f"{station_id}.{feature_name}"
+        for station_id in sorted(station_ids)
+        for feature_name in ASSIGNMENT_STATION_FEATURE_NAMES
+    )
+    return ASSIGNMENT_GLOBAL_FEATURE_NAMES + station_names
+
+
 def action_name(env: Any, action_id: int) -> str:
     """Return the stable Stage 3 assignment action name."""
     station_count = len(env.station_ids)
@@ -17,16 +61,81 @@ def action_name(env: Any, action_id: int) -> str:
 
 
 def build_assignment_features(env: Any, parcel: Any) -> list[float]:
-    """Build the normalized Stage 3 assignment observation vector."""
+    """Build the normalized Stage 3 assignment observation vector.
+
+    The MVP has no parcel-volume vehicle constraint or persistent per-trip truck
+    payload yet. Volume is therefore normalized by the largest instance parcel,
+    and average truck capacity is approximated as full for each one-parcel trip.
+    Both approximations keep a stable slot until richer physical data is added.
+    """
     horizon = max(env.horizon_min, 1.0)
-    return [
-        env.now_min / horizon,
-        parcel.weight_kg / max(float(env.config["truck"]["capacity_kg"]), 1.0),
-        max(0.0, parcel.deadline_min - env.now_min) / horizon,
-        parcel.priority / 3.0,
-        float(parcel.drone_feasible),
-        min(env.truck_available_min, default=env.horizon_min) / horizon,
+    truck_capacity = max(float(env.config["truck"]["capacity_kg"]), 1.0)
+    bus_capacity = max(float(env.config["bus"]["freight_capacity_kg"]), 1.0)
+    parcel_count = max(len(env.parcels), 1)
+    trip_count = max(len(env.trip_rows), 1)
+    volume_scale = max((float(row["volume"]) for row in env.parcel_rows), default=1.0)
+    depot = env.truck_location_index["depot_01"]
+    customer = env.truck_location_index[parcel.parcel_id]
+    station_distances = [
+        float(env.drone_distance_m[env.drone_row_index[station_id], env.drone_column_index[parcel.parcel_id]])
+        / 1000.0
+        for station_id in sorted(env.station_ids)
     ]
+    bus_details = [
+        _next_bus_details(env, station_id, parcel)
+        for station_id in sorted(env.station_ids)
+    ]
+    feasible_details = [details for details in bus_details if details[3] is not None]
+    earliest_bus_arrival = min(
+        (wait + linehaul for wait, linehaul, _remaining, _trip_id in feasible_details),
+        default=horizon,
+    )
+    feasible_trip_ids = {trip_id for _wait, _linehaul, _remaining, trip_id in feasible_details}
+    remaining_capacities = [remaining for _wait, _linehaul, remaining, _trip_id in feasible_details]
+    truck_count = max(int(env.config["truck"]["num_trucks"]), 1)
+    global_features = [
+        env.now_min / horizon,
+        max(0.0, parcel.deadline_min - env.now_min) / horizon,
+        parcel.weight_kg / truck_capacity,
+        parcel.volume / max(volume_scale, 1.0),
+        float(parcel.priority == 3),
+        float(parcel.priority == 2),
+        float(parcel.priority == 1),
+        float(any(env._station_can_serve_by_drone(parcel, station_id) for station_id in env.station_ids)),
+        float(env.truck_time_min[depot, customer]) / horizon,
+        min(station_distances, default=0.0) / max(float(env.config["network"]["drone_radius_km"]), 1.0),
+        sum(available <= env.now_min for available in env.truck_available_min) / truck_count,
+        min(env.truck_available_min, default=env.horizon_min) / horizon,
+        float(bool(env.truck_available_min)),
+        sum(len(parcel_ids) for parcel_ids in env.pending_bus_parcels.values()) / parcel_count,
+        earliest_bus_arrival / horizon,
+        len(feasible_trip_ids) / trip_count,
+        (fmean(remaining_capacities) if remaining_capacities else 0.0) / bus_capacity,
+    ]
+    station_features: list[float] = []
+    for station_id in sorted(env.station_ids):
+        station = env.stations[station_id]
+        distance = float(
+            env.drone_distance_m[
+                env.drone_row_index[station_id], env.drone_column_index[parcel.parcel_id]
+            ]
+        ) / 1000.0
+        wait, linehaul, remaining, trip_id = _next_bus_details(env, station_id, parcel)
+        station_features.extend([
+            distance / max(float(env.config["network"]["drone_radius_km"]), 1.0),
+            _drone_time(env, station_id, parcel.parcel_id)
+            / max(float(env.config["network"]["max_drone_round_trip_min"]), 1.0),
+            float(env._station_can_serve_by_drone(parcel, station_id)),
+            max(0.0, station.locker_capacity_kg - station.locker_load_kg)
+            / max(station.locker_capacity_kg, 1.0),
+            station.locker_load_kg / max(station.locker_capacity_kg, 1.0),
+            sum(value <= env.now_min for value in station.drone_available_min) / max(station.drones, 1),
+            station.full_batteries / max(float(env.config["station"]["initial_full_batteries"]), 1.0),
+            _station_power_margin(env, station) / max(station.power_capacity_kw, 1.0),
+            (wait + linehaul) / horizon if trip_id else 1.0,
+            remaining / bus_capacity if trip_id else 0.0,
+        ])
+    return [float(value) for value in global_features + station_features]
 
 
 def _drone_time(env: Any, station_id: str, parcel_id: str) -> float:
@@ -47,7 +156,12 @@ def _station_power_margin(env: Any, station: Any) -> float:
 
 
 def _next_bus_details(env: Any, station_id: str, parcel: Any) -> tuple[float, float, float, str | None]:
-    trip = env._next_freight_trip(env.now_min, station_id, parcel.weight_kg)
+    trip = env._next_freight_trip(
+        env.now_min,
+        station_id,
+        parcel.weight_kg,
+        min(parcel.deadline_min, env.horizon_min),
+    )
     if trip is None:
         return 0.0, 0.0, 0.0, None
     trip_id, arrival = trip
@@ -150,7 +264,7 @@ def build_system_summary(env: Any, parcel: Any) -> dict[str, Any]:
     stations = list(env.stations.values())
     return {
         "idle_truck_count": sum(time <= env.now_min for time in env.truck_available_min),
-        "earliest_truck_available_time": float(min(env.truck_available_min)),
+        "earliest_truck_available_time": float(min(env.truck_available_min, default=env.horizon_min)),
         "average_truck_capacity_remaining": float(env.config["truck"]["capacity_kg"]),
         "terminal_queue_length": sum(len(ids) for ids in env.pending_bus_parcels.values()),
         "next_freight_bus_arrival_time": float(min(next_arrivals)) if next_arrivals else 0.0,
@@ -169,7 +283,7 @@ def build_system_summary(env: Any, parcel: Any) -> dict[str, Any]:
 
 def build_station_states(env: Any, parcel: Any) -> list[dict[str, Any]]:
     rows = []
-    for station_id in env.station_ids:
+    for station_id in sorted(env.station_ids):
         station = env.stations[station_id]
         distance = float(
             env.drone_distance_m[env.drone_row_index[station_id], env.drone_column_index[parcel.parcel_id]]
@@ -179,9 +293,7 @@ def build_station_states(env: Any, parcel: Any) -> list[dict[str, Any]]:
             "station_id": station_id,
             "distance_customer_to_station": distance,
             "drone_round_trip_time": _drone_time(env, station_id, parcel.parcel_id),
-            "drone_feasible_from_station": bool(
-                parcel.drone_feasible and parcel.weight_kg <= float(env.config["network"]["drone_payload_kg"])
-            ),
+            "drone_feasible_from_station": env._station_can_serve_by_drone(parcel, station_id),
             "locker_remaining_capacity": station.locker_capacity_kg - station.locker_load_kg,
             "locker_occupancy_ratio": station.locker_load_kg / max(station.locker_capacity_kg, 1.0),
             "idle_drones": sum(value <= env.now_min for value in station.drone_available_min),

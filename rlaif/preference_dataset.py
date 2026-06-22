@@ -88,6 +88,7 @@ def write_jsonl(path: str | Path, records: Iterable[dict[str, Any]]) -> int:
 
 def validate_assignment_state(record: dict[str, Any]) -> None:
     required = {"state_id", "episode_id", "current_time", "feature_schema_version", "assignment_features",
+                "assignment_feature_names",
                 "parcel", "system_state_summary", "station_states", "candidate_actions",
                 "candidate_action_features", "action_mask"}
     missing = required - record.keys()
@@ -95,6 +96,8 @@ def validate_assignment_state(record: dict[str, Any]) -> None:
         raise ValueError(f"assignment state missing keys: {sorted(missing)}")
     if record["feature_schema_version"] != "v1" or not record["assignment_features"]:
         raise ValueError("invalid assignment feature schema")
+    if len(record["assignment_features"]) != len(record["assignment_feature_names"]):
+        raise ValueError("assignment feature values and names differ in length")
     if len(record["candidate_actions"]) != len(record["action_mask"]):
         raise ValueError("candidate actions and action mask differ in length")
     for action in record["candidate_actions"]:

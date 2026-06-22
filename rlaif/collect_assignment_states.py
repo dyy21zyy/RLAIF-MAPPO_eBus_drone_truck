@@ -10,7 +10,7 @@ from typing import Any
 from data_pipeline.build_instance import build_instance
 from envs import DynamicDeliveryEnv, first_feasible_policy
 from envs.state_builder import (action_name, build_assignment_features, build_candidate_action_features,
-                                build_station_states, build_system_summary)
+                                build_station_states, build_system_summary, assignment_feature_names)
 from rlaif.preference_dataset import validate_assignment_state, write_jsonl
 
 
@@ -33,6 +33,7 @@ def build_assignment_state(env: DynamicDeliveryEnv, episode_id: int) -> dict[str
         "current_time": float(env.now_min),
         "feature_schema_version": "v1",
         "assignment_features": build_assignment_features(env, parcel),
+        "assignment_feature_names": list(assignment_feature_names(env.station_ids)),
         "parcel": {
             "parcel_id": parcel_id,
             "release_time": parcel.release_time_min,
