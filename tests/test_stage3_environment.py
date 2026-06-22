@@ -222,6 +222,110 @@ def test_station_power_overload_is_soft_penalty(environment: DynamicDeliveryEnv)
     assert info["cost_components"]["power_overload"] > 0
 
 
+def test_power_overload_is_integrated_over_elapsed_time(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    station = environment.stations[environment.station_ids[0]]
+    base_load = float(environment.config["station"]["base_load_kw"])
+    bus_load = float(environment.config["bus"]["charging_power_kw"])
+    station.power_capacity_kw = base_load + 20.0
+    station.active_bus_charges = [10.0]
+
+    environment._integrate_station_penalties(0.0, 10.0)
+
+    assert environment.accumulated_power_overload == pytest.approx((bus_load - 20.0) * 10.0)
+
+
+def test_power_overload_duration_only_counts_positive_intervals(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    station = environment.stations[environment.station_ids[0]]
+    station.power_capacity_kw = float(environment.config["station"]["base_load_kw"])
+    environment._integrate_station_penalties(0.0, 4.0)
+    station.active_bus_charges = [10.0]
+    environment._integrate_station_penalties(4.0, 10.0)
+
+    assert environment.accumulated_power_overload_duration == pytest.approx(6.0)
+
+
+def test_locker_overflow_is_integrated_over_elapsed_time(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    station = environment.stations[environment.station_ids[0]]
+    station.locker_load_kg = station.locker_capacity_kg + 2.0
+
+    environment._integrate_station_penalties(0.0, 5.0)
+
+    assert environment.accumulated_locker_overflow == pytest.approx(10.0)
+
+
+def test_locker_overflow_duration_only_counts_positive_intervals(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    station = environment.stations[environment.station_ids[0]]
+    environment._integrate_station_penalties(0.0, 3.0)
+    station.locker_load_kg = station.locker_capacity_kg + 1.0
+    environment._integrate_station_penalties(3.0, 8.0)
+
+    assert environment.accumulated_locker_overflow_duration == pytest.approx(5.0)
+
+
+def test_drone_dispatch_never_creates_negative_locker_load(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.weight_kg = 1.0
+    parcel.drone_feasible = True
+    station_id = environment.station_ids[0]
+    _make_station_drone_reachable(environment, parcel.parcel_id, station_id)
+
+    environment._handle_station_arrival(parcel.parcel_id, station_id)
+
+    assert environment.stations[station_id].locker_load_kg >= 0.0
+
+
+def test_locker_load_persists_until_delayed_drone_dispatch(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.weight_kg = 1.0
+    parcel.drone_feasible = True
+    station_id = environment.station_ids[0]
+    station = environment.stations[station_id]
+    _make_station_drone_reachable(environment, parcel.parcel_id, station_id)
+    station.full_batteries = 0
+    station.battery_ready_min = [environment.now_min + 5.0]
+
+    environment._handle_station_arrival(parcel.parcel_id, station_id)
+
+    assert station.locker_load_kg == pytest.approx(parcel.weight_kg)
+    assert any(event.kind == "drone_dispatch" for event in environment.events)
+
+
+def test_metrics_expose_station_penalty_amounts_and_durations(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    station = environment.stations[environment.station_ids[0]]
+    station.power_capacity_kw = float(environment.config["station"]["base_load_kw"])
+    station.active_bus_charges = [2.0]
+    station.locker_load_kg = station.locker_capacity_kg + 1.0
+    environment._integrate_station_penalties(0.0, 2.0)
+
+    metrics = environment.get_metrics()
+
+    assert metrics["power_overload_amount"] > 0.0
+    assert metrics["power_overload_duration"] == pytest.approx(2.0)
+    assert metrics["locker_overflow_amount"] == pytest.approx(2.0)
+    assert metrics["locker_overflow_duration"] == pytest.approx(2.0)
+
+
 def test_station_drone_cycle_preserves_non_negative_resources(environment: DynamicDeliveryEnv) -> None:
     first_parcel = environment.parcel_rows[0]
     first_parcel["weight"] = "1.0"

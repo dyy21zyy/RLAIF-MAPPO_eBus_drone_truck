@@ -165,7 +165,9 @@ def _drone_time(env: Any, station_id: str, parcel_id: str) -> float:
 
 
 def _station_power_margin(env: Any, station: Any) -> float:
-    battery_load = len(station.battery_ready_min) * station.battery_power_kw
+    battery_load = sum(
+        start <= env.now_min < end for start, end in station.active_battery_charges
+    ) * station.battery_power_kw
     bus_load = len([end for end in station.active_bus_charges if end > env.now_min]) * float(
         env.config["bus"]["charging_power_kw"]
     )

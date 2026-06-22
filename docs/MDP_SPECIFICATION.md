@@ -80,6 +80,13 @@ negative `reward_components`, positive audit `cost_components`, and metrics for
 decision counts, delivery counts, drone deliveries, total reward, and corrected
 infeasible actions. No learned/RLAIF reward is present in Stage 3.
 
+The hardened event loop integrates station penalties over every elapsed interval.
+For each piecewise-constant segment it accumulates overload kW-minutes and locker
+overflow kg-minutes, plus the duration for which each violation is positive. Bus
+charge endings and drone-battery charge starts/endings split intervals. Locker
+mass remains at the station until the explicit drone-dispatch event, so delayed
+dispatches contribute their real occupancy duration.
+
 ## Stage 7 asynchronous MAPPO interface
 
 The Stage 7 learner consumes the Stage 3 decision sequence without changing its

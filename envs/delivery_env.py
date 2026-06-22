@@ -22,11 +22,12 @@ from utils.config import load_config
 EPSILON = 1e-9
 EVENT_PRIORITY = {
     "battery_ready": 0,
-    "drone_return": 1,
-    "parcel_delivery": 2,
-    "parcel_station_arrival": 3,
-    "bus_arrival": 4,
-    "parcel_release": 5,
+    "drone_dispatch": 1,
+    "drone_return": 2,
+    "parcel_delivery": 3,
+    "parcel_station_arrival": 4,
+    "bus_arrival": 5,
+    "parcel_release": 6,
 }
 
 
@@ -75,6 +76,7 @@ class StationState:
     battery_charge_duration_min: float
     locker_load_kg: float = 0.0
     active_bus_charges: list[float] = field(default_factory=list)
+    active_battery_charges: list[tuple[float, float]] = field(default_factory=list)
     drone_available_min: list[float] = field(default_factory=list)
     battery_ready_min: list[float] = field(default_factory=list)
 
@@ -207,6 +209,10 @@ class DynamicDeliveryEnv:
         self.decision_counts = {"assignment": 0, "bus": 0}
         self.infeasible_action_corrections = 0
         self.fallback_feasibility_events = 0
+        self.accumulated_power_overload = 0.0
+        self.accumulated_power_overload_duration = 0.0
+        self.accumulated_locker_overflow = 0.0
+        self.accumulated_locker_overflow_duration = 0.0
         self.peak_station_load_kw = max((float(row["base_load_kw"]) if "base_load_kw" in row else float(self.config["station"]["base_load_kw"]) for row in self.station_rows), default=0.0)
         self.cost_components = {name: 0.0 for name in (
             "passenger_delay", "bus_operating_delay", "parcel_lateness", "energy_cost", "power_overload",
@@ -287,10 +293,12 @@ class DynamicDeliveryEnv:
         reward = 0.0
         while self.events and self.current_decision is None:
             event = heapq.heappop(self.events)
+            target_time = min(max(self.now_min, event.time_min), self.horizon_min)
+            reward += self._integrate_station_penalties(self.now_min, target_time)
             if event.time_min > self.horizon_min + EPSILON:
                 self.now_min = self.horizon_min
                 break
-            self.now_min = max(self.now_min, event.time_min)
+            self.now_min = target_time
             if event.kind == "parcel_release":
                 parcel = self.parcels[event.payload["parcel_id"]]
                 parcel.status = "awaiting_assignment"
@@ -309,6 +317,13 @@ class DynamicDeliveryEnv:
                 reward += self._charge_cost("parcel_lateness", lateness)
             elif event.kind == "parcel_station_arrival":
                 reward += self._handle_station_arrival(event.payload["parcel_id"], event.payload["station_id"])
+            elif event.kind == "drone_dispatch":
+                reward += self._dispatch_drone(
+                    event.payload["parcel_id"],
+                    event.payload["station_id"],
+                    event.payload["drone_index"],
+                    bool(event.payload["battery_reserved"]),
+                )
             elif event.kind == "drone_return":
                 station = self.stations[event.payload["station_id"]]
                 station.drone_available_min[event.payload["drone_index"]] = self.now_min
@@ -317,9 +332,66 @@ class DynamicDeliveryEnv:
                 station.full_batteries += 1
                 if station.battery_ready_min:
                     heapq.heappop(station.battery_ready_min)
+                station.active_battery_charges = [
+                    session for session in station.active_battery_charges
+                    if session[1] > self.now_min + EPSILON
+                ]
         if self.current_decision is None and (not self.events or self.now_min >= self.horizon_min - EPSILON):
+            if self.now_min < self.horizon_min:
+                reward += self._integrate_station_penalties(self.now_min, self.horizon_min)
+                self.now_min = self.horizon_min
             reward += self._finish_episode()
         return reward
+
+    def _station_load_kw(self, station: StationState, time_min: float) -> float:
+        bus_charges = sum(end > time_min + EPSILON for end in station.active_bus_charges)
+        battery_charges = sum(
+            start <= time_min + EPSILON and end > time_min + EPSILON
+            for start, end in station.active_battery_charges
+        )
+        return (
+            float(self.config["station"]["base_load_kw"])
+            + bus_charges * float(self.config["bus"]["charging_power_kw"])
+            + battery_charges * station.battery_power_kw
+        )
+
+    def _integrate_station_penalties(self, previous_time: float, current_time: float) -> float:
+        """Integrate piecewise-constant station overload and overflow in minutes."""
+        start, end = float(previous_time), float(current_time)
+        if end <= start + EPSILON:
+            return 0.0
+        power_amount = power_duration = locker_amount = locker_duration = 0.0
+        for station in self.stations.values():
+            boundaries = {start, end}
+            boundaries.update(
+                charge_end for charge_end in station.active_bus_charges
+                if start < charge_end < end
+            )
+            for charge_start, charge_end in station.active_battery_charges:
+                if start < charge_start < end:
+                    boundaries.add(charge_start)
+                if start < charge_end < end:
+                    boundaries.add(charge_end)
+            ordered = sorted(boundaries)
+            for segment_start, segment_end in zip(ordered, ordered[1:]):
+                duration = segment_end - segment_start
+                station_load_kw = self._station_load_kw(station, segment_start)
+                self.peak_station_load_kw = max(self.peak_station_load_kw, station_load_kw)
+                overload_kw = max(0.0, station_load_kw - station.power_capacity_kw)
+                overflow_kg = max(0.0, station.locker_load_kg - station.locker_capacity_kg)
+                power_amount += overload_kw * duration
+                locker_amount += overflow_kg * duration
+                if overload_kw > EPSILON:
+                    power_duration += duration
+                if overflow_kg > EPSILON:
+                    locker_duration += duration
+        self.accumulated_power_overload += power_amount
+        self.accumulated_power_overload_duration += power_duration
+        self.accumulated_locker_overflow += locker_amount
+        self.accumulated_locker_overflow_duration += locker_duration
+        return self._charge_cost("power_overload", power_amount) + self._charge_cost(
+            "locker_overflow", locker_amount
+        )
 
     def _assignment_mask(self, parcel: ParcelState) -> list[bool]:
         """Return hard-feasibility mask with TD exposed as the last-resort fallback."""
@@ -538,13 +610,8 @@ class DynamicDeliveryEnv:
             energy = float(self.config["bus"]["charging_power_kw"]) * duration_min / 60
             self.bus_soc_kwh[trip_id] = min(float(self.config["bus"]["bus_battery_kwh"]), self.bus_soc_kwh[trip_id] + energy * float(self.config["bus"]["charging_efficiency"]))
             reward += self._charge_cost("energy_cost", energy)
-            base_load = float(self.config["station"]["base_load_kw"])
-            battery_load = len(station.battery_ready_min) * station.battery_power_kw
-            concurrent_bus_load = len(station.active_bus_charges) * float(self.config["bus"]["charging_power_kw"])
-            station_load_kw = base_load + battery_load + concurrent_bus_load
+            station_load_kw = self._station_load_kw(station, self.now_min)
             self.peak_station_load_kw = max(self.peak_station_load_kw, station_load_kw)
-            overload_kw = max(0.0, station_load_kw - station.power_capacity_kw)
-            reward += self._charge_cost("power_overload", overload_kw * duration_min / 60.0)
         delay = duration_min + unloading
         self.bus_delay_min[trip_id] += delay
         reward += self._charge_cost("passenger_delay", duration_min)
@@ -561,30 +628,55 @@ class DynamicDeliveryEnv:
         parcel.status = "at_station"
         station.locker_load_kg += parcel.weight_kg
         reward = 0.0
-        overflow = max(0.0, station.locker_load_kg - station.locker_capacity_kg)
-        if overflow:
-            reward += self._charge_cost("locker_overflow", overflow)
         drone_index = min(range(station.drones), key=station.drone_available_min.__getitem__)
         dispatch = max(self.now_min, station.drone_available_min[drone_index])
         if station.full_batteries <= 0:
             reward += self._charge_cost("battery_shortage", 1.0)
             dispatch = max(dispatch, station.battery_ready_min[0] if station.battery_ready_min else self.horizon_min + 1)
+            battery_reserved = False
         else:
             station.full_batteries -= 1
+            battery_reserved = True
+        _delivery, drone_return = self._drone_delivery_times(parcel_id, station_id, dispatch)
+        station.drone_available_min[drone_index] = drone_return
+        if dispatch > self.now_min + EPSILON:
+            parcel.status = "waiting_for_drone"
+            self._push(dispatch, "drone_dispatch", {
+                "parcel_id": parcel_id,
+                "station_id": station_id,
+                "drone_index": drone_index,
+                "battery_reserved": battery_reserved,
+            })
+            return reward
+        return reward + self._dispatch_drone(parcel_id, station_id, drone_index, battery_reserved)
+
+    def _drone_delivery_times(
+        self, parcel_id: str, station_id: str, dispatch: float
+    ) -> tuple[float, float]:
         distance_km = float(self.drone_distance_m[self.drone_row_index[station_id], self.drone_column_index[parcel_id]]) / 1000
         one_way = distance_km / float(self.config["network"]["drone_speed_kmph"]) * 60
         delivery = dispatch + one_way + float(self.config["network"]["customer_service_time_min"])
         drone_return = delivery + one_way + float(self.config["network"]["drone_turnaround_time_min"])
+        return delivery, drone_return
+
+    def _dispatch_drone(
+        self, parcel_id: str, station_id: str, drone_index: int, battery_reserved: bool
+    ) -> float:
+        parcel, station = self.parcels[parcel_id], self.stations[station_id]
+        if not battery_reserved and station.full_batteries > 0:
+            station.full_batteries -= 1
+        delivery, drone_return = self._drone_delivery_times(parcel_id, station_id, self.now_min)
         station.drone_available_min[drone_index] = drone_return
         station.locker_load_kg = max(0.0, station.locker_load_kg - parcel.weight_kg)
-        if dispatch <= self.horizon_min:
+        if self.now_min <= self.horizon_min:
             self._push(drone_return, "drone_return", {"station_id": station_id, "drone_index": drone_index})
             battery_ready = drone_return + station.battery_charge_duration_min
             heapq.heappush(station.battery_ready_min, battery_ready)
+            station.active_battery_charges.append((drone_return, battery_ready))
             self._push(battery_ready, "battery_ready", {"station_id": station_id})
         parcel.status = "out_for_delivery"
         self._push(delivery, "parcel_delivery", {"parcel_id": parcel_id})
-        return reward
+        return 0.0
 
     def _charge_cost(self, component: str, amount: float) -> float:
         weighted = max(0.0, amount) * float(self.config["reward"][component])
@@ -667,6 +759,10 @@ class DynamicDeliveryEnv:
             "total_reward": self.reward_total,
             "infeasible_action_corrections": self.infeasible_action_corrections,
             "fallback_feasibility_events": self.fallback_feasibility_events,
+            "power_overload_amount": self.accumulated_power_overload,
+            "power_overload_duration": self.accumulated_power_overload_duration,
+            "locker_overflow_amount": self.accumulated_locker_overflow,
+            "locker_overflow_duration": self.accumulated_locker_overflow_duration,
         }
         return {
             "time_min": self.now_min,
