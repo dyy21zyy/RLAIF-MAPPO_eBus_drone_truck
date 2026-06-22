@@ -10,15 +10,7 @@ def collect_environment_metrics(env, *, bus_charging_count=0, bus_charging_energ
     on_time = sum(value <= 0.0 for value in lateness)
     urgent_on_time = sum(float(p.delivered_time_min) <= p.deadline_min for p in urgent)
     station_count = len(env.station_ids)
-    truck_distance = 0.0
-    for parcel in env.parcels.values():
-        if parcel.mode == "TD":
-            a, b = env.truck_location_index["depot_01"], env.truck_location_index[parcel.parcel_id]
-        elif parcel.mode == "TLD" and parcel.station_id:
-            a, b = env.truck_location_index["depot_01"], env.truck_location_index[parcel.station_id]
-        else: continue
-        truck_distance += float(env.truck_distance_m[a, b]) / 1000.0
-        if env.config["truck"].get("return_to_depot", True): truck_distance += float(env.truck_distance_m[b, a]) / 1000.0
+    truck_distance = sum(float(truck.total_distance) for truck in env.trucks)
     costs = env.cost_components
     def raw_cost(name):
         weight = float(env.config["reward"].get(name, 1.0))

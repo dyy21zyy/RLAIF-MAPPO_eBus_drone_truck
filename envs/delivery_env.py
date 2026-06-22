@@ -60,6 +60,7 @@ class ParcelState:
     action_id: int | None = None
     mode: str | None = None
     station_id: str | None = None
+    truck_id: str | None = None
     delivered_time_min: float | None = None
     cost: float = 0.0
 
@@ -79,6 +80,21 @@ class StationState:
     active_battery_charges: list[tuple[float, float]] = field(default_factory=list)
     drone_available_min: list[float] = field(default_factory=list)
     battery_ready_min: list[float] = field(default_factory=list)
+
+
+@dataclass
+class TruckState:
+    """Explicit state for a one-parcel-per-trip truck schedule."""
+
+    truck_id: str
+    current_location_id: str
+    available_time: float
+    remaining_capacity_kg: float
+    onboard_parcels: list[str] = field(default_factory=list)
+    total_distance: float = 0.0
+    total_travel_time: float = 0.0
+    status: str = "idle"
+    route_history: list[list[str]] = field(default_factory=list)
 
 
 @dataclass
@@ -188,6 +204,11 @@ class DynamicDeliveryEnv:
     def bus_action_size(self) -> int:
         return len(self.config["bus"]["charging_actions_sec"])
 
+    @property
+    def truck_available_min(self) -> list[float]:
+        """Compatibility view backed by explicit truck states."""
+        return [truck.available_time for truck in self.trucks]
+
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
         """Reset all mutable state and advance to the first decision epoch."""
         del options  # Reserved for Gymnasium compatibility.
@@ -199,7 +220,16 @@ class DynamicDeliveryEnv:
         self.current_decision: Decision | None = None
         self.terminated = False
         self.truncated = False
-        self.truck_available_min = [0.0] * int(self.config["truck"]["num_trucks"])
+        truck_capacity = float(self.config["truck"]["capacity_kg"])
+        self.trucks = [
+            TruckState(
+                truck_id=f"truck_{index:03d}",
+                current_location_id="depot_01",
+                available_time=0.0,
+                remaining_capacity_kg=truck_capacity,
+            )
+            for index in range(int(self.config["truck"]["num_trucks"]))
+        ]
         self.bus_soc_kwh: dict[str, float] = {trip_id: float(self.config["bus"]["bus_battery_kwh"]) for trip_id in self.trip_rows}
         self.bus_delay_min: dict[str, float] = {trip_id: 0.0 for trip_id in self.trip_rows}
         self.bus_freight_kg: dict[str, float] = {trip_id: 0.0 for trip_id in self.trip_rows}
@@ -295,6 +325,7 @@ class DynamicDeliveryEnv:
             event = heapq.heappop(self.events)
             target_time = min(max(self.now_min, event.time_min), self.horizon_min)
             reward += self._integrate_station_penalties(self.now_min, target_time)
+            self._refresh_truck_states(target_time)
             if event.time_min > self.horizon_min + EPSILON:
                 self.now_min = self.horizon_min
                 break
@@ -342,6 +373,38 @@ class DynamicDeliveryEnv:
                 self.now_min = self.horizon_min
             reward += self._finish_episode()
         return reward
+
+    def _refresh_truck_states(self, time_min: float) -> None:
+        capacity = float(self.config["truck"]["capacity_kg"])
+        for truck in self.trucks:
+            if truck.available_time <= time_min + EPSILON:
+                truck.current_location_id = truck.route_history[-1][-1] if truck.route_history else "depot_01"
+                truck.remaining_capacity_kg = capacity
+                truck.onboard_parcels.clear()
+                truck.status = "idle"
+
+    def _earliest_truck(self) -> TruckState:
+        return min(self.trucks, key=lambda truck: (truck.available_time, truck.truck_id))
+
+    def _record_truck_trip(
+        self,
+        truck: TruckState,
+        parcel: ParcelState,
+        route: list[str],
+        available_time: float,
+        distance_km: float,
+        travel_time_min: float,
+    ) -> None:
+        capacity = float(self.config["truck"]["capacity_kg"])
+        truck.available_time = available_time
+        truck.remaining_capacity_kg = max(0.0, capacity - parcel.weight_kg)
+        truck.onboard_parcels = [parcel.parcel_id]
+        truck.total_distance += distance_km
+        truck.total_travel_time += travel_time_min
+        truck.status = "traveling"
+        truck.current_location_id = route[0]
+        truck.route_history.append(route)
+        parcel.truck_id = truck.truck_id
 
     def _station_load_kw(self, station: StationState, time_min: float) -> float:
         bus_charges = sum(end > time_min + EPSILON for end in station.active_bus_charges)
@@ -515,8 +578,8 @@ class DynamicDeliveryEnv:
         parcel.action_id = action
         if action == 0:
             parcel.mode = "TD"
-            truck = min(range(len(self.truck_available_min)), key=self.truck_available_min.__getitem__)
-            start = max(self.now_min, self.truck_available_min[truck]) + parcel.weight_kg * float(self.config["truck"]["loading_time_min_per_kg"])
+            truck = self._earliest_truck()
+            start = max(self.now_min, truck.available_time) + parcel.weight_kg * float(self.config["truck"]["loading_time_min_per_kg"])
             depot = self.truck_location_index["depot_01"]
             customer = self.truck_location_index[parcel_id]
             travel = float(self.truck_time_min[depot, customer])
@@ -526,9 +589,15 @@ class DynamicDeliveryEnv:
             service = float(self.config["network"]["customer_service_time_min"])
             return_time = float(self.truck_time_min[customer, depot]) if self.config["truck"]["return_to_depot"] else 0.0
             completion = start + travel + service
-            self.truck_available_min[truck] = completion + return_time
+            available_time = completion + return_time
             parcel.status = "in_transit"
             self._push(completion, "parcel_delivery", {"parcel_id": parcel_id})
+            route = ["depot_01", parcel_id]
+            if self.config["truck"]["return_to_depot"]:
+                route.append("depot_01")
+            self._record_truck_trip(
+                truck, parcel, route, available_time, distance_km, travel + return_time
+            )
             truck_cost = float(self.config["truck"]["fixed_dispatch_cost"]) + distance_km * float(self.config["truck"]["cost_per_km"]) + (travel + return_time) * float(self.config["truck"]["cost_per_min"])
             return self._charge_cost("truck_cost", truck_cost)
         station_offset = action - 1
@@ -552,18 +621,24 @@ class DynamicDeliveryEnv:
         parcel.mode = "TLD"
         station_id = self.station_ids[station_offset - len(self.station_ids)]
         parcel.station_id = station_id
-        truck = min(range(len(self.truck_available_min)), key=self.truck_available_min.__getitem__)
-        start = max(self.now_min, self.truck_available_min[truck]) + parcel.weight_kg * float(self.config["truck"]["loading_time_min_per_kg"])
+        truck = self._earliest_truck()
+        start = max(self.now_min, truck.available_time) + parcel.weight_kg * float(self.config["truck"]["loading_time_min_per_kg"])
         depot, station = self.truck_location_index["depot_01"], self.truck_location_index[station_id]
         travel = float(self.truck_time_min[depot, station])
         return_time = float(self.truck_time_min[station, depot]) if self.config["truck"]["return_to_depot"] else 0.0
         arrival = start + travel + parcel.weight_kg * float(self.config["truck"]["unloading_time_min_per_kg"])
-        self.truck_available_min[truck] = arrival + return_time
+        available_time = arrival + return_time
         parcel.status = "to_station"
         self._push(arrival, "parcel_station_arrival", {"parcel_id": parcel_id, "station_id": station_id})
         outbound_distance_km = float(self.truck_distance_m[depot, station]) / 1000
         return_distance_km = float(self.truck_distance_m[station, depot]) / 1000 if self.config["truck"]["return_to_depot"] else 0.0
         distance_km = outbound_distance_km + return_distance_km
+        route = ["depot_01", station_id]
+        if self.config["truck"]["return_to_depot"]:
+            route.append("depot_01")
+        self._record_truck_trip(
+            truck, parcel, route, available_time, distance_km, travel + return_time
+        )
         truck_cost = float(self.config["truck"]["fixed_dispatch_cost"]) + distance_km * float(self.config["truck"]["cost_per_km"]) + (travel + return_time) * float(self.config["truck"]["cost_per_min"])
         return self._charge_cost("truck_cost", truck_cost)
 
@@ -763,6 +838,11 @@ class DynamicDeliveryEnv:
             "power_overload_duration": self.accumulated_power_overload_duration,
             "locker_overflow_amount": self.accumulated_locker_overflow,
             "locker_overflow_duration": self.accumulated_locker_overflow_duration,
+            "truck_total_distance": sum(truck.total_distance for truck in self.trucks),
+            "truck_operating_cost": (
+                self.cost_components["truck_cost"]
+                / max(float(self.config["reward"]["truck_cost"]), EPSILON)
+            ),
         }
         return {
             "time_min": self.now_min,
@@ -794,8 +874,14 @@ class DynamicDeliveryEnv:
                 errors.append(f"{station.station_id} drone availability vector has the wrong size")
         if any(value < -EPSILON for value in self.bus_freight_kg.values()):
             errors.append("a bus has negative freight load")
-        if any(value < -EPSILON for value in self.truck_available_min):
-            errors.append("a truck has negative availability time")
+        valid_truck_statuses = {"idle", "traveling", "loading", "unloading"}
+        for truck in self.trucks:
+            if truck.available_time < -EPSILON:
+                errors.append(f"{truck.truck_id} has negative availability time")
+            if truck.remaining_capacity_kg < -EPSILON:
+                errors.append(f"{truck.truck_id} has negative remaining capacity")
+            if truck.status not in valid_truck_statuses:
+                errors.append(f"{truck.truck_id} has invalid status {truck.status}")
         return errors
 
 

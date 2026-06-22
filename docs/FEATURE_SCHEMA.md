@@ -22,10 +22,10 @@ total length is therefore `17 + 10S`. Exact machine-readable names are exported 
 `envs.state_builder.assignment_feature_names()`.
 
 The current Stage 2 data has no vehicle volume constraint, so parcel volume is
-normalized by the maximum parcel volume in the instance. The one-parcel-per-trip
-truck policy restores capacity after each dispatch, so average remaining truck
-capacity is represented as full when a truck exists. These are explicit stable
-approximations, not omitted fields.
+normalized by the maximum parcel volume in the instance. Average remaining truck
+capacity is derived from the explicit truck states; one-parcel trips restore that
+capacity when their recorded return time is reached. The volume treatment is an
+explicit stable approximation, not an omitted field.
 
 The assignment mask has `1 + 2S` entries in stable TD, TBD-station, TLD-station
 order. Station order is lexicographic by `station_id`.

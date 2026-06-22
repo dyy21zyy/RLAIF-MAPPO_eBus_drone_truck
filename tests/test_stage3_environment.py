@@ -326,6 +326,95 @@ def test_metrics_expose_station_penalty_amounts_and_durations(
     assert metrics["locker_overflow_duration"] == pytest.approx(2.0)
 
 
+def test_earliest_available_truck_is_selected(environment: DynamicDeliveryEnv) -> None:
+    environment.config["truck"]["num_trucks"] = 2
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.weight_kg = 1.0
+    environment.trucks[0].available_time = environment.now_min + 20.0
+    environment.trucks[1].available_time = environment.now_min
+
+    environment._apply_assignment(parcel.parcel_id, 0)
+
+    assert parcel.truck_id == "truck_001"
+
+
+def test_truck_distance_accumulates_for_td(environment: DynamicDeliveryEnv) -> None:
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.weight_kg = 1.0
+    depot = environment.truck_location_index["depot_01"]
+    customer = environment.truck_location_index[parcel.parcel_id]
+    expected = (
+        float(environment.truck_distance_m[depot, customer])
+        + float(environment.truck_distance_m[customer, depot])
+    ) / 1000.0
+
+    environment._apply_assignment(parcel.parcel_id, 0)
+
+    assert environment.trucks[0].total_distance == pytest.approx(expected)
+
+
+def test_truck_distance_accumulates_for_tld(environment: DynamicDeliveryEnv) -> None:
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.weight_kg = 1.0
+    station_id = environment.station_ids[0]
+    depot = environment.truck_location_index["depot_01"]
+    station = environment.truck_location_index[station_id]
+    expected = (
+        float(environment.truck_distance_m[depot, station])
+        + float(environment.truck_distance_m[station, depot])
+    ) / 1000.0
+
+    environment._apply_assignment(parcel.parcel_id, 1 + len(environment.station_ids))
+
+    assert environment.trucks[0].total_distance == pytest.approx(expected)
+
+
+def test_truck_remaining_capacity_never_becomes_negative(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.weight_kg = float(environment.config["truck"]["capacity_kg"])
+
+    environment._apply_assignment(parcel.parcel_id, 0)
+
+    assert all(truck.remaining_capacity_kg >= 0.0 for truck in environment.trucks)
+
+
+def test_truck_route_history_records_td_and_tld_paths(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.config["truck"]["num_trucks"] = 2
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.weight_kg = 1.0
+    station_id = environment.station_ids[0]
+
+    environment._apply_assignment(parcel.parcel_id, 0)
+    environment._apply_assignment(parcel.parcel_id, 1 + len(environment.station_ids))
+    routes = [route for truck in environment.trucks for route in truck.route_history]
+
+    assert ["depot_01", parcel.parcel_id, "depot_01"] in routes
+    assert ["depot_01", station_id, "depot_01"] in routes
+
+
+def test_metrics_report_truck_distance_and_operating_cost(
+    environment: DynamicDeliveryEnv,
+) -> None:
+    environment.reset()
+    parcel = _current_parcel(environment)
+    parcel.weight_kg = 1.0
+    environment._apply_assignment(parcel.parcel_id, 0)
+
+    metrics = environment.get_metrics()
+
+    assert metrics["truck_total_distance"] > 0.0
+    assert metrics["truck_operating_cost"] > 0.0
+
+
 def test_station_drone_cycle_preserves_non_negative_resources(environment: DynamicDeliveryEnv) -> None:
     first_parcel = environment.parcel_rows[0]
     first_parcel["weight"] = "1.0"

@@ -123,7 +123,10 @@ def build_assignment_features(env: Any, parcel: Any) -> list[float]:
         min(station_distances, default=0.0) / max(float(env.config["network"]["drone_radius_km"]), 1.0),
         sum(available <= env.now_min for available in env.truck_available_min) / truck_count,
         min(env.truck_available_min, default=env.horizon_min) / horizon,
-        float(bool(env.truck_available_min)),
+        (
+            fmean(truck.remaining_capacity_kg for truck in env.trucks) / truck_capacity
+            if env.trucks else 0.0
+        ),
         sum(len(parcel_ids) for parcel_ids in env.pending_bus_parcels.values()) / parcel_count,
         earliest_bus_arrival / horizon,
         len(feasible_trip_ids) / trip_count,
@@ -299,7 +302,9 @@ def build_system_summary(env: Any, parcel: Any) -> dict[str, Any]:
     return {
         "idle_truck_count": sum(time <= env.now_min for time in env.truck_available_min),
         "earliest_truck_available_time": float(min(env.truck_available_min, default=env.horizon_min)),
-        "average_truck_capacity_remaining": float(env.config["truck"]["capacity_kg"]),
+        "average_truck_capacity_remaining": (
+            fmean(truck.remaining_capacity_kg for truck in env.trucks) if env.trucks else 0.0
+        ),
         "terminal_queue_length": sum(len(ids) for ids in env.pending_bus_parcels.values()),
         "next_freight_bus_arrival_time": float(min(next_arrivals)) if next_arrivals else 0.0,
         "feasible_freight_bus_count_before_deadline": sum(

@@ -50,7 +50,8 @@ arrivals for that trip.
 ## State, termination, and invariants
 
 Mutable state includes simulation time; parcel status and delayed cost ledger;
-truck availability; per-trip state of charge, delay, and freight mass; and each
+explicit per-truck location, availability, remaining capacity, onboard parcel,
+distance, travel time, status, and route history; per-trip state of charge, delay, and freight mass; and each
 station's locker mass, drones, batteries, charging sessions, and power limits.
 The episode terminates after all events through the delivery horizon are processed.
 Every parcel not delivered by then incurs a priority-weighted undelivered cost.

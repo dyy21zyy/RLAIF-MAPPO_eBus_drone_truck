@@ -57,7 +57,9 @@ def run_smoke_test(config_path: str | Path, output_root: str | Path | None = Non
             "any_nan": False,
             "any_negative_locker_load": any(station.locker_load_kg < 0 for station in env.stations.values()),
             "any_negative_battery_count": any(station.full_batteries < 0 for station in env.stations.values()),
-            "any_negative_truck_capacity": False,
+            "any_negative_truck_capacity": any(
+                truck.remaining_capacity_kg < 0 for truck in env.trucks
+            ),
             "invariants": "passed",
         }
     finally:
