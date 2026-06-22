@@ -203,7 +203,7 @@ def train_reward_model(config: dict[str, Any], preferences_path: str | Path | No
     reward_mean = float(all_train_scores.mean())
     reward_std = float(all_train_scores.std(unbiased=False))
     checkpoint = {
-        "model_state_dict": model.state_dict(), "config": config, "feature_schema_version": "v1",
+        "model_state_dict": model.state_dict(), "config": config, "feature_schema_version": "v2",
         "state_feature_dim": state_dim, "action_feature_dim": action_dim, "num_actions": num_actions,
         "action_mapping": action_mapping,
         **{key: value.cpu() for key, value in stats.items()},

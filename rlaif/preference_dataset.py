@@ -9,22 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from envs.state_builder import CANDIDATE_ACTION_FEATURE_NAMES
+
 NO_USABLE_LABELS_MESSAGE = (
     "No usable AI/human preference labels found. Run Stage 4 in API mode or replay mode "
     "with valid labels before training the reward model."
 )
-ACTION_FEATURE_KEYS = (
-    "feasible_flag",
-    "estimated_delivery_time",
-    "estimated_lateness",
-    "estimated_truck_distance",
-    "estimated_truck_time",
-    "estimated_bus_wait_time",
-    "estimated_bus_linehaul_time",
-    "estimated_drone_time",
-    "estimated_locker_load_after_assignment",
-    "estimated_station_power_margin",
-)
+ACTION_FEATURE_KEYS = CANDIDATE_ACTION_FEATURE_NAMES
 CANDIDATE_FEATURE_KEYS = {"action_id", "action_name", *ACTION_FEATURE_KEYS, "infeasibility_reasons"}
 
 
@@ -94,7 +85,7 @@ def validate_assignment_state(record: dict[str, Any]) -> None:
     missing = required - record.keys()
     if missing:
         raise ValueError(f"assignment state missing keys: {sorted(missing)}")
-    if record["feature_schema_version"] != "v1" or not record["assignment_features"]:
+    if record["feature_schema_version"] not in {"v1", "v2"} or not record["assignment_features"]:
         raise ValueError("invalid assignment feature schema")
     if len(record["assignment_features"]) != len(record["assignment_feature_names"]):
         raise ValueError("assignment feature values and names differ in length")
@@ -180,7 +171,7 @@ def load_preference_examples(preferences_path: str | Path, assignment_states_pat
         if chosen not in {action_a, action_b} or rejected not in {action_a, action_b} or chosen == rejected:
             continue
         state = state_by_id.get(str(record.get("state_id")))
-        if state is None or state.get("feature_schema_version") != "v1":
+        if state is None or state.get("feature_schema_version") not in {"v1", "v2"}:
             continue
         candidates = state.get("candidate_action_features", {})
         if chosen not in candidates or rejected not in candidates:

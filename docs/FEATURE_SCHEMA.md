@@ -52,34 +52,32 @@ Every decision observation is a dictionary with `agent`, `entity_id`, `time_min`
 IDs are `trip_id:station_id`. Global MAPPO state and padding remain deferred until
 the MAPPO stage.
 
-## Stage 4 assignment preference schema (`v1`)
+## Stage 4 assignment preference schema (`v2`)
 
 Stage 4 reuses `envs/state_builder.py` for the `17 + 10S` assignment observation
 and all objective action estimates. An assignment JSONL record contains parcel,
 system, and station context; all `1 + 2H` named candidates; the Stage 3 action
-mask; and a map from action name to objective features. The candidate feature
-keys are `action_id`, `action_name`, `feasible_flag`,
-`estimated_delivery_time`, `estimated_lateness`, `estimated_truck_distance`,
-`estimated_truck_time`, `estimated_bus_wait_time`,
-`estimated_bus_linehaul_time`, `estimated_drone_time`,
-`estimated_locker_load_after_assignment`, `estimated_station_power_margin`, and
-`infeasibility_reasons`. No preference score is part of this schema.
+mask; and a map from action name to objective features. Human-readable fields are
+`action_id`, `action_name`, and `infeasibility_reasons`. The ordered numeric
+features are the TD/TBD/TLD one-hot values, normalized 1-based station index,
+feasibility flag, and normalized delivery time, lateness, truck distance, truck
+time, bus wait, bus linehaul, drone time, locker load after assignment, and
+station power margin. No preference score is part of this schema.
 
 Prompt records use `prompt_version=v1` and store the state/pair IDs, prompt text,
 and pair-selection metadata. Validated preference records add evaluator model,
 temperature, parser/validation status, raw response, and training usability;
 confidence below `0.6` is retained but unusable by default.
 
-## Stage 5 reward-model input schema (`v1`)
+## Stage 5 reward-model input schema (`v2`)
 
 Stage 5 joins each valid preference to its Stage 4 `state_id`. Both alternatives
 reuse the expanded `assignment_features` vector. Per-action input is the
-following ordered numeric vector from `candidate_action_features[ACTION_NAME]`:
-`feasible_flag`, `estimated_delivery_time`, `estimated_lateness`,
-`estimated_truck_distance`, `estimated_truck_time`, `estimated_bus_wait_time`,
-`estimated_bus_linehaul_time`, `estimated_drone_time`,
-`estimated_locker_load_after_assignment`, and
-`estimated_station_power_margin`. `action_id` is embedded separately. Textual
+following 14-value ordered numeric vector from
+`candidate_action_features[ACTION_NAME]`: `action_type_TD`, `action_type_TBD`,
+`action_type_TLD`, `action_station_index_norm`, `feasible_flag`, followed by the
+nine normalized objective estimates listed above. `action_id` is embedded
+separately. Textual
 reasons and `infeasibility_reasons` are not model inputs.
 
 State and action means and population standard deviations are fitted using both

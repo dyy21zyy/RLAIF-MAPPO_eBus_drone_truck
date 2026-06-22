@@ -39,6 +39,23 @@ ASSIGNMENT_STATION_FEATURE_NAMES = (
     "bus_freight_remaining_capacity_to_station_norm",
 )
 
+CANDIDATE_ACTION_FEATURE_NAMES = (
+    "action_type_TD",
+    "action_type_TBD",
+    "action_type_TLD",
+    "action_station_index_norm",
+    "feasible_flag",
+    "estimated_delivery_time_norm",
+    "estimated_lateness_norm",
+    "estimated_truck_distance_norm",
+    "estimated_truck_time_norm",
+    "estimated_bus_wait_time_norm",
+    "estimated_bus_linehaul_time_norm",
+    "estimated_drone_time_norm",
+    "estimated_locker_load_after_assignment_norm",
+    "estimated_station_power_margin_norm",
+)
+
 
 def assignment_feature_names(station_ids: list[str] | tuple[str, ...]) -> tuple[str, ...]:
     """Return the ordered shared assignment schema for sorted station IDs."""
@@ -172,7 +189,7 @@ def _next_bus_details(env: Any, station_id: str, parcel: Any) -> tuple[float, fl
 
 
 def build_candidate_action_features(env: Any, parcel: Any, action_id: int, feasible: bool) -> dict[str, Any]:
-    """Build objective estimates for one action without assigning a preference score."""
+    """Build the ordered, normalized objective context for one candidate action."""
     station_count = len(env.station_ids)
     truck_capacity = float(env.config["truck"]["capacity_kg"])
     reasons: list[str] = []
@@ -185,18 +202,23 @@ def build_candidate_action_features(env: Any, parcel: Any, action_id: int, feasi
     estimated_drone_time = 0.0
     estimated_locker_load = 0.0
     estimated_power_margin = 0.0
+    station = None
+    is_td = action_id == 0
+    is_tbd = 0 < action_id <= station_count
+    is_tld = action_id > station_count
+    station_index = None if is_td else (action_id - 1) % station_count
 
-    if action_id == 0:
+    if is_td:
         depot = env.truck_location_index["depot_01"]
         customer = env.truck_location_index[parcel.parcel_id]
         estimated_truck_distance = float(env.truck_distance_m[depot, customer]) / 1000.0
         estimated_truck_time = float(env.truck_time_min[depot, customer])
-        start = max(env.now_min, min(env.truck_available_min)) + parcel.weight_kg * float(
+        start = max(env.now_min, min(env.truck_available_min, default=env.horizon_min)) + parcel.weight_kg * float(
             env.config["truck"]["loading_time_min_per_kg"]
         )
         delivery = start + estimated_truck_time + float(env.config["network"]["customer_service_time_min"])
     else:
-        station_index = (action_id - 1) % station_count
+        assert station_index is not None
         station_id = env.station_ids[station_index]
         station = env.stations[station_id]
         estimated_drone_time = _drone_time(env, station_id, parcel.parcel_id)
@@ -210,7 +232,7 @@ def build_candidate_action_features(env: Any, parcel: Any, action_id: int, feasi
             reasons.append("no_station_drone")
         if station.full_batteries <= 0:
             reasons.append("no_full_battery_now")
-        if action_id <= station_count:
+        if is_tbd:
             estimated_bus_wait, estimated_bus_linehaul, bus_remaining, trip_id = _next_bus_details(
                 env, station_id, parcel
             )
@@ -226,7 +248,7 @@ def build_candidate_action_features(env: Any, parcel: Any, action_id: int, feasi
             station_location = env.truck_location_index[station_id]
             estimated_truck_distance = float(env.truck_distance_m[depot, station_location]) / 1000.0
             estimated_truck_time = float(env.truck_time_min[depot, station_location])
-            start = max(env.now_min, min(env.truck_available_min)) + parcel.weight_kg * float(
+            start = max(env.now_min, min(env.truck_available_min, default=env.horizon_min)) + parcel.weight_kg * float(
                 env.config["truck"]["loading_time_min_per_kg"]
             )
             delivery = start + estimated_truck_time + parcel.weight_kg * float(
@@ -234,19 +256,29 @@ def build_candidate_action_features(env: Any, parcel: Any, action_id: int, feasi
             ) + estimated_drone_time / 2.0
     if not feasible and not reasons:
         reasons.append("masked_by_environment")
+    horizon = max(float(env.horizon_min), 1.0)
+    max_truck_distance_km = max(float(env.truck_distance_m.max()) / 1000.0, 1.0)
+    locker_capacity = max(float(station.locker_capacity_kg), 1.0) if station is not None else 1.0
+    power_capacity = max(float(station.power_capacity_kw), 1.0) if station is not None else 1.0
     return {
         "action_id": action_id,
         "action_name": action_name(env, action_id),
-        "feasible_flag": bool(feasible),
-        "estimated_delivery_time": float(delivery),
-        "estimated_lateness": max(0.0, float(delivery) - parcel.deadline_min),
-        "estimated_truck_distance": float(estimated_truck_distance),
-        "estimated_truck_time": float(estimated_truck_time),
-        "estimated_bus_wait_time": float(estimated_bus_wait),
-        "estimated_bus_linehaul_time": float(estimated_bus_linehaul),
-        "estimated_drone_time": float(estimated_drone_time),
-        "estimated_locker_load_after_assignment": float(estimated_locker_load),
-        "estimated_station_power_margin": float(estimated_power_margin),
+        "action_type_TD": float(is_td),
+        "action_type_TBD": float(is_tbd),
+        "action_type_TLD": float(is_tld),
+        "action_station_index_norm": (
+            0.0 if station_index is None else float(station_index + 1) / max(station_count, 1)
+        ),
+        "feasible_flag": float(feasible),
+        "estimated_delivery_time_norm": float(delivery) / horizon,
+        "estimated_lateness_norm": max(0.0, float(delivery) - parcel.deadline_min) / horizon,
+        "estimated_truck_distance_norm": float(estimated_truck_distance) / max_truck_distance_km,
+        "estimated_truck_time_norm": float(estimated_truck_time) / horizon,
+        "estimated_bus_wait_time_norm": float(estimated_bus_wait) / horizon,
+        "estimated_bus_linehaul_time_norm": float(estimated_bus_linehaul) / horizon,
+        "estimated_drone_time_norm": float(estimated_drone_time) / horizon,
+        "estimated_locker_load_after_assignment_norm": float(estimated_locker_load) / locker_capacity,
+        "estimated_station_power_margin_norm": float(estimated_power_margin) / power_capacity,
         "infeasibility_reasons": reasons,
     }
 

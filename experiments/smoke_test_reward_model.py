@@ -24,7 +24,7 @@ def build_fixture(directory: Path, count: int = 10) -> tuple[Path, Path]:
     for index in range(count):
         state_id = f"smoke-state-{index}"
         states.append({
-            "state_id": state_id, "feature_schema_version": "v1",
+            "state_id": state_id, "feature_schema_version": "v2",
             "assignment_features": [index / 10, 0.1, 0.5, 1.0, 1.0, 0.0],
             "candidate_action_features": {
                 "TD": _action(0, "TD", 0.2 + index / 100),

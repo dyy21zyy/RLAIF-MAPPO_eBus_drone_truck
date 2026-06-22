@@ -11,9 +11,9 @@ PROMPT_VERSION = "v1"
 def _best(actions: list[dict[str, Any]], features: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
     feasible = [action for action in actions if action["feasible"]]
     return min(feasible, key=lambda action: (
-        features[action["action_name"]]["estimated_lateness"],
-        features[action["action_name"]]["estimated_delivery_time"],
-        features[action["action_name"]]["estimated_truck_distance"],
+        features[action["action_name"]]["estimated_lateness_norm"],
+        features[action["action_name"]]["estimated_delivery_time_norm"],
+        features[action["action_name"]]["estimated_truck_distance_norm"],
         action["action_id"],
     ), default=None)
 
@@ -28,11 +28,11 @@ def select_action_pairs(state: dict[str, Any]) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     nearest_tbd = min(
         (action for action in tbd if action["feasible"]),
-        key=lambda action: features[action["action_name"]]["estimated_drone_time"], default=None,
+        key=lambda action: features[action["action_name"]]["estimated_drone_time_norm"], default=None,
     )
     nearest_tld = min(
         (action for action in tld if action["feasible"]),
-        key=lambda action: features[action["action_name"]]["estimated_drone_time"], default=None,
+        key=lambda action: features[action["action_name"]]["estimated_drone_time_norm"], default=None,
     )
     if td and nearest_tbd:
         pairs.append((td["action_name"], nearest_tbd["action_name"]))

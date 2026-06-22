@@ -31,7 +31,7 @@ def build_assignment_state(env: DynamicDeliveryEnv, episode_id: int) -> dict[str
         "state_id": f"episode_{episode_id:04d}:{parcel_id}:{env.now_min:.6f}",
         "episode_id": episode_id,
         "current_time": float(env.now_min),
-        "feature_schema_version": "v1",
+        "feature_schema_version": "v2",
         "assignment_features": build_assignment_features(env, parcel),
         "assignment_feature_names": list(assignment_feature_names(env.station_ids)),
         "parcel": {

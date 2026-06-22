@@ -12,8 +12,7 @@ class RuleBasedPolicy:
         parcel = env.parcels[env.current_decision.event.payload["parcel_id"]]
         def score(action):
             f = build_candidate_action_features(env, parcel, action, True)
-            capacity = max(1.0, float(env.config["station"]["locker_capacity_kg"]))
-            occupancy = float(f["estimated_locker_load_after_assignment"]) / capacity
-            power_stress = max(0.0, -float(f["estimated_station_power_margin"]))
-            return (float(f["estimated_lateness"]), float(f["estimated_truck_distance"]), occupancy, power_stress, action)
+            occupancy = float(f["estimated_locker_load_after_assignment_norm"])
+            power_stress = max(0.0, -float(f["estimated_station_power_margin_norm"]))
+            return (float(f["estimated_lateness_norm"]), float(f["estimated_truck_distance_norm"]), occupancy, power_stress, action)
         return min(feasible, key=score)
