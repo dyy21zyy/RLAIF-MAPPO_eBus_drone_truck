@@ -48,6 +48,7 @@ def build_prompt_text(state: dict[str, Any], action_a: str, action_b: str) -> st
     context = {
         "parcel": state["parcel"],
         "system_state_summary": state["system_state_summary"],
+        "data_sources": state.get("data_sources", {}),
         "action_a": {"name": action_a, **state["candidate_action_features"][action_a]},
         "action_b": {"name": action_b, **state["candidate_action_features"][action_b]},
     }
@@ -58,6 +59,8 @@ Consider: (1) hard feasibility; (2) deadline reliability; (3) parcel weight and 
 (11) remote customer service; and (12) avoiding excessive passenger-service impact.
 Do not choose an infeasible action unless both options are infeasible.
 If both actions are feasible, choose the one with the better operational trade-off.
+Use the data_sources block to distinguish real transit observations from inherited or fallback settings.
+Do not treat inherited or fallback fields as real-world observations.
 Return only valid JSON. chosen must be either action_a or action_b. rejected must be the other action.
 Use exactly this schema: {{"chosen":"ACTION_NAME","rejected":"ACTION_NAME","confidence":0.0,"reason":"..."}}
 Do not include markdown or surrounding prose.

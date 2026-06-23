@@ -187,6 +187,7 @@ class DynamicDeliveryEnv:
             raise InstanceValidationError("Distance and time matrices must contain finite non-negative values")
 
         self.trip_rows = {row["trip_id"]: row for row in trip_rows}
+        self.data_sources = self._load_data_sources()
         self.trip_stop_times: dict[str, list[dict[str, str]]] = {}
         for row in stop_time_rows:
             self.trip_stop_times.setdefault(row["trip_id"], []).append(row)
@@ -195,6 +196,35 @@ class DynamicDeliveryEnv:
         missing_trips = set(self.trip_rows) - set(self.trip_stop_times)
         if missing_trips:
             raise InstanceValidationError(f"Trips have no stop times: {sorted(missing_trips)}")
+
+    def _load_data_sources(self) -> dict[str, dict[str, Any]]:
+        """Return source-provenance entries keyed for observations/RLAIF context."""
+
+        entries: dict[str, dict[str, Any]] = {}
+        manifest_sources = self.manifest.get("data_provenance", {})
+        if isinstance(manifest_sources, dict):
+            for field, value in manifest_sources.items():
+                key = str(field).replace(" ", "_")
+                if isinstance(value, dict):
+                    entries[key] = value
+        provenance_name = self.manifest.get("artifacts", {}).get("data_provenance")
+        if provenance_name:
+            provenance_path = self.instance_dir / provenance_name
+            if provenance_path.is_file():
+                try:
+                    loaded = json.loads(provenance_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    loaded = {}
+                for entry in loaded.get("entries", []):
+                    field = str(entry.get("field", "")).replace(" ", "_")
+                    if field:
+                        entries[field] = {
+                            "source_type": entry.get("source_type", ""),
+                            "source_file": entry.get("source_file", ""),
+                            "notes": entry.get("notes", ""),
+                            "value": entry.get("value"),
+                        }
+        return entries
 
     @property
     def assignment_action_size(self) -> int:

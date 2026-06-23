@@ -20,6 +20,10 @@
 - Keep units in field names (`_km`, `_min`, `_kg`, `_kw`, `_kwh`, `_sec`).
 - Treat configuration as experiment input; avoid hidden constants.
 - Validate malformed and missing configuration files with actionable errors.
+- In `original_scale_real_transit` mode, never silently fabricate real transit
+  data. Real stop_times must come from CSVs; inherited/synthesized stop_times
+  must be marked `original_ebus_drone`, and fixture data must remain
+  `fallback_test_only` in documentation.
 
 ## Logging and artifacts
 
@@ -208,3 +212,17 @@
 - Smoke output validates wiring only. It is neither a performance estimate nor a paper-ready table.
 - Compare methods only on the identical Stage 2 instance and identical seed list.
 - Keep generated `results/`, `runs/`, checkpoints, and preference artifacts out of Git.
+
+## Original-scale real-transit pitfalls
+
+- Do not treat the deterministic fallback corridor as the formal research data
+  setting. It is for smoke tests.
+- Do not describe committed fixture CSVs under `tests/fixtures/transit` as real
+  crawled data. They exercise the loader only.
+- Do not use `headway_min` to approximate bus movement when real stop_times are
+  available. Stage 3 bus arrivals should follow the stop_times table.
+- If real integrated-station annotations are unavailable, select stations from
+  real stops with the inherited eBus-Drone count/spacing policy and record that
+  source.
+- If real parcel, station load, or truck data are unavailable, record the
+  inherited or explicit-extension source rather than calling the value real.

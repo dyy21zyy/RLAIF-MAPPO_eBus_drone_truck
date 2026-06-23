@@ -1,0 +1,25 @@
+stop_id,stop_name,lat,lon,stop_sequence
+real_stop_01,Real Stop 01,31.2000,121.4000,1
+real_stop_02,Real Stop 02,31.2010,121.4020,2
+real_stop_03,Real Stop 03,31.2020,121.4040,3
+real_stop_04,Real Stop 04,31.2030,121.4060,4
+real_stop_05,Real Stop 05,31.2040,121.4080,5
+real_stop_06,Real Stop 06,31.2050,121.4100,6
+real_stop_07,Real Stop 07,31.2060,121.4120,7
+real_stop_08,Real Stop 08,31.2070,121.4140,8
+real_stop_09,Real Stop 09,31.2080,121.4160,9
+real_stop_10,Real Stop 10,31.2090,121.4180,10
+real_stop_11,Real Stop 11,31.2100,121.4200,11
+real_stop_12,Real Stop 12,31.2110,121.4220,12
+real_stop_13,Real Stop 13,31.2120,121.4240,13
+real_stop_14,Real Stop 14,31.2130,121.4260,14
+real_stop_15,Real Stop 15,31.2140,121.4280,15
+real_stop_16,Real Stop 16,31.2150,121.4300,16
+real_stop_17,Real Stop 17,31.2160,121.4320,17
+real_stop_18,Real Stop 18,31.2170,121.4340,18
+real_stop_19,Real Stop 19,31.2180,121.4360,19
+real_stop_20,Real Stop 20,31.2190,121.4380,20
+real_stop_21,Real Stop 21,31.2200,121.4400,21
+real_stop_22,Real Stop 22,31.2210,121.4420,22
+real_stop_23,Real Stop 23,31.2220,121.4440,23
+real_stop_24,Real Stop 24,31.2230,121.4460,24

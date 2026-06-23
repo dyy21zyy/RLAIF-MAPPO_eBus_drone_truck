@@ -47,6 +47,7 @@ def build_assignment_state(env: DynamicDeliveryEnv, episode_id: int) -> dict[str
             "drone_feasible": parcel.drone_feasible,
         },
         "system_state_summary": build_system_summary(env, parcel),
+        "data_sources": getattr(env, "data_sources", {}),
         "station_states": build_station_states(env, parcel),
         "candidate_actions": candidates,
         "candidate_action_features": features,

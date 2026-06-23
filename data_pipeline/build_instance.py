@@ -22,6 +22,12 @@ REQUIRED_FILENAMES = ["road_graph.graphml", "road_nodes.csv", "road_edges.csv", 
 def build_instance(config_path: str | Path, fallback: bool = False, output_root: str | Path | None = None, custom_bus_route: str | Path | None = None) -> dict[str, Any]:
     config_path = Path(config_path)
     config = load_config(config_path)
+    if config.get("data_mode") == "original_scale_real_transit":
+        from data_pipeline.original_scale_real_transit import build_original_scale_real_transit_instance
+
+        if fallback:
+            raise ValueError("original_scale_real_transit mode uses source-aware real/inherited data, not fallback=True")
+        return build_original_scale_real_transit_instance(config_path, output_root=output_root)
     root = Path(output_root) if output_root else PROJECT_ROOT / "data" / "processed"
     output_dir = root / str(config["city"]["name"])
     output_dir.mkdir(parents=True, exist_ok=True)

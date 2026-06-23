@@ -1,0 +1,5 @@
+trip_id,route_id,direction_id,service_id,freight_allowed
+real_trip_001,R-test,0,weekday,true
+real_trip_002,R-test,0,weekday,true
+real_trip_003,R-test,0,weekday,true
+real_trip_004,R-test,0,weekday,true

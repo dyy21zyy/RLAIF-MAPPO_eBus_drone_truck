@@ -15,6 +15,13 @@ feature into `chosen`/`rejected`. Those values are permitted as prompt context
 and for choosing which action pair to present, but they are not labels. Stage 4
 does not train a reward model or implement PPO/MAPPO.
 
+For `original_scale_real_transit` instances, prompts include source-aware
+transit context. This helps the evaluator distinguish real stop/timetable
+observations from inherited eBus-Drone settings, explicit truck-extension
+assumptions, or fallback_test_only smoke fixtures. Source wording is context
+only; it must never create labels or imply that inherited/synthetic fields are
+real-world observations.
+
 ## Workflow
 
 1. `collect_assignment_states` runs the Stage 3 environment and writes

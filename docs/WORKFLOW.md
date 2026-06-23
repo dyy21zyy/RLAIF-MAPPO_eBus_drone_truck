@@ -17,6 +17,10 @@ manual intervention.
 2. **Stage 2 — data pipeline (implemented)**
    - Build a Shanghai Yangpu instance from approved public/custom inputs.
    - Always retain a deterministic fallback instance that needs no network.
+   - For formal AutoDL experiments, use `data_mode:
+     original_scale_real_transit` so scale/settings inherit the previous
+     eBus-Drone article while real transit stop/timetable CSVs are used where
+     available.
 3. **Stage 3 — event-driven MDP (implemented)**
    - Consume a validated Stage 2 instance.
    - Implement event/state/action/reward behavior and invariant tests.
@@ -52,3 +56,15 @@ python -m pytest -q tests/test_stage3_environment.py
 The smoke gate forces the deterministic Stage 2 fallback build, completes an
 episode with the first-feasible baseline, and checks simulator invariants after
 every assignment and bus decision.
+
+## Original-scale real-transit verification
+
+```bash
+python -m experiments.smoke_test_original_scale_real_transit_data --config configs/original_scale_real_transit.yaml
+python -m experiments.smoke_test_original_scale_real_transit_env --config configs/original_scale_real_transit.yaml
+python -m experiments.smoke_test_original_scale_real_transit_rlaif --config configs/original_scale_real_transit.yaml
+```
+
+These checks use fixture transit CSVs and temporary directories. They verify
+interfaces, provenance, scale reports, timetable-driven bus events, and
+source-aware prompts without claiming the fixture data are real research inputs.

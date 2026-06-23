@@ -15,6 +15,18 @@ network modes:
   20-stop corridor route, a synthetic timetable and parcels, and requires no
   internet access.
 
+The repository also includes the source-aware `original_scale_real_transit` data
+mode. This project extends the previous Electric Bus-Drone paper by adding a
+truck feeder layer; the formal data design therefore inherits the previous
+eBus-Drone scale and system parameters wherever available, uses real transit
+data where available, and records provenance for every important inherited,
+real, explicit truck-extension, or fallback-only field. Missing real data are
+not claimed as real.
+
+Real transit data are used where available; otherwise missing fields are filled
+from the previous eBus-Drone setting or an explicitly documented truck-extension
+default.
+
 Stage 3 provides the hardened deterministic event-driven assignment and
 electric-bus charging MDP. Stage 4 provides assignment-state collection,
 objective candidate features, versioned pairwise AI prompts, and
@@ -79,6 +91,31 @@ python -m data_pipeline.build_instance --config configs/shanghai_small.yaml
 A user-provided route can be supplied with `--bus-route path/to/route.csv`. Its
 required columns are `route_id`, `stop_id`, `stop_name`, `stop_sequence`, `lat`,
 `lon`, `first_departure`, `last_departure`, and `headway_min`.
+
+## Build original-scale real-transit data
+
+Formal original-scale builds use:
+
+```bash
+python -m data_pipeline.build_instance --config configs/original_scale_real_transit.yaml
+```
+
+This mode expects real transit CSVs at the configured `data/raw/transit/real_*`
+paths and writes `instance.json`, `data_provenance.json`, and
+`scale_match_report.json` below `data/processed/<city_name>/`. Raw real transit
+CSVs and generated processed data are ignored by Git.
+
+Dependency-light smoke commands use tiny committed fixtures and temporary output
+only:
+
+```bash
+python -m experiments.smoke_test_original_scale_real_transit_data --config configs/original_scale_real_transit.yaml
+python -m experiments.smoke_test_original_scale_real_transit_env --config configs/original_scale_real_transit.yaml
+python -m experiments.smoke_test_original_scale_real_transit_rlaif --config configs/original_scale_real_transit.yaml
+```
+
+See [docs/DATA_SETTING_TRACE.md](docs/DATA_SETTING_TRACE.md) and
+[docs/RANDOMNESS_DESIGN.md](docs/RANDOMNESS_DESIGN.md).
 
 ## Run the Stage 3 environment
 

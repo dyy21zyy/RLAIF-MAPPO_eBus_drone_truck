@@ -14,6 +14,7 @@ Store the resolved configuration and a metadata manifest with every run.
 | --- | --- | --- | --- |
 | Project smoke | `configs/shanghai_small.yaml` | Implemented | Validate Stage 1 foundation |
 | Data pipeline smoke | `configs/shanghai_small.yaml` | Stage 2 implemented | Validate fallback instance |
+| Original-scale real-transit smoke | `configs/original_scale_real_transit.yaml` | Implemented | Validate source-aware real-transit/inherited data mode with fixtures |
 | Environment smoke | `configs/shanghai_small.yaml` | Stage 3 implemented and hardened | Complete one valid episode |
 | Reward model | `configs/train_reward_model.yaml` | Stage 5 Code Gate complete; runtime deferred | Fit preference reward |
 | Assignment PPO | `configs/train_assignment_ppo.yaml` | Stage 6 Code Gate complete; runtime training deferred | Assignment-only policy |
@@ -105,3 +106,28 @@ Missing Stage 6/7 checkpoints produce `skipped_missing_checkpoint`; missing PyTo
 Ablations are declarations of checkpoint-backed variants. Sensitivity dimensions are config-driven and smoke mode deliberately evaluates only a tiny subset. Full benchmark, ablation, and sensitivity execution remains deferred until PyTorch is available and valid Stage 5, Stage 6, and Stage 7 checkpoints have been trained in the proper runtime environment.
 
 The rule-based policy is an interpretable comparison baseline only. Reusing it for preference labels or reward-model supervision would create circular, fabricated RLAIF evidence and is prohibited.
+
+## Original-scale real-transit setting
+
+The formal data mode is:
+
+```yaml
+data_mode: original_scale_real_transit
+```
+
+It preserves the scale of the previous eBus-Drone article while adding the truck
+feeder layer. Bus stops, trips, stop sequences, and stop-level timetables come
+from real transit CSVs when available. Missing real stop_times may be synthesized
+only when explicitly allowed, and then the provenance is `original_ebus_drone`,
+not `real_transit_data`.
+
+Smoke commands:
+
+```bash
+python -m experiments.smoke_test_original_scale_real_transit_data --config configs/original_scale_real_transit.yaml
+python -m experiments.smoke_test_original_scale_real_transit_env --config configs/original_scale_real_transit.yaml
+python -m experiments.smoke_test_original_scale_real_transit_rlaif --config configs/original_scale_real_transit.yaml
+```
+
+Those commands use committed fixture CSVs and temporary output. They are code
+validation artifacts, not final data collection or paper-ready experiments.

@@ -1,0 +1,153 @@
+metadata:
+  reference_project: eBus-Drone
+  reference_repo: https://github.com/dyy21zyy/eBus-Drone
+  extraction_note: >
+    Values are extracted from ../eBus-Drone configs/default.yaml and
+    configs/instances/medium.yaml. They are inherited defaults, not newly
+    crawled real-world measurements.
+
+scale:
+  instance_name: medium
+  num_stops: 30
+  num_integrated_stations: 8
+  station_ids: [1, 5, 9, 13, 17, 21, 25, 29]
+  num_parcels: 60
+  num_scheduled_bus_trips: 36
+  num_freight_carrying_trips: 12
+  planned_headway_min: 10
+  bus_operation_horizon_min: 360
+  service_horizon_min: 480
+
+network:
+  stop_spacing_km: 1.0
+  interstop_distance_km: 1.0
+  service_area:
+    x_min_km: 0.0
+    x_max_km: 30.0
+    y_min_km: -6.0
+    y_max_km: 6.0
+
+bus:
+  passenger_capacity: 80
+  battery_capacity_kwh: 160.0
+  safety_battery_kwh: 40.0
+  energy_kwh_per_km: 1.6
+  nominal_speed_kmph: 30.0
+  freight_capacity_kg: 20.0
+  initial_battery_fraction_min: 0.55
+  initial_battery_fraction_max: 0.85
+  planned_headway_min: 10
+
+charging:
+  chargers_per_station: 2
+  pantograph_power_kw: 500.0
+  efficiency: 0.95
+  action_set_seconds: [0, 15, 30, 45, 60, 75, 90, 105, 120]
+  max_single_stop_seconds: 120
+
+parcel:
+  weight_values_kg: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
+  drone_service_radius_km: 8.0
+  drone_round_trip_range_km: 8.0
+  unloading_capacity_kg_per_stop: 10.0
+  unloading_time_sec_per_kg: 6.0
+  locker_capacity_kg: 30.0
+  nominal_locker_waiting_time_min: 10.0
+  deadline_class_mix:
+    tight:
+      probability: 0.30
+      slack_min: 20.0
+      slack_max: 40.0
+    moderate:
+      probability: 0.50
+      slack_min: 40.0
+      slack_max: 80.0
+    loose:
+      probability: 0.20
+      slack_min: 80.0
+      slack_max: 140.0
+  cost:
+    bus_transport_per_kgkm: 1.0
+    drone_per_km: 2.0
+    locker_holding_per_kgmin: 0.1
+    lateness_per_min: 10.0
+
+drone:
+  drones_per_station: 3
+  speed_kmph: 40.0
+  payload_kg: 4.5
+  max_round_trip_duration_min: 120.0
+  customer_service_time_min: 1.0
+  turnaround_time_min: 1.0
+
+battery:
+  initial_fully_charged_per_station: 6
+  initial_depleted_per_station: 0
+  charge_power_kw: 2.0
+  charge_duration_min: 45.0
+  max_simultaneous_charging: 6
+  charging_mode: non_preemptive
+
+power:
+  station_capacity_kw: 1100.0
+  nominal_base_load_min_kw: 80.0
+  nominal_base_load_max_kw: 180.0
+  disturbance_std_kw: 8.0
+
+reward:
+  alpha_1: 1.0
+  alpha_2: 1.0
+  alpha_3: 0.2
+  alpha_4: 1.0
+  alpha_5: 5.0
+  alpha_6: 1.0
+  energy_cost_per_kwh: 1.0
+  eta_l_term: 1.0
+  eta_u_term: 1.0
+
+rl:
+  episodes: 5000
+  evaluation_episodes: 100
+  random_seeds: 5
+  gamma: 0.997
+  learning_rate: 0.00005
+  batch_size: 128
+  max_steps_per_episode: 100
+
+sources:
+  scale.num_stops:
+    source_type: original_ebus_drone
+    source_file: ../eBus-Drone/configs/default.yaml
+    notes: network.num_stops
+  scale.num_integrated_stations:
+    source_type: original_ebus_drone
+    source_file: ../eBus-Drone/configs/instances/medium.yaml
+    notes: Length of medium.station_ids
+  scale.num_parcels:
+    source_type: original_ebus_drone
+    source_file: ../eBus-Drone/configs/instances/medium.yaml
+    notes: medium.num_customers used as parcel/customer demand scale
+  scale.service_horizon_min:
+    source_type: original_ebus_drone
+    source_file: ../eBus-Drone/configs/default.yaml
+    notes: generation.delivery_evaluation_horizon_minutes
+  bus:
+    source_type: original_ebus_drone
+    source_file: ../eBus-Drone/configs/default.yaml
+    notes: bus and charging sections
+  parcel:
+    source_type: original_ebus_drone
+    source_file: ../eBus-Drone/configs/default.yaml
+    notes: parcel section and deadline mix in parcel_generator.py
+  drone:
+    source_type: original_ebus_drone
+    source_file: ../eBus-Drone/configs/default.yaml
+    notes: drone section plus payload equal to max listed parcel weight
+  station:
+    source_type: original_ebus_drone
+    source_file: ../eBus-Drone/configs/default.yaml
+    notes: charging, parcel locker, drone, battery, and power sections
+  reward:
+    source_type: original_ebus_drone
+    source_file: ../eBus-Drone/configs/default.yaml
+    notes: reward section

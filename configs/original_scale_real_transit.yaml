@@ -1,0 +1,122 @@
+project:
+  name: truck_ebus_drone_original_scale_real_transit
+  seed: 42
+  output_dir: outputs
+  log_dir: logs
+  checkpoint_dir: checkpoints
+
+data_mode: original_scale_real_transit
+
+reference:
+  original_repo_path: ../eBus-Drone
+  defaults_config: configs/original_ebus_drone_defaults.yaml
+
+city:
+  name: shanghai_original_scale_real_transit
+  bbox:
+    north: null
+    south: null
+    east: null
+    west: null
+
+transit:
+  mode: simplified_csv
+  stops_csv: data/raw/transit/real_bus_stops.csv
+  trips_csv: data/raw/transit/real_bus_trips.csv
+  stop_times_csv: data/raw/transit/real_bus_stop_times.csv
+  route_id: null
+  direction_id: null
+  service_id: null
+  allow_synthetic_timetable_if_missing: false
+
+network:
+  use_osm: false
+  distance_mode: haversine
+  osm_optional: true
+  num_integrated_stations: null
+  drone_radius_km: null
+  drone_speed_kmph: null
+  drone_payload_kg: null
+  max_drone_round_trip_min: null
+  customer_service_time_min: null
+  drone_turnaround_time_min: null
+
+scale_policy:
+  match_original_ebus_drone: true
+  max_relative_deviation:
+    num_stops: 0.25
+    num_integrated_stations: 0.25
+    num_parcels: 0.25
+    service_horizon_min: 0.25
+
+bus:
+  horizon_min: null
+  delivery_horizon_min: null
+  headway_min: null
+  bus_speed_kmph: null
+  bus_capacity_passenger: null
+  bus_battery_kwh: null
+  bus_min_soc_kwh: null
+  bus_energy_kwh_per_km: null
+  freight_capacity_kg: null
+  terminal_loading_time_min_per_kg: null
+  station_unloading_time_min_per_kg: null
+  charging_power_kw: null
+  charging_efficiency: null
+  charging_actions_sec: null
+  freight_trip_frequency: 3
+
+station:
+  chargers_per_station: null
+  locker_capacity_kg: null
+  drones_per_station: null
+  initial_full_batteries: null
+  max_simultaneous_battery_charging: null
+  battery_charging_power_kw: null
+  battery_charging_duration_min: null
+  power_capacity_kw: null
+  base_load_kw: null
+
+parcel:
+  num_parcels: null
+  heavy_ratio: 0.0
+  tight_deadline_ratio: null
+  moderate_deadline_ratio: null
+  loose_deadline_ratio: null
+
+truck_extension:
+  enabled: true
+  num_trucks: 1
+  capacity_kg: null
+  speed_kmph: null
+  cost_per_km: null
+  cost_per_min: null
+  loading_time_min_per_kg: null
+  unloading_time_min_per_kg: null
+  source: explicit_new_truck_extension
+
+truck:
+  num_trucks: 1
+  capacity_kg: null
+  speed_kmph: null
+  fixed_dispatch_cost: 20.0
+  cost_per_km: null
+  cost_per_min: null
+  loading_time_min_per_kg: null
+  unloading_time_min_per_kg: null
+  return_to_depot: true
+  one_parcel_per_trip_mvp: true
+
+reward:
+  passenger_delay: null
+  bus_operating_delay: null
+  parcel_lateness: null
+  energy_cost: null
+  power_overload: null
+  bus_battery_violation: null
+  locker_overflow: null
+  truck_cost: 0.5
+  undelivered: 10.0
+  battery_shortage: null
+  infeasible_action: 5.0
+  rlaif_lambda: 0.2

@@ -64,3 +64,19 @@ def test_pitfalls_document_mvp_simplifications_and_hardened_behavior() -> None:
         "explicit per-truck state",
     ):
         assert behavior in pitfalls
+
+
+def test_original_scale_real_transit_docs_preserve_source_boundaries() -> None:
+    readme = _read("README.md")
+    trace = _read("docs/DATA_SETTING_TRACE.md")
+    randomness = _read("docs/RANDOMNESS_DESIGN.md")
+    rlaif = _read("docs/RLAIF_WORKFLOW.md")
+    readme_flat = " ".join(readme.split())
+    rlaif_flat = " ".join(rlaif.split())
+
+    assert "extends the previous Electric Bus-Drone paper by adding a truck feeder layer" in readme_flat
+    assert "real transit data are used where available" in readme.lower()
+    assert "| Parameter | New project value | Source | Source file/path in eBus-Drone | Notes |" in trace
+    assert "fallback_test_only" in trace
+    assert "Do not randomize the real bus route" in randomness
+    assert "source-aware transit context" in rlaif_flat
