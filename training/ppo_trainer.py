@@ -70,6 +70,34 @@ def _episode_metrics(env: DynamicDeliveryEnv, counts: dict[str, int]) -> dict[st
     }
 
 
+def _first_feasible(action_mask: list[bool]) -> int:
+    return next(index for index, feasible in enumerate(action_mask) if feasible)
+
+
+def _is_bus_charge(observation: dict[str, Any], action: int) -> bool:
+    if observation["agent"] != "bus" or observation.get("event_type") != "BUS_ARRIVAL":
+        return False
+    candidates = observation.get("candidate_actions", [])
+    if candidates and 0 <= action < len(candidates):
+        return candidates[action].get("action_type") == "charge"
+    return False
+
+
+def _non_assignment_action(
+    env: DynamicDeliveryEnv,
+    observation: dict[str, Any],
+    bus_policy: BusBaselinePolicy,
+) -> int:
+    mask = [bool(value) for value in observation["action_mask"]]
+    if observation["agent"] == "bus" and observation.get("event_type") == "BUS_ARRIVAL":
+        return bus_policy.select_action(
+            mask,
+            env.config["bus"]["charging_actions_sec"],
+            bus_soc=float(observation["features"][1]),
+        )
+    return _first_feasible(mask)
+
+
 def collect_episode(
     env: DynamicDeliveryEnv,
     model: AssignmentActorCritic,
@@ -90,12 +118,9 @@ def collect_episode(
     counts = {"TD": 0, "TBD": 0, "TLD": 0, "bus_charge": 0}
 
     while observation["agent"] != "terminal":
-        if observation["agent"] == "bus":
-            action = bus_policy.select_action(
-                observation["action_mask"], env.config["bus"]["charging_actions_sec"],
-                bus_soc=float(observation["features"][1]),
-            )
-            if float(env.config["bus"]["charging_actions_sec"][action]) > 0:
+        if observation["agent"] != "assignment":
+            action = _non_assignment_action(env, observation, bus_policy)
+            if _is_bus_charge(observation, action):
                 counts["bus_charge"] += 1
             observation, reward, *_ = env.step(action)
             env_reward_total += float(reward)
@@ -116,12 +141,9 @@ def collect_episode(
         next_observation, reward, terminated, truncated, info = env.step(action)
         transition_env_reward = float(reward)
         env_reward_total += float(reward)
-        while next_observation["agent"] == "bus" and not (terminated or truncated):
-            bus_action = bus_policy.select_action(
-                next_observation["action_mask"], env.config["bus"]["charging_actions_sec"],
-                bus_soc=float(next_observation["features"][1]),
-            )
-            if float(env.config["bus"]["charging_actions_sec"][bus_action]) > 0:
+        while next_observation["agent"] not in {"assignment", "terminal"} and not (terminated or truncated):
+            bus_action = _non_assignment_action(env, next_observation, bus_policy)
+            if _is_bus_charge(next_observation, bus_action):
                 counts["bus_charge"] += 1
             next_observation, bus_reward, terminated, truncated, info = env.step(bus_action)
             transition_env_reward += float(bus_reward)

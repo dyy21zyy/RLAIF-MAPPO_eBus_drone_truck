@@ -155,7 +155,7 @@ def test_integrated_stations_parcels_and_bus_events_use_real_transit_inputs(tmp_
         if row["stop_id"] == fixture_first_station_stop
     )
     observed_times = []
-    if observation["agent"] == "bus":
+    if observation["agent"] == "bus" and observation["event_type"] == "BUS_ARRIVAL":
         observed_times.append(float(observation["time_min"]))
     observed_times.extend(bus_event_times[: len(expected_first_arrivals)])
     assert sorted(observed_times)[: len(expected_first_arrivals)] == expected_first_arrivals

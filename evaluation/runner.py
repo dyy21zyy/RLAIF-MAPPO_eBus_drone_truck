@@ -14,6 +14,17 @@ from rlaif.preference_dataset import ACTION_FEATURE_KEYS
 
 LEARNED_ASSIGNMENT={"assignment_ppo","mappo_async"}
 
+
+def _first_feasible(action_mask):
+    return next((index for index, feasible in enumerate(action_mask) if bool(feasible)), 0)
+
+
+def _is_bus_arrival_charge(observation, selected: int, env: DynamicDeliveryEnv) -> tuple[bool, float]:
+    if observation["agent"] != "bus" or observation.get("event_type") != "BUS_ARRIVAL":
+        return False, 0.0
+    seconds = float(env.config["bus"]["charging_actions_sec"][selected])
+    return seconds > 0.0, seconds
+
 class EvaluationRunner:
     def __init__(self, config: dict[str,Any], instance, method: dict[str,Any], seed: int):
         self.config=config; self.instance=Path(instance); self.method=dict(method); self.seed=int(seed)
@@ -82,9 +93,12 @@ class EvaluationRunner:
                     if self.method.get("assignment_policy")=="mappo_async":
                         policy_mask = mask if self.method.get("action_mask", True) else [True] * len(mask)
                         selected=bus.act(observation["features"],policy_mask,deterministic=True)[0]
-                    else: selected=bus.select_action(observation,env)
-                    seconds=float(env.config["bus"]["charging_actions_sec"][selected])
-                    if seconds>0:
+                    elif observation["agent"]=="bus" and observation.get("event_type")=="BUS_ARRIVAL":
+                        selected=bus.select_action(observation,env)
+                    else:
+                        selected=_first_feasible(mask)
+                    is_charge, seconds = _is_bus_arrival_charge(observation, selected, env)
+                    if is_charge:
                         charge_count+=1; charge_energy+=float(env.config["bus"]["charging_power_kw"])*(seconds/3600.0)
                     observation,reward,*_=env.step(selected); env_reward+=float(reward)
             env.get_metrics()  # Stable Stage 3 metric hook; detailed Stage 8 metrics are derived below.

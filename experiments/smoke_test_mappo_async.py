@@ -51,6 +51,6 @@ def run_smoke_test():
 
 def main():
     result=run_smoke_test()
-    print(('SKIP: '+result['reason']) if result['skipped'] else 'Stage 7 asynchronous MAPPO smoke test passed.\n'+str(result))
+    print(('SKIP: '+result['reason']) if result['skipped'] else 'Stage 9 four-agent asynchronous MAPPO smoke test passed.\n'+str(result))
     return 0
 if __name__=='__main__': raise SystemExit(main())
