@@ -1,0 +1,14 @@
+# Paper-Code Alignment Traceability
+
+| ID | Paper claim | Required behavior | Code area | Test | Status | Evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| REQ-MDP-FOUR-AGENT | The method trains assignment, truck, bus, and station agents over the asynchronous event stream. | Expose real decision events for assignment, truck, bus, and station without inactive-agent padding. | `envs/delivery_env.py`; `envs/state_builder.py` | `tests/test_four_agent_environment.py` | planned | Design committed in `docs/superpowers/specs/2026-07-20-four-agent-rlaif-mappo-design.md`. |
+| REQ-MDP-CANDIDATES | Candidate-action encoding and masks represent operational constraints. | Every decision observation includes candidate descriptors, finite candidate features, and hard masks. | `envs/decision_schema.py`; `envs/state_builder.py` | `tests/test_four_agent_candidate_schema.py` | planned | To be verified by TDD task. |
+| REQ-MDP-TRANSITIONS | Truck dispatch, bus loading and charging, and station drone/battery operations are real operational decisions. | Environment action appliers update parcel, truck, bus, station, locker, drone, battery, and reward state. | `envs/delivery_env.py` | `tests/test_four_agent_environment.py` | planned | To be verified by TDD task. |
+| REQ-MAPPO-ACTORS | Heterogeneous event-specific actors train under a centralized critic. | Provide actor registry entries for assignment, truck, bus, and station. | `training/mappo_networks.py`; `training/mappo_trainer.py` | `tests/test_mappo_networks.py`; `tests/test_mappo_async.py` | planned | To be verified by TDD task. |
+| REQ-MAPPO-CANDIDATE-POLICY | The actor scores candidate actions and applies masks before softmax. | Candidate-scoring actors give infeasible actions zero probability. | `training/mappo_networks.py` | `tests/test_mappo_networks.py` | planned | To be verified by TDD task. |
+| REQ-MAPPO-BUFFER | Rollouts store only activated agents and use event-time discounting. | Buffer supports four agent ids, no inactive rows, and time-delta GAE. | `training/mappo_buffer.py` | `tests/test_mappo_buffer.py` | planned | To be verified by TDD task. |
+| REQ-RLAIF-SCOPE | AI feedback ranks feasible alternatives, while physical feasibility remains masked. | Disabled RLAIF loads no checkpoint; enabled RLAIF requires a valid checkpoint; no rules create labels or rewards. | `rlaif/`; `training/reward_model_wrapper.py`; `training/mappo_async.py` | `tests/test_reward_model_wrapper.py`; `tests/test_mappo_async.py` | planned | Existing Stage 5/7 guardrails remain active. |
+| REQ-DOC-TRACE | Paper-code alignment decisions and validation remain auditable. | Maintain traceability, decision, and validation files for the four-agent pass. | `docs/paper_code_alignment/` | `tests/test_paper_alignment_traceability.py` | in-progress | This file records planned and current evidence. |
+
+Smoke-test metrics are code-gate evidence only and are not final experiment evidence.
