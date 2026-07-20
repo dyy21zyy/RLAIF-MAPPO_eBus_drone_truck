@@ -1,4 +1,4 @@
-"""Rollout collection, PPO updates, checkpoints, and evaluation for Stage 7."""
+"""Rollout collection, PPO updates, checkpoints, and evaluation for Stage 9."""
 
 from __future__ import annotations
 
@@ -7,28 +7,52 @@ import json
 import math
 import random
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import torch
 from torch import nn
 
-from envs.state_builder import build_candidate_action_features
-from rlaif.preference_dataset import ACTION_FEATURE_KEYS
-from training.mappo_async import reward_decomposition, transition_reward, validate_decision
+from training.mappo_async import (
+    RLAIF_AGENT_TYPES,
+    VALID_AGENT_EVENTS,
+    reward_decomposition,
+    transition_reward,
+    validate_decision,
+)
 from training.mappo_buffer import AsyncMAPPOBuffer, AsyncTransition
-from training.mappo_networks import AssignmentActor, BusActor, CentralizedCritic, BUS_CHARGING_ACTIONS
+from training.mappo_networks import CandidateScoringActor, CentralizedCritic, build_actor_registry
 from training.ppo_trainer import create_environment
 from training.reward_model_wrapper import RewardModelWrapper
 
-FEATURE_SCHEMA_VERSION = 1
+AGENT_IDS = ("assignment", "truck", "bus", "station")
+FEATURE_SCHEMA_VERSION = 2
+ACTOR_POLICY_FIELDS = tuple(f"{agent}_policy_loss" for agent in AGENT_IDS)
+ACTOR_ENTROPY_FIELDS = tuple(f"entropy_{agent}" for agent in AGENT_IDS)
+ACTOR_KL_FIELDS = tuple(f"approx_kl_{agent}" for agent in AGENT_IDS)
+ACTOR_CLIP_FIELDS = tuple(f"clip_fraction_{agent}" for agent in AGENT_IDS)
 METRIC_FIELDS = (
-    "episode_reward", "episode_env_reward", "episode_rlaif_reward", "assignment_decision_count",
-    "bus_decision_count", "assignment_policy_loss", "bus_policy_loss", "value_loss",
-    "entropy_assignment", "entropy_bus", "approx_kl_assignment", "approx_kl_bus",
-    "clip_fraction_assignment", "clip_fraction_bus", "delivered_parcels", "undelivered_parcels",
-    "average_lateness", "infeasible_action_count", "bus_charging_count", "passenger_delay",
-    "bus_operating_delay", "power_overload_amount", "locker_overflow_amount",
+    "episode_reward",
+    "episode_env_reward",
+    "episode_rlaif_reward",
+    "assignment_decision_count",
+    "truck_decision_count",
+    "bus_decision_count",
+    "station_decision_count",
+    *ACTOR_POLICY_FIELDS,
+    "value_loss",
+    *ACTOR_ENTROPY_FIELDS,
+    *ACTOR_KL_FIELDS,
+    *ACTOR_CLIP_FIELDS,
+    "delivered_parcels",
+    "undelivered_parcels",
+    "average_lateness",
+    "infeasible_action_count",
+    "bus_charging_count",
+    "passenger_delay",
+    "bus_operating_delay",
+    "power_overload_amount",
+    "locker_overflow_amount",
 )
 
 
@@ -38,13 +62,36 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
 
 
-def _assignment_action_features(env, action: int, feasible: bool) -> list[float]:
-    parcel = env.parcels[env.current_decision.event.payload["parcel_id"]]
-    features = build_candidate_action_features(env, parcel, action, feasible)
-    return [float(features[key]) for key in ACTION_FEATURE_KEYS]
+def _candidate_payload(observation: dict[str, Any], action: int) -> dict[str, Any]:
+    return dict(observation["candidate_actions"][action])
 
 
-def _episode_summary(env, env_reward: float, rlaif_reward: float, bus_charging_count: int) -> dict[str, float | int]:
+def _candidate_feature_payload(observation: dict[str, Any]) -> tuple[list[list[float]], tuple[str, ...]]:
+    names = tuple(str(name) for name in observation["candidate_feature_names"])
+    features = [
+        [float(value) for value in row]
+        for row in observation["candidate_features"]
+    ]
+    if len(features) != len(observation["action_mask"]):
+        raise ValueError("candidate_features and action_mask differ in length")
+    if any(len(row) != len(names) for row in features):
+        raise ValueError("candidate feature rows do not match candidate_feature_names")
+    return features, names
+
+
+def _pad_vector(values: Sequence[float], target_dim: int) -> list[float]:
+    result = [float(value) for value in values]
+    if len(result) > target_dim:
+        raise ValueError("Observation vector exceeds registered actor dimension")
+    return result + [0.0] * (target_dim - len(result))
+
+
+def _episode_summary(
+    env,
+    env_reward: float,
+    rlaif_reward: float,
+    bus_charging_count: int,
+) -> dict[str, float | int]:
     delivered = [parcel for parcel in env.parcels.values() if parcel.status == "delivered"]
     lateness = [max(0.0, float(parcel.delivered_time_min) - parcel.deadline_min) for parcel in delivered]
     costs = env.cost_components
@@ -53,7 +100,9 @@ def _episode_summary(env, env_reward: float, rlaif_reward: float, bus_charging_c
         "episode_env_reward": env_reward,
         "episode_rlaif_reward": rlaif_reward,
         "assignment_decision_count": env.decision_counts["assignment"],
+        "truck_decision_count": env.decision_counts["truck"],
         "bus_decision_count": env.decision_counts["bus"],
+        "station_decision_count": env.decision_counts["station"],
         "delivered_parcels": len(delivered),
         "undelivered_parcels": len(env.parcels) - len(delivered),
         "average_lateness": float(np.mean(lateness)) if lateness else 0.0,
@@ -67,49 +116,85 @@ def _episode_summary(env, env_reward: float, rlaif_reward: float, bus_charging_c
 
 
 def collect_episode(
-    env, assignment_actor: AssignmentActor, bus_actor: BusActor, critic: CentralizedCritic,
-    buffer: AsyncMAPPOBuffer | None, reward_wrapper: RewardModelWrapper, *, episode_id: int,
-    lambda_rlaif: float, deterministic: bool = False,
+    env,
+    actors: nn.ModuleDict,
+    critic: CentralizedCritic,
+    buffer: AsyncMAPPOBuffer | None,
+    reward_wrapper: RewardModelWrapper,
+    *,
+    episode_id: int,
+    lambda_rlaif: float,
+    deterministic: bool = False,
 ) -> dict[str, float | int]:
-    """Act once and append once for each actual decision event."""
+    """Act once and append once for each actual four-agent decision event."""
+
     observation, _ = env.reset(seed=episode_id)
-    env_total = rlaif_total = 0.0
+    env_total = 0.0
+    rlaif_total = 0.0
     bus_charging_count = 0
     while observation["agent_id"] != "terminal":
         agent_id = str(observation["agent_id"])
         event_type = str(observation["event_type"])
         validate_decision(agent_id, event_type)
-        local_obs = [float(value) for value in observation["features"]]
+        if agent_id not in actors:
+            raise RuntimeError(f"No MAPPO actor registered for {agent_id}")
         mask = [bool(value) for value in observation["action_mask"]]
+        candidate_features, candidate_feature_names = _candidate_feature_payload(observation)
         global_state = [float(value) for value in env.get_global_state()]
-        actor = assignment_actor if agent_id == "assignment" else bus_actor
-        action, log_prob = actor.act(local_obs, mask, deterministic=deterministic)
+        actor = actors[agent_id]
+        local_obs = _pad_vector(observation["features"], actor.obs_dim)
+        action, log_prob = actor.act(
+            local_obs, candidate_features, mask, deterministic=deterministic
+        )
         if not mask[action]:
             raise RuntimeError("Masked MAPPO sampled an infeasible action")
+        action_payload = _candidate_payload(observation, action)
+        if agent_id == "bus" and action_payload.get("action_type") == "charge":
+            bus_charging_count += 1
         with torch.no_grad():
             value = float(critic(torch.tensor(global_state, dtype=torch.float32)).item())
-        action_features = None
-        if agent_id == "assignment":
-            action_features = _assignment_action_features(env, action, mask[action])
-        elif BUS_CHARGING_ACTIONS[action] > 0:
-            bus_charging_count += 1
+
+        action_features = candidate_features[action] if agent_id in RLAIF_AGENT_TYPES else None
         next_observation, env_reward, terminated, truncated, info = env.step(action)
         done = bool(terminated or truncated)
         total_reward, learned_reward = transition_reward(
-            agent_id, float(env_reward), reward_wrapper, lambda_rlaif=lambda_rlaif,
-            state_features=local_obs, action_features=action_features, action_id=action,
+            agent_id,
+            float(env_reward),
+            reward_wrapper,
+            lambda_rlaif=lambda_rlaif,
+            state_features=local_obs,
+            action_features=action_features,
+            action_id=action,
         )
         env_total += float(env_reward)
         rlaif_total += learned_reward * float(lambda_rlaif)
         if buffer is not None:
-            buffer.append(AsyncTransition(
-                agent_id=agent_id, local_obs=local_obs, global_state=global_state, action=action,
-                action_mask=mask, log_prob=log_prob, value=value, reward=total_reward, done=done,
-                next_global_state=[float(value) for value in env.get_global_state()],
-                event_type=event_type, event_time=float(observation["time_min"]), episode_id=episode_id,
-                info={**info, "env_reward": float(env_reward), "rlaif_reward": learned_reward,
-                      "reward_decomposition": reward_decomposition(info)},
-            ))
+            buffer.append(
+                AsyncTransition(
+                    agent_id=agent_id,
+                    local_obs=local_obs,
+                    global_state=global_state,
+                    action=action,
+                    action_mask=mask,
+                    candidate_features=candidate_features,
+                    candidate_feature_names=candidate_feature_names,
+                    log_prob=log_prob,
+                    value=value,
+                    reward=total_reward,
+                    done=done,
+                    next_global_state=[float(value) for value in env.get_global_state()],
+                    event_type=event_type,
+                    event_time=float(observation["time_min"]),
+                    episode_id=episode_id,
+                    info={
+                        **info,
+                        "env_reward": float(env_reward),
+                        "rlaif_reward": learned_reward,
+                        "action_candidate": action_payload,
+                        "reward_decomposition": reward_decomposition(info),
+                    },
+                )
+            )
         observation = next_observation
     return _episode_summary(env, env_total, rlaif_total, bus_charging_count)
 
@@ -118,53 +203,91 @@ def _mean(values: list[float]) -> float:
     return float(np.mean(values)) if values else 0.0
 
 
+def _padded_candidate_batch(items: Sequence[AsyncTransition]) -> tuple[torch.Tensor, torch.Tensor]:
+    if not items:
+        raise ValueError("Cannot build an empty candidate batch")
+    feature_names = items[0].candidate_feature_names
+    feature_dim = len(feature_names)
+    if any(item.candidate_feature_names != feature_names for item in items):
+        raise ValueError("Candidate feature schema differs within an agent batch")
+    max_actions = max(len(item.action_mask) for item in items)
+    candidates = np.zeros((len(items), max_actions, feature_dim), dtype=np.float32)
+    masks = np.zeros((len(items), max_actions), dtype=bool)
+    for row_index, item in enumerate(items):
+        rows = np.asarray(item.candidate_features, dtype=np.float32)
+        candidates[row_index, : rows.shape[0], :] = rows
+        masks[row_index, : len(item.action_mask)] = np.asarray(item.action_mask, dtype=bool)
+    return torch.tensor(candidates, dtype=torch.float32), torch.tensor(masks, dtype=torch.bool)
+
+
 def update_mappo(
-    assignment_actor: AssignmentActor, bus_actor: BusActor, critic: CentralizedCritic,
-    assignment_optimizer, bus_optimizer, critic_optimizer, buffer: AsyncMAPPOBuffer,
-    training: dict[str, Any], rng: np.random.Generator,
+    actors: nn.ModuleDict,
+    critic: CentralizedCritic,
+    actor_optimizers: dict[str, torch.optim.Optimizer],
+    critic_optimizer: torch.optim.Optimizer,
+    buffer: AsyncMAPPOBuffer,
+    training: dict[str, Any],
+    rng: np.random.Generator,
 ) -> dict[str, float]:
-    buffer.compute_returns_and_advantages(float(training["gamma"]), float(training["gae_lambda"]))
+    buffer.compute_returns_and_advantages(
+        float(training["gamma"]),
+        float(training["gae_lambda"]),
+        reference_time_unit=float(training.get("event_time_reference_min", 1.0)),
+    )
     aggregates = {key: [] for key in (
-        "assignment_policy_loss", "bus_policy_loss", "value_loss", "entropy_assignment", "entropy_bus",
-        "approx_kl_assignment", "approx_kl_bus", "clip_fraction_assignment", "clip_fraction_bus",
+        *ACTOR_POLICY_FIELDS,
+        "value_loss",
+        *ACTOR_ENTROPY_FIELDS,
+        *ACTOR_KL_FIELDS,
+        *ACTOR_CLIP_FIELDS,
     )}
     indices_by_agent = {
         agent: np.asarray([i for i, item in enumerate(buffer.transitions) if item.agent_id == agent], dtype=int)
-        for agent in ("assignment", "bus")
+        for agent in AGENT_IDS
     }
     for _ in range(int(training["ppo_epochs"])):
-        for agent_id, actor, optimizer in (
-            ("assignment", assignment_actor, assignment_optimizer), ("bus", bus_actor, bus_optimizer)
-        ):
-            indices = indices_by_agent[agent_id]
+        for agent_id, actor in actors.items():
+            indices = indices_by_agent[str(agent_id)]
             if not len(indices):
                 continue
             indices = rng.permutation(indices)
+            optimizer = actor_optimizers[str(agent_id)]
             for start in range(0, len(indices), int(training["batch_size"])):
                 batch = indices[start:start + int(training["batch_size"])]
                 items = [buffer.transitions[i] for i in batch]
-                observations = torch.tensor(np.asarray([item.local_obs for item in items]), dtype=torch.float32)
+                observations = torch.tensor(
+                    np.asarray([item.local_obs for item in items]), dtype=torch.float32
+                )
+                candidate_features, masks = _padded_candidate_batch(items)
                 actions = torch.tensor([item.action for item in items], dtype=torch.long)
-                masks = torch.tensor(np.asarray([item.action_mask for item in items]), dtype=torch.bool)
                 old_log_probs = torch.tensor([item.log_prob for item in items], dtype=torch.float32)
                 advantages = torch.tensor(buffer.advantages[batch], dtype=torch.float32)
-                new_log_probs, entropy = actor.evaluate_actions(observations, actions, masks)
+                new_log_probs, entropy = actor.evaluate_actions(
+                    observations, candidate_features, actions, masks
+                )
                 log_ratio = new_log_probs - old_log_probs
                 ratio = log_ratio.exp()
-                clipped = torch.clamp(ratio, 1.0 - float(training["clip_eps"]), 1.0 + float(training["clip_eps"]))
+                clipped = torch.clamp(
+                    ratio, 1.0 - float(training["clip_eps"]), 1.0 + float(training["clip_eps"])
+                )
                 policy_loss = -torch.minimum(ratio * advantages, clipped * advantages).mean()
                 loss = policy_loss - float(training["ent_coef"]) * entropy.mean()
                 optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(actor.parameters(), float(training["max_grad_norm"]))
                 optimizer.step()
-                prefix = "assignment" if agent_id == "assignment" else "bus"
-                aggregates[f"{prefix}_policy_loss"].append(float(policy_loss.detach()))
-                aggregates[f"entropy_{prefix}"].append(float(entropy.mean().detach()))
-                aggregates[f"approx_kl_{prefix}"].append(float(((ratio - 1.0) - log_ratio).mean().detach()))
-                aggregates[f"clip_fraction_{prefix}"].append(float(((ratio - 1.0).abs() > float(training["clip_eps"])).float().mean().detach()))
+                aggregates[f"{agent_id}_policy_loss"].append(float(policy_loss.detach()))
+                aggregates[f"entropy_{agent_id}"].append(float(entropy.mean().detach()))
+                aggregates[f"approx_kl_{agent_id}"].append(
+                    float(((ratio - 1.0) - log_ratio).mean().detach())
+                )
+                aggregates[f"clip_fraction_{agent_id}"].append(
+                    float(((ratio - 1.0).abs() > float(training["clip_eps"])).float().mean().detach())
+                )
         for batch in buffer.minibatch_indices(int(training["batch_size"]), rng):
-            states = torch.tensor(np.asarray([buffer.transitions[i].global_state for i in batch]), dtype=torch.float32)
+            states = torch.tensor(
+                np.asarray([buffer.transitions[i].global_state for i in batch]), dtype=torch.float32
+            )
             returns = torch.tensor(buffer.returns[batch], dtype=torch.float32)
             value_loss = nn.functional.mse_loss(critic(states), returns)
             critic_optimizer.zero_grad()
@@ -178,49 +301,165 @@ def update_mappo(
     return result
 
 
-def save_checkpoint(path, assignment_actor, bus_actor, critic, assignment_optimizer, bus_optimizer,
-                    critic_optimizer, config, metrics) -> None:
+def _actor_specs(actors: nn.ModuleDict) -> dict[str, dict[str, Any]]:
+    specs = {}
+    for agent_id, actor in actors.items():
+        if not isinstance(actor, CandidateScoringActor):
+            raise TypeError("Stage 9 checkpoint expects candidate-scoring actors")
+        specs[str(agent_id)] = {
+            "obs_dim": actor.obs_dim,
+            "candidate_feature_dim": actor.candidate_feature_dim,
+            "hidden_dims": list(actor.hidden_dims),
+        }
+    return specs
+
+
+def save_checkpoint(
+    path,
+    actors: nn.ModuleDict,
+    critic: CentralizedCritic,
+    actor_optimizers: dict[str, torch.optim.Optimizer],
+    critic_optimizer: torch.optim.Optimizer,
+    config: dict[str, Any],
+    metrics: list[dict[str, Any]],
+) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({
-        "stage": 7, "algorithm": "asynchronous_mappo",
-        "assignment_actor_state_dict": assignment_actor.state_dict(),
-        "bus_actor_state_dict": bus_actor.state_dict(), "critic_state_dict": critic.state_dict(),
-        "assignment_optimizer_state_dict": assignment_optimizer.state_dict(),
-        "bus_optimizer_state_dict": bus_optimizer.state_dict(), "critic_optimizer_state_dict": critic_optimizer.state_dict(),
-        "config": config, "action_mappings": {"assignment": "0=TD,1..H=TBD,H+1..2H=TLD", "bus": list(BUS_CHARGING_ACTIONS)},
-        "feature_schema_version": FEATURE_SCHEMA_VERSION, "training_metrics": metrics,
-        "dimensions": {"assignment_obs": assignment_actor.obs_dim, "bus_obs": bus_actor.obs_dim,
-                       "stations": assignment_actor.station_count, "global_state": critic.global_state_dim},
-    }, path)
+    torch.save(
+        {
+            "stage": 9,
+            "algorithm": "four_agent_asynchronous_mappo",
+            "actor_state_dicts": actors.state_dict(),
+            "critic_state_dict": critic.state_dict(),
+            "actor_optimizer_state_dicts": {
+                agent: optimizer.state_dict() for agent, optimizer in actor_optimizers.items()
+            },
+            "critic_optimizer_state_dict": critic_optimizer.state_dict(),
+            "config": config,
+            "action_mappings": {
+                "assignment": "0=TD,1..H=TBD,H+1..2H=TLD",
+                "truck": "candidate task index or idle",
+                "bus": "BUS_DEPARTURE load/idle or BUS_ARRIVAL charge/no_charge",
+                "station": "dispatch_drone or idle",
+            },
+            "feature_schema_version": FEATURE_SCHEMA_VERSION,
+            "training_metrics": metrics,
+            "actor_specs": _actor_specs(actors),
+            "dimensions": {
+                "actors": _actor_specs(actors),
+                "global_state": critic.global_state_dim,
+            },
+        },
+        path,
+    )
 
 
 def load_checkpoint(path):
     checkpoint = torch.load(Path(path), map_location="cpu", weights_only=False)
-    if checkpoint.get("stage") != 7 or checkpoint.get("algorithm") != "asynchronous_mappo":
-        raise ValueError("Checkpoint is not a Stage 7 asynchronous MAPPO checkpoint")
-    dims, config = checkpoint["dimensions"], checkpoint["config"]
-    assignment = AssignmentActor(dims["assignment_obs"], dims["stations"], config["networks"]["assignment_hidden_dims"])
-    bus = BusActor(dims["bus_obs"], config["networks"]["bus_hidden_dims"])
-    critic = CentralizedCritic(dims["global_state"], config["networks"]["critic_hidden_dims"])
-    assignment.load_state_dict(checkpoint["assignment_actor_state_dict"])
-    bus.load_state_dict(checkpoint["bus_actor_state_dict"])
+    if checkpoint.get("stage") != 9 or checkpoint.get("algorithm") != "four_agent_asynchronous_mappo":
+        raise ValueError("Checkpoint is not a Stage 9 four-agent asynchronous MAPPO checkpoint")
+    specs_payload = checkpoint["actor_specs"]
+    specs = {
+        agent: (int(payload["obs_dim"]), int(payload["candidate_feature_dim"]))
+        for agent, payload in specs_payload.items()
+    }
+    hidden_dims = {
+        agent: list(payload["hidden_dims"])
+        for agent, payload in specs_payload.items()
+    }
+    hidden_dims["default"] = list(next(iter(specs_payload.values()))["hidden_dims"])
+    actors = build_actor_registry(specs, hidden_dims)
+    critic = CentralizedCritic(
+        int(checkpoint["dimensions"]["global_state"]),
+        checkpoint["config"]["networks"]["critic_hidden_dims"],
+    )
+    actors.load_state_dict(checkpoint["actor_state_dicts"])
     critic.load_state_dict(checkpoint["critic_state_dict"])
-    assignment.eval(); bus.eval(); critic.eval()
-    return assignment, bus, critic, checkpoint
+    actors.eval()
+    critic.eval()
+    return actors, critic, checkpoint
+
+
+def _first_candidate_action(
+    observation: dict[str, Any], action_type: str
+) -> int | None:
+    for candidate in observation["candidate_actions"]:
+        if candidate["feasible"] and candidate["action_type"] == action_type:
+            return int(candidate["action_id"])
+    return None
+
+
+def _dimension_probe_action(env, observation: dict[str, Any]) -> int:
+    mask = [bool(value) for value in observation["action_mask"]]
+    agent_id = str(observation["agent_id"])
+    if agent_id == "assignment":
+        first_tld = 1 + len(env.station_ids)
+        for action_id in range(first_tld, len(mask)):
+            if mask[action_id]:
+                return action_id
+        for action_id in range(1, first_tld):
+            if mask[action_id]:
+                return action_id
+    if agent_id == "truck":
+        action = _first_candidate_action(observation, "station_feeder")
+        if action is not None:
+            return action
+    if agent_id == "station":
+        action = _first_candidate_action(observation, "dispatch_drone")
+        if action is not None:
+            return action
+    return next(index for index, feasible in enumerate(mask) if feasible)
+
+
+def _collect_actor_specs(env, seed: int, max_steps: int = 2000) -> dict[str, tuple[int, int]]:
+    observation, _ = env.reset(seed=seed)
+    specs: dict[str, tuple[int, int]] = {}
+    observed_pairs: set[tuple[str, str]] = set()
+    steps = 0
+    while observation["agent_id"] != "terminal" and steps < max_steps:
+        agent_id = str(observation["agent_id"])
+        event_type = str(observation["event_type"])
+        candidate_features, candidate_names = _candidate_feature_payload(observation)
+        del candidate_features
+        observed_pairs.add((agent_id, event_type))
+        obs_dim = len(observation["features"])
+        candidate_dim = len(candidate_names)
+        if agent_id in specs:
+            previous_obs_dim, previous_candidate_dim = specs[agent_id]
+            if previous_candidate_dim != candidate_dim:
+                raise RuntimeError(f"Candidate feature dimension changed for {agent_id}")
+            specs[agent_id] = (max(previous_obs_dim, obs_dim), candidate_dim)
+        else:
+            specs[agent_id] = (obs_dim, candidate_dim)
+        if set(specs) == set(AGENT_IDS) and ("bus", "BUS_ARRIVAL") in observed_pairs:
+            break
+        observation, *_ = env.step(_dimension_probe_action(env, observation))
+        errors = env.check_invariants()
+        if errors:
+            raise RuntimeError(f"Dimension probe violated environment invariants: {errors}")
+        steps += 1
+    missing = set(AGENT_IDS) - set(specs)
+    if missing:
+        raise RuntimeError(f"Could not observe Stage 9 agent dimensions for {sorted(missing)}")
+    return specs
+
+
+def _actor_hidden_dims(config: dict[str, Any]) -> dict[str, Sequence[int]]:
+    networks = config["networks"]
+    default = networks.get("actor_hidden_dims", networks.get("assignment_hidden_dims", [256, 256]))
+    return {
+        "default": default,
+        "assignment": networks.get("assignment_hidden_dims", default),
+        "truck": networks.get("truck_hidden_dims", default),
+        "bus": networks.get("bus_hidden_dims", default),
+        "station": networks.get("station_hidden_dims", default),
+    }
 
 
 def _models(env, config):
-    if tuple(env.config["bus"]["charging_actions_sec"]) != BUS_CHARGING_ACTIONS:
-        raise ValueError(f"Stage 7 bus actions must be {list(BUS_CHARGING_ACTIONS)}")
-    observation, _ = env.reset(seed=int(config["training"]["seed"]))
-    assignment_dim = len(observation["features"])
-    while observation["agent_id"] not in {"bus", "terminal"}:
-        observation, *_ = env.step(next(i for i, allowed in enumerate(observation["action_mask"]) if allowed))
-    bus_dim = len(observation["features"]) if observation["agent_id"] == "bus" else 6
+    specs = _collect_actor_specs(env, int(config["training"]["seed"]))
     return (
-        AssignmentActor(assignment_dim, len(env.station_ids), config["networks"]["assignment_hidden_dims"]),
-        BusActor(bus_dim, config["networks"]["bus_hidden_dims"]),
+        build_actor_registry(specs, _actor_hidden_dims(config)),
         CentralizedCritic(len(env.get_global_state()), config["networks"]["critic_hidden_dims"]),
     )
 
@@ -229,38 +468,83 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
     training, seed = config["training"], int(config["training"]["seed"])
     set_seed(seed)
     env = create_environment(config, output_root=output_root)
-    assignment, bus, critic = _models(env, config)
-    assignment_optimizer = torch.optim.Adam(assignment.parameters(), lr=float(training["lr_actor"]))
-    bus_optimizer = torch.optim.Adam(bus.parameters(), lr=float(training["lr_actor"]))
+    actors, critic = _models(env, config)
+    actor_optimizers = {
+        agent: torch.optim.Adam(actor.parameters(), lr=float(training["lr_actor"]))
+        for agent, actor in actors.items()
+    }
     critic_optimizer = torch.optim.Adam(critic.parameters(), lr=float(training["lr_critic"]))
-    wrapper = RewardModelWrapper(config["rlaif"].get("reward_model_checkpoint"), enabled=bool(config["rlaif"].get("enabled", False)))
+    wrapper = RewardModelWrapper(
+        config["rlaif"].get("reward_model_checkpoint"),
+        enabled=bool(config["rlaif"].get("enabled", False)),
+    )
     buffer, rng, rows = AsyncMAPPOBuffer(), np.random.default_rng(seed), []
     rollout_episodes = int(training["rollout_episodes"])
     for start in range(0, int(training["total_episodes"]), rollout_episodes):
-        summaries = [collect_episode(env, assignment, bus, critic, buffer, wrapper, episode_id=seed + episode,
-                     lambda_rlaif=float(config["rlaif"].get("lambda_rlaif", 1.0)))
-                     for episode in range(start, min(start + rollout_episodes, int(training["total_episodes"])))]
-        update = update_mappo(assignment, bus, critic, assignment_optimizer, bus_optimizer, critic_optimizer, buffer, training, rng)
+        summaries = [
+            collect_episode(
+                env,
+                actors,
+                critic,
+                buffer,
+                wrapper,
+                episode_id=seed + episode,
+                lambda_rlaif=float(config["rlaif"].get("lambda_rlaif", 1.0)),
+            )
+            for episode in range(start, min(start + rollout_episodes, int(training["total_episodes"])))
+        ]
+        update = update_mappo(
+            actors,
+            critic,
+            actor_optimizers,
+            critic_optimizer,
+            buffer,
+            training,
+            rng,
+        )
         rows.extend({"episode": start + offset + 1, **summary, **update} for offset, summary in enumerate(summaries))
         buffer.clear()
-    path = Path(config["output"]["training_log_path"]); path.parent.mkdir(parents=True, exist_ok=True)
+    path = Path(config["output"]["training_log_path"])
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["episode", *METRIC_FIELDS]); writer.writeheader(); writer.writerows(rows)
-    save_checkpoint(config["output"]["checkpoint_path"], assignment, bus, critic, assignment_optimizer, bus_optimizer,
-                    critic_optimizer, config, rows)
-    return {"rows": rows, "checkpoint_path": config["output"]["checkpoint_path"], "models": (assignment, bus, critic)}
+        writer = csv.DictWriter(handle, fieldnames=["episode", *METRIC_FIELDS])
+        writer.writeheader()
+        writer.writerows(rows)
+    save_checkpoint(
+        config["output"]["checkpoint_path"],
+        actors,
+        critic,
+        actor_optimizers,
+        critic_optimizer,
+        config,
+        rows,
+    )
+    return {"rows": rows, "checkpoint_path": config["output"]["checkpoint_path"], "models": (actors, critic)}
 
 
 def evaluate_mappo_async(config: dict[str, Any], checkpoint_path, *, output_root=None, episodes: int = 1):
     env = create_environment(config, output_root=output_root)
-    assignment, bus, critic, _ = load_checkpoint(checkpoint_path)
-    wrapper = RewardModelWrapper(config["rlaif"].get("reward_model_checkpoint"), enabled=bool(config["rlaif"].get("enabled", False)))
-    results = [collect_episode(env, assignment, bus, critic, None, wrapper,
-               episode_id=int(config["training"]["seed"]) + index,
-               lambda_rlaif=float(config["rlaif"].get("lambda_rlaif", 1.0)), deterministic=True)
-               for index in range(episodes)]
+    actors, critic, _ = load_checkpoint(checkpoint_path)
+    wrapper = RewardModelWrapper(
+        config["rlaif"].get("reward_model_checkpoint"),
+        enabled=bool(config["rlaif"].get("enabled", False)),
+    )
+    results = [
+        collect_episode(
+            env,
+            actors,
+            critic,
+            None,
+            wrapper,
+            episode_id=int(config["training"]["seed"]) + index,
+            lambda_rlaif=float(config["rlaif"].get("lambda_rlaif", 1.0)),
+            deterministic=True,
+        )
+        for index in range(episodes)
+    ]
     summary = {key: float(np.mean([float(row[key]) for row in results])) for key in results[0]}
     payload = {"checkpoint": str(checkpoint_path), "episodes": results, "summary": summary}
-    path = Path(config["output"]["eval_path"]); path.parent.mkdir(parents=True, exist_ok=True)
+    path = Path(config["output"]["eval_path"])
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return payload

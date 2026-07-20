@@ -10,9 +10,17 @@ def test_config_loading():
     config=load_config(ROOT/'configs/train_mappo_async.yaml')
     assert config['training']['gamma']==.99 and config['rlaif']['enabled'] is False
 
-def test_agent_event_pairs_are_asynchronous():
-    validate_decision('assignment','PARCEL_ARRIVAL'); validate_decision('bus','BUS_ARRIVAL')
-    with pytest.raises(ValueError): validate_decision('bus','PARCEL_ARRIVAL')
+def test_agent_event_pairs_include_four_agent_solution_method():
+    for agent, event in (
+        ("assignment", "PARCEL_RELEASE"),
+        ("truck", "TRUCK_AVAILABLE"),
+        ("bus", "BUS_DEPARTURE"),
+        ("bus", "BUS_ARRIVAL"),
+        ("station", "STATION_OPERATION"),
+    ):
+        validate_decision(agent, event)
+    with pytest.raises(ValueError):
+        validate_decision("station", "BUS_ARRIVAL")
 
 def test_disabled_rlaif_needs_no_checkpoint(tmp_path):
     wrapper=RewardModelWrapper(tmp_path/'missing.pt',enabled=False)
@@ -21,14 +29,20 @@ def test_disabled_rlaif_needs_no_checkpoint(tmp_path):
 def test_enabled_rlaif_requires_real_checkpoint(tmp_path):
     with pytest.raises(RewardModelCheckpointError): RewardModelWrapper(tmp_path/'missing.pt',enabled=True)
 
-def test_rlaif_only_assignment_and_never_bus():
+def test_rlaif_only_assignment_and_never_other_agents():
     class Wrapper:
         enabled=True
         def score(self,*args): return 3.0
     assert transition_reward('assignment',2.0,Wrapper(),lambda_rlaif=.5,state_features=[0],action_features=[0],action_id=0)==(3.5,3.0)
-    assert transition_reward('bus',2.0,Wrapper(),lambda_rlaif=99)==(2.0,0.0)
+    for agent in ("truck", "bus", "station"):
+        assert transition_reward(agent,2.0,Wrapper(),lambda_rlaif=99)==(2.0,0.0)
 
-def test_smoke_contract():
+def test_smoke_contract_collects_four_agent_transitions():
     from experiments.smoke_test_mappo_async import run_smoke_test
     result=run_smoke_test()
-    assert result['skipped'] or (result['assignment_transitions']>0 and result['bus_transitions']>0)
+    assert result['skipped'] or (
+        result['assignment_transitions']>0
+        and result['truck_transitions']>0
+        and result['bus_transitions']>0
+        and result['station_transitions']>0
+    )

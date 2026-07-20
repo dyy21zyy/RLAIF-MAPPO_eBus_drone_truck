@@ -7,14 +7,20 @@ from typing import Any, Sequence
 from training.reward_model_wrapper import RewardModelWrapper
 
 ASSIGNMENT_AGENT = "assignment"
+TRUCK_AGENT = "truck"
 BUS_AGENT = "bus"
-ASSIGNMENT_EVENT = "PARCEL_ARRIVAL"
-BUS_EVENT = "BUS_ARRIVAL"
+STATION_AGENT = "station"
+VALID_AGENT_EVENTS = {
+    ASSIGNMENT_AGENT: {"PARCEL_RELEASE"},
+    TRUCK_AGENT: {"TRUCK_AVAILABLE"},
+    BUS_AGENT: {"BUS_DEPARTURE", "BUS_ARRIVAL"},
+    STATION_AGENT: {"STATION_OPERATION"},
+}
+RLAIF_AGENT_TYPES = {ASSIGNMENT_AGENT}
 
 
 def validate_decision(agent_id: str, event_type: str) -> None:
-    expected = {ASSIGNMENT_AGENT: ASSIGNMENT_EVENT, BUS_AGENT: BUS_EVENT}
-    if agent_id not in expected or event_type != expected[agent_id]:
+    if agent_id not in VALID_AGENT_EVENTS or event_type not in VALID_AGENT_EVENTS[agent_id]:
         raise ValueError(f"Invalid asynchronous decision pairing: {agent_id}/{event_type}")
 
 
@@ -29,9 +35,9 @@ def transition_reward(
     action_id: int | None = None,
 ) -> tuple[float, float]:
     """Return ``(total, learned_reward)``; learned reward is assignment-only."""
-    if agent_id == BUS_AGENT:
+    if agent_id in VALID_AGENT_EVENTS and agent_id not in RLAIF_AGENT_TYPES:
         return float(env_reward), 0.0
-    if agent_id != ASSIGNMENT_AGENT:
+    if agent_id not in RLAIF_AGENT_TYPES:
         raise ValueError(f"Unknown agent_id: {agent_id}")
     learned = 0.0
     if reward_wrapper.enabled:

@@ -10,6 +10,7 @@ training:
   batch_size: 128
   gamma: 0.99
   gae_lambda: 0.95
+  event_time_reference_min: 1.0
   clip_eps: 0.2
   lr_actor: 0.0003
   lr_critic: 0.0003
@@ -17,8 +18,11 @@ training:
   ent_coef: 0.01
   max_grad_norm: 0.5
 networks:
+  actor_hidden_dims: [256, 256]
   assignment_hidden_dims: [256, 256]
+  truck_hidden_dims: [256, 256]
   bus_hidden_dims: [256, 256]
+  station_hidden_dims: [256, 256]
   critic_hidden_dims: [256, 256]
 rlaif:
   enabled: false
