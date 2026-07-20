@@ -77,6 +77,93 @@ class BusActor(MaskedCategoricalActor):
         super().__init__(obs_dim, len(BUS_CHARGING_ACTIONS), hidden_dims)
 
 
+class CandidateScoringActor(nn.Module):
+    """Masked actor that scores each observation/candidate-action pair."""
+
+    def __init__(
+        self, obs_dim: int, candidate_feature_dim: int, hidden_dims: Sequence[int] = (256, 256)
+    ) -> None:
+        super().__init__()
+        self.obs_dim = int(obs_dim)
+        self.candidate_feature_dim = int(candidate_feature_dim)
+        self.hidden_dims = tuple(int(value) for value in hidden_dims)
+        self.scorer = _mlp(self.obs_dim + self.candidate_feature_dim, self.hidden_dims, 1)
+
+    def distribution(
+        self, observations: Tensor, candidate_features: Tensor, action_masks: Tensor
+    ) -> Categorical:
+        if observations.ndim == 1:
+            observations = observations.unsqueeze(0)
+        if candidate_features.ndim == 2:
+            candidate_features = candidate_features.unsqueeze(0)
+        if action_masks.ndim == 1:
+            action_masks = action_masks.unsqueeze(0)
+        if observations.shape[-1] != self.obs_dim:
+            raise ValueError("Observation dimension does not match actor")
+        if candidate_features.shape[-1] != self.candidate_feature_dim:
+            raise ValueError("Candidate-feature dimension does not match actor")
+        if candidate_features.shape[:2] != action_masks.shape[:2]:
+            raise ValueError("Candidate features and action mask must align")
+        repeated_obs = observations.float().unsqueeze(1).expand(
+            -1, candidate_features.shape[1], -1
+        )
+        inputs = torch.cat((repeated_obs, candidate_features.float()), dim=-1)
+        logits = self.scorer(inputs).squeeze(-1)
+        masks = action_masks.to(device=logits.device, dtype=torch.bool)
+        if (~masks.any(dim=-1)).any():
+            raise ValueError("Action mask must contain at least one feasible action")
+        return Categorical(logits=logits.masked_fill(~masks, MASKED_LOGIT))
+
+    def act(
+        self,
+        observation,
+        candidate_features,
+        action_mask,
+        *,
+        deterministic: bool = False,
+    ) -> tuple[int, float]:
+        with torch.no_grad():
+            distribution = self.distribution(
+                torch.as_tensor(observation, dtype=torch.float32),
+                torch.as_tensor(candidate_features, dtype=torch.float32),
+                torch.as_tensor(action_mask, dtype=torch.bool),
+            )
+            action = distribution.probs.argmax(dim=-1) if deterministic else distribution.sample()
+            log_prob = distribution.log_prob(action)
+        return int(action.item()), float(log_prob.item())
+
+    def evaluate_actions(
+        self,
+        observations: Tensor,
+        candidate_features: Tensor,
+        actions: Tensor,
+        action_masks: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        distribution = self.distribution(observations, candidate_features, action_masks)
+        actions = actions.long().reshape(-1)
+        return distribution.log_prob(actions), distribution.entropy()
+
+
+def build_actor_registry(
+    specs: dict[str, tuple[int, int]], hidden_dims: dict[str, Sequence[int]]
+) -> nn.ModuleDict:
+    """Build the Stage 9 four-agent candidate-scoring actor registry."""
+
+    required = {"assignment", "truck", "bus", "station"}
+    if set(specs) != required:
+        raise ValueError(f"Actor specs must cover exactly {sorted(required)}")
+    default_hidden = tuple(hidden_dims.get("default", (256, 256)))
+    actors = {
+        agent_id: CandidateScoringActor(
+            obs_dim=obs_dim,
+            candidate_feature_dim=candidate_dim,
+            hidden_dims=hidden_dims.get(agent_id, default_hidden),
+        )
+        for agent_id, (obs_dim, candidate_dim) in specs.items()
+    }
+    return nn.ModuleDict(actors)
+
+
 class CentralizedCritic(nn.Module):
     """Shared value function over the environment's global state."""
 
