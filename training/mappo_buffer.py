@@ -7,7 +7,7 @@ from typing import Any, Iterator
 
 import numpy as np
 
-VALID_AGENTS = {"assignment", "bus"}
+VALID_AGENTS = {"assignment", "truck", "bus", "station"}
 
 
 @dataclass
@@ -17,6 +17,8 @@ class AsyncTransition:
     global_state: list[float]
     action: int
     action_mask: list[bool]
+    candidate_features: list[list[float]]
+    candidate_feature_names: tuple[str, ...]
     log_prob: float
     value: float
     reward: float
@@ -48,6 +50,11 @@ class AsyncMAPPOBuffer:
             raise ValueError("Transition action and mask are inconsistent")
         if not transition.action_mask[transition.action]:
             raise ValueError("Cannot append an infeasible action")
+        if len(transition.candidate_features) != len(transition.action_mask):
+            raise ValueError("Candidate features must align with the action mask")
+        for row in transition.candidate_features:
+            if len(row) != len(transition.candidate_feature_names):
+                raise ValueError("Candidate feature rows must match candidate_feature_names")
         self.transitions.append(transition)
 
     def by_agent(self, agent_id: str) -> list[AsyncTransition]:
@@ -55,21 +62,33 @@ class AsyncMAPPOBuffer:
             raise ValueError(f"Unknown agent_id: {agent_id}")
         return [item for item in self.transitions if item.agent_id == agent_id]
 
-    def compute_returns_and_advantages(self, gamma: float, gae_lambda: float) -> tuple[np.ndarray, np.ndarray]:
+    def compute_returns_and_advantages(
+        self,
+        gamma: float,
+        gae_lambda: float,
+        reference_time_unit: float = 1.0,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Compute GAE along the real event stream, resetting at episode boundaries."""
         count = len(self.transitions)
         advantages = np.zeros(count, dtype=np.float32)
         gae = 0.0
+        time_unit = max(float(reference_time_unit), 1e-8)
         for index in range(count - 1, -1, -1):
             item = self.transitions[index]
             next_item = self.transitions[index + 1] if index + 1 < count else None
             same_episode = next_item is not None and next_item.episode_id == item.episode_id
             nonterminal = 0.0 if item.done else 1.0
             next_value = next_item.value if same_episode and not item.done else 0.0
-            delta = item.reward + float(gamma) * nonterminal * next_value - item.value
+            elapsed = (
+                max(0.0, float(next_item.event_time) - float(item.event_time))
+                if same_episode
+                else time_unit
+            )
+            discount = float(gamma) ** (elapsed / time_unit)
+            delta = item.reward + discount * nonterminal * next_value - item.value
             if not same_episode:
                 gae = 0.0
-            gae = delta + float(gamma) * float(gae_lambda) * nonterminal * gae
+            gae = delta + discount * float(gae_lambda) * nonterminal * gae
             advantages[index] = gae
         self.returns = advantages + np.asarray([item.value for item in self.transitions], dtype=np.float32)
         if count:
