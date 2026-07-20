@@ -204,6 +204,26 @@
   still requires the Stage 5 Runtime Gate. Stage 8 is now implemented separately
   as evaluation code and does not retroactively broaden Stage 7 semantics.
 
+## Stage 9 four-agent MAPPO guardrails
+
+- Stage 9 four-agent asynchronous MAPPO has exactly four active policy agent ids:
+  assignment, truck, bus, and station. Do not add inactive rows or a fifth bus
+  sub-agent for departure versus arrival events.
+- Every policy step must consume candidate actions, candidate features, and
+  action masks from the environment observation. Do not rebuild masks inside the
+  trainer with heuristic shortcuts.
+- The actor registry must be keyed by `agent_id`; the centralized critic remains
+  shared over `get_global_state()`.
+- The rollout buffer stores only activated-agent transitions and uses event-time
+  discounting over elapsed minutes. Do not convert the event stream to uniform
+  fake timesteps without recording that modeling change.
+- RLAIF remains assignment-scoped until real multi-agent preference labels and a
+  validated checkpoint exist. No rule score, heuristic preference,
+  objective-feature label, evaluator reason text, or blank template may become a
+  learned reward.
+- Stage 9 smoke results validate wiring only. They are not final benchmark,
+  ablation, sensitivity, or RLAIF-enabled experiment evidence.
+
 ## Stage 8 experiment pitfalls
 
 - A deterministic heuristic is a baseline, not an AI preference label and not reward-model supervision.

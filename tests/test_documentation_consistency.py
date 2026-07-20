@@ -80,3 +80,23 @@ def test_original_scale_real_transit_docs_preserve_source_boundaries() -> None:
     assert "fallback_test_only" in trace
     assert "Do not randomize the real bus route" in randomness
     assert "source-aware transit context" in rlaif_flat
+
+
+def test_docs_describe_stage9_four_agent_mappo_boundary() -> None:
+    mdp = _read("docs/MDP_SPECIFICATION.md")
+    rlaif = _read("docs/RLAIF_WORKFLOW.md")
+    experiments = _read("docs/EXPERIMENTS.md")
+    combined = "\n".join((mdp, rlaif, experiments))
+
+    assert "Stage 9 four-agent asynchronous MAPPO" in combined
+    assert "assignment, truck, bus, and station" in combined
+    assert "candidate actions, candidate features, and action masks" in combined
+
+
+def test_docs_keep_four_agent_rlaif_no_fabrication_boundary() -> None:
+    rlaif = _read("docs/RLAIF_WORKFLOW.md")
+
+    assert (
+        "No rule score, heuristic preference, objective-feature label, evaluator reason text, "
+        "or blank template may become a learned reward"
+    ) in rlaif

@@ -79,6 +79,19 @@ These commands are code and interface validation only. Do not report them as fin
 Stage 8 comparisons. In particular, do not enable RLAIF unless the Stage 5 Runtime
 Gate has produced and validated the configured `reward_model.pt`.
 
+## Stage 9 four-agent code-gate runs (not final experiments)
+
+Stage 9 four-agent asynchronous MAPPO uses the same `configs/train_mappo_async.yaml`
+entry point, but the checkpoint metadata is `stage: 9` and
+`algorithm: four_agent_asynchronous_mappo`. The smoke gate validates assignment,
+truck, bus, and station transitions, candidate actions, candidate features, and
+action masks.
+
+Training logs four decision counts, four policy-loss/entropy/KL/clip-fraction
+families, shared critic loss, and delivery/resource metrics. These outputs are
+code-gate evidence only. They are not benchmark, ablation, sensitivity, or
+paper-ready RLAIF-enabled experiment results.
+
 
 # Stage 8 experiment framework
 

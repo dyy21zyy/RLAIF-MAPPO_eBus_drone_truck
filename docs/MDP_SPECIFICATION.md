@@ -111,3 +111,21 @@ actual event order and resets at episode boundaries. Initially, each transition
 uses the event-to-event environment reward. Optional learned reward is added only
 to assignment rows after strict Stage 5 checkpoint loading; bus rows never receive
 RLAIF.
+
+## Stage 9 four-agent asynchronous MAPPO code gate
+
+Stage 9 aligns the code surface with the 2026-07-20 Solution Method manuscript.
+It exposes assignment, truck, bus, and station decisions in the real event
+stream. Each active decision provides candidate actions, candidate features, and action masks, and the environment stores only the active agent row for that
+event. There is no inactive-agent padding and no simultaneous joint-action row.
+
+The Stage 9 observation events are `PARCEL_RELEASE` for assignment,
+`TRUCK_AVAILABLE` for truck dispatch, `BUS_DEPARTURE` and `BUS_ARRIVAL` for bus
+loading/charging, and `STATION_OPERATION` for station drone dispatch and battery
+operations. MAPPO uses event-specific candidate-scoring actors with a shared
+centralized critic over `get_global_state()`. Rollout storage applies
+event-time discounting over elapsed minutes.
+
+This is a code gate, not final experiment evidence. It does not fabricate
+preference labels, learned rewards, checkpoints, benchmark results, ablation
+results, or sensitivity results.

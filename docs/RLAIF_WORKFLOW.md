@@ -266,6 +266,22 @@ PyTorch is required to execute actors, critic, PPO updates, and checkpoint loadi
 Final RLAIF-enabled MAPPO runs remain blocked until the Stage 5 Runtime Gate has
 validated a trained checkpoint in such an environment.
 
+# Stage 9 Four-Agent RLAIF-MAPPO Code Gate
+
+Stage 9 four-agent asynchronous MAPPO exposes assignment, truck, bus, and station
+decisions from the real event stream. Every active decision carries candidate
+actions, candidate features, and action masks. The trainer stores only activated
+agent rows, applies event-time discounting, and trains event-specific
+candidate-scoring actors with one shared centralized critic.
+
+RLAIF remains assignment-scoped in this code gate because the repository has no
+validated multi-agent preference labels or trained reward checkpoint for truck,
+bus, or station choices. With `rlaif.enabled: false`, the wrapper does not inspect
+`reward_model.pt`. With `rlaif.enabled: true`, it must load a valid Stage 5
+checkpoint and may add learned reward only to assignment transitions.
+
+No rule score, heuristic preference, objective-feature label, evaluator reason text, or blank template may become a learned reward. This code gate is not final experiment evidence and does not fabricate labels, learned rewards, checkpoints, benchmark results, ablation results, or sensitivity results.
+
 ## Stage 8 evaluation boundary
 
 Stage 8 registers `assignment_ppo_rlaif` and `mappo_async_rlaif`, but runs them only when their learned-policy checkpoint, a valid Stage 5 `reward_model.pt`, and PyTorch are available. Disabled-RLAIF baselines do not touch the reward checkpoint. The rule-based Stage 8 policy must never be converted into preference labels or reward supervision: doing so would be a fabricated, circular substitute for AI feedback.
