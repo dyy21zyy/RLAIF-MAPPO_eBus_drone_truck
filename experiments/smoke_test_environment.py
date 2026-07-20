@@ -22,10 +22,13 @@ def run_smoke_test(config_path: str | Path, output_root: str | Path | None = Non
         instance = build_instance(config_path, fallback=True, output_root=output_root)
         env = DynamicDeliveryEnv(Path(instance["output_directory"]) / "instance.json")
         observation, _ = env.reset()
-        decisions = {"assignment": 0, "bus": 0}
+        decisions = {"assignment": 0, "truck": 0, "bus": 0, "station": 0}
+        decision_event_types: dict[str, int] = {}
         steps = 0
         while observation["agent"] != "terminal":
             decisions[observation["agent"]] += 1
+            event_type = str(observation["event_type"])
+            decision_event_types[event_type] = decision_event_types.get(event_type, 0) + 1
             observation, _reward, terminated, truncated, _info = env.step(first_feasible_policy(observation))
             steps += 1
             if steps > 10000:
@@ -46,6 +49,7 @@ def run_smoke_test(config_path: str | Path, output_root: str | Path | None = Non
             "steps": steps,
             "decision_events": steps,
             "decisions": decisions,
+            "decision_event_types": decision_event_types,
             "assignment_events": decisions["assignment"],
             "bus_charging_events": decisions["bus"],
             "delivered_parcels": delivered,

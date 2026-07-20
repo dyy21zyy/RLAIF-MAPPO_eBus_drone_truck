@@ -20,9 +20,15 @@ def environment(tmp_path: Path) -> DynamicDeliveryEnv:
     return DynamicDeliveryEnv(Path(instance["output_directory"]) / "instance.json")
 
 
-def advance_to_agent(env: DynamicDeliveryEnv, agent: str) -> dict[str, object]:
+def advance_to_agent(
+    env: DynamicDeliveryEnv, agent: str, event_type: str | None = None
+) -> dict[str, object]:
     observation, _ = env.reset()
-    while observation["agent"] not in {agent, "terminal"}:
+    while observation["agent"] != "terminal":
+        if observation["agent"] == agent and (
+            event_type is None or observation["event_type"] == event_type
+        ):
+            break
         observation, *_ = env.step(first_feasible_policy(observation))
     return observation
 
@@ -32,7 +38,7 @@ def test_reset_exposes_stable_assignment_schema(environment: DynamicDeliveryEnv)
 
     assert observation["agent"] == "assignment"
     assert observation["agent_id"] == "assignment"
-    assert observation["event_type"] == "PARCEL_ARRIVAL"
+    assert observation["event_type"] == "PARCEL_RELEASE"
     assert len(observation["features"]) == 17 + 10 * len(environment.station_ids)
     assert len(environment.get_global_state()) == 15
     assert len(observation["action_mask"]) == environment.assignment_action_size
@@ -176,9 +182,10 @@ def test_all_infeasible_actions_use_penalized_td_fallback(
 
 
 def test_bus_decision_uses_configured_charging_actions(environment: DynamicDeliveryEnv) -> None:
-    observation = advance_to_agent(environment, "bus")
+    observation = advance_to_agent(environment, "bus", "BUS_ARRIVAL")
 
     assert observation["agent"] == "bus"
+    assert observation["event_type"] == "BUS_ARRIVAL"
     assert len(observation["features"]) == 6
     assert len(observation["action_mask"]) == environment.bus_action_size
     assert observation["action_mask"][0]
@@ -210,7 +217,8 @@ def test_rejects_non_stage2_manifest(tmp_path: Path) -> None:
 
 
 def test_station_power_overload_is_soft_penalty(environment: DynamicDeliveryEnv) -> None:
-    observation = advance_to_agent(environment, "bus")
+    observation = advance_to_agent(environment, "bus", "BUS_ARRIVAL")
+    assert observation["event_type"] == "BUS_ARRIVAL"
     station_id = str(observation["entity_id"]).split(":", 1)[1]
     station = environment.stations[station_id]
     station.power_capacity_kw = 1.0
@@ -305,7 +313,8 @@ def test_locker_load_persists_until_delayed_drone_dispatch(
     environment._handle_station_arrival(parcel.parcel_id, station_id)
 
     assert station.locker_load_kg == pytest.approx(parcel.weight_kg)
-    assert any(event.kind == "drone_dispatch" for event in environment.events)
+    assert any(event.kind == "station_operation" for event in environment.events)
+    assert not any(event.kind == "drone_dispatch" for event in environment.events)
 
 
 def test_metrics_expose_station_penalty_amounts_and_durations(

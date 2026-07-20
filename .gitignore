@@ -7,6 +7,7 @@ venv/
 .worktrees/
 
 # Generated runtime artifacts
+work/
 logs/*
 !logs/.gitkeep
 outputs/*

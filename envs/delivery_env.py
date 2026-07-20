@@ -16,18 +16,29 @@ from typing import Any
 
 import numpy as np
 
-from envs.state_builder import build_assignment_features
+from envs.decision_schema import DecisionSurface
+from envs.state_builder import (
+    build_assignment_decision_surface,
+    build_bus_charging_decision_surface,
+    build_bus_loading_decision_surface,
+    build_station_decision_surface,
+    build_truck_decision_surface,
+)
 from utils.config import load_config
 
 EPSILON = 1e-9
 EVENT_PRIORITY = {
     "battery_ready": 0,
-    "drone_dispatch": 1,
-    "drone_return": 2,
-    "parcel_delivery": 3,
-    "parcel_station_arrival": 4,
-    "bus_arrival": 5,
-    "parcel_release": 6,
+    "drone_return": 1,
+    "station_operation": 2,
+    "drone_dispatch": 3,
+    "parcel_delivery": 4,
+    "parcel_bus_terminal_arrival": 5,
+    "parcel_station_arrival": 6,
+    "bus_departure": 7,
+    "bus_arrival": 8,
+    "truck_available": 9,
+    "parcel_release": 10,
 }
 
 
@@ -265,8 +276,12 @@ class DynamicDeliveryEnv:
         self.bus_freight_kg: dict[str, float] = {trip_id: 0.0 for trip_id in self.trip_rows}
         self.bus_segment_index: dict[str, int] = {trip_id: 0 for trip_id in self.trip_rows}
         self.pending_bus_parcels: dict[tuple[str, str], list[str]] = {}
+        self.pending_truck_tasks: list[dict[str, Any]] = []
+        self.pending_truck_decision_min: dict[int, float] = {}
+        self.bus_terminal_ready: dict[str, list[str]] = {}
+        self.waiting_station_parcels: dict[str, list[str]] = {}
         self.reward_total = 0.0
-        self.decision_counts = {"assignment": 0, "bus": 0}
+        self.decision_counts = {"assignment": 0, "truck": 0, "bus": 0, "station": 0}
         self.infeasible_action_corrections = 0
         self.fallback_feasibility_events = 0
         self.accumulated_power_overload = 0.0
@@ -298,6 +313,8 @@ class DynamicDeliveryEnv:
         for parcel in self.parcels.values():
             self._push(parcel.release_time_min, "parcel_release", {"parcel_id": parcel.parcel_id})
         for trip_id, rows in self.trip_stop_times.items():
+            if self._as_bool(self.trip_rows[trip_id]["freight_allowed"]):
+                self._push(float(rows[0]["departure_time"]), "bus_departure", {"trip_id": trip_id})
             first_station_index = next((i for i, row in enumerate(rows) if row["stop_id"] in self.stop_to_station), None)
             if first_station_index is not None:
                 self.bus_segment_index[trip_id] = first_station_index
@@ -340,9 +357,17 @@ class DynamicDeliveryEnv:
             parcel = self.parcels[decision.event.payload["parcel_id"]]
             parcel.action_id, parcel.mode, parcel.status = 0, "TD", "undelivered"
         elif decision.agent == "assignment":
-            reward += self._apply_assignment(decision.event.payload["parcel_id"], selected)
-        else:
+            reward += self._apply_assignment_decision(decision.event.payload["parcel_id"], selected)
+        elif decision.agent == "truck":
+            reward += self._apply_truck_action(decision.event, selected)
+        elif decision.agent == "bus" and decision.event.kind == "bus_departure":
+            reward += self._apply_bus_loading_action(decision.event, selected)
+        elif decision.agent == "bus":
             reward += self._apply_bus_action(decision.event, selected)
+        elif decision.agent == "station":
+            reward += self._apply_station_action(decision.event, selected)
+        else:
+            raise ValueError(f"Unknown decision agent: {decision.agent}")
         reward += self._advance()
         self.reward_total += reward
         info = self._info(reward)
@@ -367,17 +392,42 @@ class DynamicDeliveryEnv:
                 if fallback:
                     self.fallback_feasibility_events += 1
                 self.current_decision = Decision("assignment", event, mask, fallback)
+            elif event.kind == "truck_available":
+                truck_index = int(event.payload["truck_index"])
+                scheduled_time = self.pending_truck_decision_min.get(truck_index)
+                if scheduled_time is None or abs(scheduled_time - event.time_min) > EPSILON:
+                    continue
+                self.pending_truck_decision_min.pop(truck_index, None)
+                if not self.pending_truck_tasks:
+                    continue
+                truck = self.trucks[truck_index]
+                if truck.available_time > self.now_min + EPSILON:
+                    self._push_next_truck_decision()
+                    continue
+                surface = build_truck_decision_surface(self, truck)
+                self.current_decision = Decision("truck", event, surface.action_mask())
+            elif event.kind == "bus_departure":
+                surface = build_bus_loading_decision_surface(self, event.payload["trip_id"])
+                self.current_decision = Decision("bus", event, surface.action_mask())
             elif event.kind == "bus_arrival":
                 reward += self._handle_bus_arrival(event)
-                self.current_decision = Decision("bus", event, self._bus_mask(event))
+                surface = build_bus_charging_decision_surface(self, event)
+                self.current_decision = Decision("bus", event, surface.action_mask())
             elif event.kind == "parcel_delivery":
                 parcel = self.parcels[event.payload["parcel_id"]]
                 parcel.status, parcel.delivered_time_min = "delivered", self.now_min
                 lateness = max(0.0, self.now_min - parcel.deadline_min) * parcel.priority
                 parcel.cost += lateness
                 reward += self._charge_cost("parcel_lateness", lateness)
+            elif event.kind == "parcel_bus_terminal_arrival":
+                parcel = self.parcels[event.payload["parcel_id"]]
+                parcel.status = "at_bus_terminal"
+                self.bus_terminal_ready.setdefault(event.payload["trip_id"], []).append(parcel.parcel_id)
             elif event.kind == "parcel_station_arrival":
                 reward += self._handle_station_arrival(event.payload["parcel_id"], event.payload["station_id"])
+            elif event.kind == "station_operation":
+                surface = build_station_decision_surface(self, event.payload["station_id"])
+                self.current_decision = Decision("station", event, surface.action_mask())
             elif event.kind == "drone_dispatch":
                 reward += self._dispatch_drone(
                     event.payload["parcel_id"],
@@ -388,6 +438,8 @@ class DynamicDeliveryEnv:
             elif event.kind == "drone_return":
                 station = self.stations[event.payload["station_id"]]
                 station.drone_available_min[event.payload["drone_index"]] = self.now_min
+                if self.waiting_station_parcels.get(station.station_id):
+                    self._push(self.now_min, "station_operation", {"station_id": station.station_id})
             elif event.kind == "battery_ready":
                 station = self.stations[event.payload["station_id"]]
                 station.full_batteries += 1
@@ -397,6 +449,8 @@ class DynamicDeliveryEnv:
                     session for session in station.active_battery_charges
                     if session[1] > self.now_min + EPSILON
                 ]
+                if self.waiting_station_parcels.get(station.station_id):
+                    self._push(self.now_min, "station_operation", {"station_id": station.station_id})
         if self.current_decision is None and (not self.events or self.now_min >= self.horizon_min - EPSILON):
             if self.now_min < self.horizon_min:
                 reward += self._integrate_station_penalties(self.now_min, self.horizon_min)
@@ -415,6 +469,26 @@ class DynamicDeliveryEnv:
 
     def _earliest_truck(self) -> TruckState:
         return min(self.trucks, key=lambda truck: (truck.available_time, truck.truck_id))
+
+    def _earliest_truck_index(self) -> int:
+        return min(
+            range(len(self.trucks)),
+            key=lambda index: (self.trucks[index].available_time, self.trucks[index].truck_id),
+        )
+
+    def _push_next_truck_decision(self) -> None:
+        if self.trucks and self.pending_truck_tasks:
+            index = self._earliest_truck_index()
+            decision_time = max(self.now_min, self.trucks[index].available_time)
+            scheduled_time = self.pending_truck_decision_min.get(index)
+            if scheduled_time is not None and scheduled_time <= decision_time + EPSILON:
+                return
+            self.pending_truck_decision_min[index] = decision_time
+            self._push(
+                decision_time,
+                "truck_available",
+                {"truck_index": index},
+            )
 
     def _record_truck_trip(
         self,
@@ -435,6 +509,234 @@ class DynamicDeliveryEnv:
         truck.current_location_id = route[0]
         truck.route_history.append(route)
         parcel.truck_id = truck.truck_id
+
+    def _apply_assignment_decision(self, parcel_id: str, action: int) -> float:
+        """Convert assignment choices into truck tasks for four-agent control."""
+        parcel = self.parcels[parcel_id]
+        parcel.action_id = action
+        if action == 0:
+            parcel.mode = "TD"
+            depot = self.truck_location_index["depot_01"]
+            customer = self.truck_location_index[parcel_id]
+            travel = float(self.truck_time_min[depot, customer])
+            return_time = (
+                float(self.truck_time_min[customer, depot])
+                if self.config["truck"]["return_to_depot"]
+                else 0.0
+            )
+            service = float(self.config["network"]["customer_service_time_min"])
+            parcel.status = "awaiting_truck"
+            self.pending_truck_tasks.append(
+                {
+                    "kind": "direct_delivery",
+                    "parcel_id": parcel_id,
+                    "estimated_time_min": travel + service + return_time,
+                }
+            )
+            self._push_next_truck_decision()
+            return 0.0
+
+        station_offset = action - 1
+        if station_offset < len(self.station_ids):
+            parcel.mode = "TBD"
+            station_id = self.station_ids[station_offset]
+            trip = self._next_freight_trip(
+                self.now_min,
+                station_id,
+                parcel.weight_kg,
+                min(parcel.deadline_min, self.horizon_min),
+            )
+            if trip is None:
+                parcel.status = "undelivered"
+                return self._charge_cost("infeasible_action", 1.0)
+            trip_id, _arrival = trip
+            rows = self.trip_stop_times[trip_id]
+            terminal_stop = rows[0]["stop_id"]
+            terminal_location = self.truck_location_index[terminal_stop]
+            depot = self.truck_location_index["depot_01"]
+            travel = float(self.truck_time_min[depot, terminal_location])
+            return_time = (
+                float(self.truck_time_min[terminal_location, depot])
+                if self.config["truck"]["return_to_depot"]
+                else 0.0
+            )
+            parcel.status, parcel.station_id = "awaiting_truck", station_id
+            self.pending_truck_tasks.append(
+                {
+                    "kind": "bus_terminal_feeder",
+                    "parcel_id": parcel_id,
+                    "trip_id": trip_id,
+                    "station_id": station_id,
+                    "terminal_stop_id": terminal_stop,
+                    "estimated_time_min": travel + return_time,
+                }
+            )
+            self._push_next_truck_decision()
+            return 0.0
+
+        parcel.mode = "TLD"
+        station_id = self.station_ids[station_offset - len(self.station_ids)]
+        parcel.status, parcel.station_id = "awaiting_truck", station_id
+        depot = self.truck_location_index["depot_01"]
+        station = self.truck_location_index[station_id]
+        travel = float(self.truck_time_min[depot, station])
+        return_time = (
+            float(self.truck_time_min[station, depot])
+            if self.config["truck"]["return_to_depot"]
+            else 0.0
+        )
+        self.pending_truck_tasks.append(
+            {
+                "kind": "station_feeder",
+                "parcel_id": parcel_id,
+                "station_id": station_id,
+                "estimated_time_min": travel + return_time,
+            }
+        )
+        self._push_next_truck_decision()
+        return 0.0
+
+    def _apply_truck_action(self, event: Event, action: int) -> float:
+        truck = self.trucks[int(event.payload["truck_index"])]
+        if action >= len(self.pending_truck_tasks):
+            return 0.0
+        task = self.pending_truck_tasks.pop(action)
+        parcel = self.parcels[task["parcel_id"]]
+        if parcel.weight_kg > truck.remaining_capacity_kg + EPSILON:
+            self.pending_truck_tasks.insert(action, task)
+            return self._charge_cost("infeasible_action", 1.0)
+        if task["kind"] == "direct_delivery":
+            return self._execute_direct_truck_task(truck, parcel)
+        if task["kind"] == "station_feeder":
+            return self._execute_station_feeder_task(truck, parcel, task["station_id"])
+        if task["kind"] == "bus_terminal_feeder":
+            return self._execute_bus_terminal_feeder_task(truck, parcel, task)
+        return self._charge_cost("infeasible_action", 1.0)
+
+    def _execute_direct_truck_task(self, truck: TruckState, parcel: ParcelState) -> float:
+        start = max(self.now_min, truck.available_time) + parcel.weight_kg * float(
+            self.config["truck"]["loading_time_min_per_kg"]
+        )
+        depot = self.truck_location_index["depot_01"]
+        customer = self.truck_location_index[parcel.parcel_id]
+        travel = float(self.truck_time_min[depot, customer])
+        outbound_distance_km = float(self.truck_distance_m[depot, customer]) / 1000
+        return_distance_km = (
+            float(self.truck_distance_m[customer, depot]) / 1000
+            if self.config["truck"]["return_to_depot"]
+            else 0.0
+        )
+        service = float(self.config["network"]["customer_service_time_min"])
+        return_time = (
+            float(self.truck_time_min[customer, depot])
+            if self.config["truck"]["return_to_depot"]
+            else 0.0
+        )
+        completion = start + travel + service
+        available_time = completion + return_time
+        parcel.status = "in_transit"
+        self._push(completion, "parcel_delivery", {"parcel_id": parcel.parcel_id})
+        route = ["depot_01", parcel.parcel_id]
+        if self.config["truck"]["return_to_depot"]:
+            route.append("depot_01")
+        distance_km = outbound_distance_km + return_distance_km
+        self._record_truck_trip(
+            truck, parcel, route, available_time, distance_km, travel + return_time
+        )
+        truck_cost = (
+            float(self.config["truck"]["fixed_dispatch_cost"])
+            + distance_km * float(self.config["truck"]["cost_per_km"])
+            + (travel + return_time) * float(self.config["truck"]["cost_per_min"])
+        )
+        self._push_next_truck_decision()
+        return self._charge_cost("truck_cost", truck_cost)
+
+    def _execute_station_feeder_task(
+        self, truck: TruckState, parcel: ParcelState, station_id: str
+    ) -> float:
+        start = max(self.now_min, truck.available_time) + parcel.weight_kg * float(
+            self.config["truck"]["loading_time_min_per_kg"]
+        )
+        depot = self.truck_location_index["depot_01"]
+        station = self.truck_location_index[station_id]
+        travel = float(self.truck_time_min[depot, station])
+        return_time = (
+            float(self.truck_time_min[station, depot])
+            if self.config["truck"]["return_to_depot"]
+            else 0.0
+        )
+        arrival = start + travel + parcel.weight_kg * float(
+            self.config["truck"]["unloading_time_min_per_kg"]
+        )
+        available_time = arrival + return_time
+        parcel.status = "to_station"
+        self._push(arrival, "parcel_station_arrival", {"parcel_id": parcel.parcel_id, "station_id": station_id})
+        outbound_distance_km = float(self.truck_distance_m[depot, station]) / 1000
+        return_distance_km = (
+            float(self.truck_distance_m[station, depot]) / 1000
+            if self.config["truck"]["return_to_depot"]
+            else 0.0
+        )
+        distance_km = outbound_distance_km + return_distance_km
+        route = ["depot_01", station_id]
+        if self.config["truck"]["return_to_depot"]:
+            route.append("depot_01")
+        self._record_truck_trip(
+            truck, parcel, route, available_time, distance_km, travel + return_time
+        )
+        truck_cost = (
+            float(self.config["truck"]["fixed_dispatch_cost"])
+            + distance_km * float(self.config["truck"]["cost_per_km"])
+            + (travel + return_time) * float(self.config["truck"]["cost_per_min"])
+        )
+        self._push_next_truck_decision()
+        return self._charge_cost("truck_cost", truck_cost)
+
+    def _execute_bus_terminal_feeder_task(
+        self, truck: TruckState, parcel: ParcelState, task: dict[str, Any]
+    ) -> float:
+        terminal_stop = task["terminal_stop_id"]
+        start = max(self.now_min, truck.available_time) + parcel.weight_kg * float(
+            self.config["truck"]["loading_time_min_per_kg"]
+        )
+        depot = self.truck_location_index["depot_01"]
+        terminal = self.truck_location_index[terminal_stop]
+        travel = float(self.truck_time_min[depot, terminal])
+        return_time = (
+            float(self.truck_time_min[terminal, depot])
+            if self.config["truck"]["return_to_depot"]
+            else 0.0
+        )
+        arrival = start + travel + parcel.weight_kg * float(
+            self.config["truck"]["unloading_time_min_per_kg"]
+        )
+        available_time = arrival + return_time
+        parcel.status = "to_bus_terminal"
+        self._push(
+            arrival,
+            "parcel_bus_terminal_arrival",
+            {"parcel_id": parcel.parcel_id, "trip_id": task["trip_id"], "station_id": task["station_id"]},
+        )
+        outbound_distance_km = float(self.truck_distance_m[depot, terminal]) / 1000
+        return_distance_km = (
+            float(self.truck_distance_m[terminal, depot]) / 1000
+            if self.config["truck"]["return_to_depot"]
+            else 0.0
+        )
+        distance_km = outbound_distance_km + return_distance_km
+        route = ["depot_01", terminal_stop]
+        if self.config["truck"]["return_to_depot"]:
+            route.append("depot_01")
+        self._record_truck_trip(
+            truck, parcel, route, available_time, distance_km, travel + return_time
+        )
+        truck_cost = (
+            float(self.config["truck"]["fixed_dispatch_cost"])
+            + distance_km * float(self.config["truck"]["cost_per_km"])
+            + (travel + return_time) * float(self.config["truck"]["cost_per_min"])
+        )
+        self._push_next_truck_decision()
+        return self._charge_cost("truck_cost", truck_cost)
 
     def _station_load_kw(self, station: StationState, time_min: float) -> float:
         bus_charges = sum(end > time_min + EPSILON for end in station.active_bus_charges)
@@ -704,6 +1006,31 @@ class DynamicDeliveryEnv:
         # charger is available, then price any overload in ``_apply_bus_action``.
         return [True] + [charger_available] * (self.bus_action_size - 1)
 
+    def _apply_bus_loading_action(self, event: Event, action: int) -> float:
+        trip_id = event.payload["trip_id"]
+        surface = build_bus_loading_decision_surface(self, trip_id)
+        candidate = surface.candidates[action]
+        if candidate.action_type != "load_ready":
+            return 0.0
+        ready = self.bus_terminal_ready.get(trip_id, [])
+        capacity = float(self.config["bus"]["freight_capacity_kg"])
+        remaining = max(0.0, capacity - self.bus_freight_kg[trip_id])
+        loaded: list[str] = []
+        total_weight = 0.0
+        for parcel_id in list(ready):
+            parcel = self.parcels[parcel_id]
+            if total_weight + parcel.weight_kg <= remaining + EPSILON:
+                loaded.append(parcel_id)
+                total_weight += parcel.weight_kg
+        for parcel_id in loaded:
+            ready.remove(parcel_id)
+            parcel = self.parcels[parcel_id]
+            station_id = str(parcel.station_id)
+            self.bus_freight_kg[trip_id] += parcel.weight_kg
+            self.pending_bus_parcels.setdefault((trip_id, station_id), []).append(parcel_id)
+            parcel.status = "on_bus"
+        return 0.0
+
     def _apply_bus_action(self, event: Event, action: int) -> float:
         trip_id, stop_index = event.payload["trip_id"], event.payload["stop_index"]
         station = self.stations[event.payload["station_id"]]
@@ -732,28 +1059,28 @@ class DynamicDeliveryEnv:
         parcel, station = self.parcels[parcel_id], self.stations[station_id]
         parcel.status = "at_station"
         station.locker_load_kg += parcel.weight_kg
-        reward = 0.0
+        self.waiting_station_parcels.setdefault(station_id, []).append(parcel_id)
+        self._push(self.now_min, "station_operation", {"station_id": station_id})
+        return 0.0
+
+    def _apply_station_action(self, event: Event, action: int) -> float:
+        station_id = event.payload["station_id"]
+        surface = build_station_decision_surface(self, station_id)
+        candidate = surface.candidates[action]
+        if candidate.action_type != "dispatch_drone":
+            return 0.0
+        waiting = self.waiting_station_parcels.get(station_id, [])
+        if candidate.entity_id not in waiting:
+            return self._charge_cost("infeasible_action", 1.0)
+        station = self.stations[station_id]
         drone_index = min(range(station.drones), key=station.drone_available_min.__getitem__)
-        dispatch = max(self.now_min, station.drone_available_min[drone_index])
         if station.full_batteries <= 0:
-            reward += self._charge_cost("battery_shortage", 1.0)
-            dispatch = max(dispatch, station.battery_ready_min[0] if station.battery_ready_min else self.horizon_min + 1)
-            battery_reserved = False
-        else:
-            station.full_batteries -= 1
-            battery_reserved = True
-        _delivery, drone_return = self._drone_delivery_times(parcel_id, station_id, dispatch)
-        station.drone_available_min[drone_index] = drone_return
-        if dispatch > self.now_min + EPSILON:
-            parcel.status = "waiting_for_drone"
-            self._push(dispatch, "drone_dispatch", {
-                "parcel_id": parcel_id,
-                "station_id": station_id,
-                "drone_index": drone_index,
-                "battery_reserved": battery_reserved,
-            })
-            return reward
-        return reward + self._dispatch_drone(parcel_id, station_id, drone_index, battery_reserved)
+            return self._charge_cost("battery_shortage", 1.0)
+        if station.drone_available_min[drone_index] > self.now_min + EPSILON:
+            return 0.0
+        waiting.remove(candidate.entity_id)
+        station.full_batteries -= 1
+        return self._dispatch_drone(candidate.entity_id, station_id, drone_index, True)
 
     def _drone_delivery_times(
         self, parcel_id: str, station_id: str, dispatch: float
@@ -797,30 +1124,55 @@ class DynamicDeliveryEnv:
         self.current_decision = None
         return self._charge_cost("undelivered", float(undelivered))
 
-    def _observation(self) -> dict[str, Any]:
+    def _decision_surface(self) -> DecisionSurface | None:
         if self.current_decision is None:
-            return {"agent": "terminal", "agent_id": "terminal", "event_type": "TERMINAL", "features": [1.0], "action_mask": []}
+            return None
         event = self.current_decision.event
         if self.current_decision.agent == "assignment":
             parcel = self.parcels[event.payload["parcel_id"]]
-            features = build_assignment_features(self, parcel)
-            entity_id = parcel.parcel_id
-        else:
-            trip_id, station_id = event.payload["trip_id"], event.payload["station_id"]
-            station = self.stations[station_id]
-            features = [
-                self.now_min / max(self.horizon_min, 1.0),
-                self.bus_soc_kwh[trip_id] / max(float(self.config["bus"]["bus_battery_kwh"]), 1.0),
-                self.bus_delay_min[trip_id] / max(self.horizon_min, 1.0),
-                station.locker_load_kg / max(station.locker_capacity_kg, 1.0),
-                station.full_batteries / max(float(self.config["station"]["initial_full_batteries"]), 1.0),
-                self.bus_freight_kg[trip_id] / max(float(self.config["bus"]["freight_capacity_kg"]), 1.0),
-            ]
-            entity_id = f"{trip_id}:{station_id}"
-        event_type = "PARCEL_ARRIVAL" if self.current_decision.agent == "assignment" else "BUS_ARRIVAL"
-        return {"agent": self.current_decision.agent, "agent_id": self.current_decision.agent,
-                "event_type": event_type, "entity_id": entity_id, "time_min": self.now_min,
-                "features": features, "action_mask": list(self.current_decision.action_mask)}
+            return build_assignment_decision_surface(
+                self, parcel, list(self.current_decision.action_mask)
+            )
+        if self.current_decision.agent == "truck":
+            truck = self.trucks[int(event.payload["truck_index"])]
+            return build_truck_decision_surface(self, truck)
+        if self.current_decision.agent == "bus" and event.kind == "bus_departure":
+            return build_bus_loading_decision_surface(self, event.payload["trip_id"])
+        if self.current_decision.agent == "bus":
+            return build_bus_charging_decision_surface(self, event)
+        if self.current_decision.agent == "station":
+            return build_station_decision_surface(self, event.payload["station_id"])
+        raise ValueError(f"Unknown decision agent: {self.current_decision.agent}")
+
+    def _observation(self) -> dict[str, Any]:
+        surface = self._decision_surface()
+        if surface is None:
+            return {
+                "agent": "terminal",
+                "agent_id": "terminal",
+                "event_type": "TERMINAL",
+                "entity_id": None,
+                "time_min": self.now_min,
+                "features": [1.0],
+                "feature_names": ("terminal",),
+                "action_mask": [],
+                "candidate_actions": [],
+                "candidate_features": [],
+                "candidate_feature_names": (),
+            }
+        return {
+            "agent": surface.agent_id,
+            "agent_id": surface.agent_id,
+            "event_type": surface.event_type,
+            "entity_id": surface.entity_id,
+            "time_min": self.now_min,
+            "features": list(surface.features),
+            "feature_names": list(surface.feature_names),
+            "action_mask": surface.action_mask(),
+            "candidate_actions": surface.candidate_payloads(),
+            "candidate_features": surface.candidate_feature_matrix(),
+            "candidate_feature_names": list(surface.candidate_feature_names()),
+        }
 
     def get_global_state(self) -> list[float]:
         """Return a fixed-size centralized state shared by both Stage 7 agents."""

@@ -5,6 +5,8 @@ from __future__ import annotations
 from statistics import fmean
 from typing import Any
 
+from envs.decision_schema import ActionCandidate, DecisionSurface
+
 
 ASSIGNMENT_GLOBAL_FEATURE_NAMES = (
     "time_norm",
@@ -54,6 +56,47 @@ CANDIDATE_ACTION_FEATURE_NAMES = (
     "estimated_drone_time_norm",
     "estimated_locker_load_after_assignment_norm",
     "estimated_station_power_margin_norm",
+)
+
+TRUCK_FEATURE_NAMES = (
+    "time_norm",
+    "available_now",
+    "pending_task_count_norm",
+    "capacity_norm",
+)
+
+BUS_LOADING_FEATURE_NAMES = (
+    "time_norm",
+    "ready_parcel_count_norm",
+    "freight_load_norm",
+    "capacity_remaining_norm",
+)
+
+BUS_CHARGING_FEATURE_NAMES = (
+    "time_norm",
+    "soc_norm",
+    "delay_norm",
+    "locker_load_norm",
+    "full_batteries_norm",
+    "freight_load_norm",
+)
+
+STATION_OPERATION_FEATURE_NAMES = (
+    "time_norm",
+    "waiting_parcels_norm",
+    "locker_load_norm",
+    "idle_drones_norm",
+    "full_batteries_norm",
+    "power_margin_norm",
+)
+
+COMMON_CANDIDATE_FEATURE_NAMES = (
+    "action_type_id",
+    "estimated_time_norm",
+    "estimated_lateness_norm",
+    "capacity_after_norm",
+    "resource_margin_norm",
+    "idle_flag",
 )
 
 
@@ -286,6 +329,285 @@ def build_candidate_action_features(env: Any, parcel: Any, action_id: int, feasi
         "estimated_station_power_margin_norm": float(estimated_power_margin) / power_capacity,
         "infeasibility_reasons": reasons,
     }
+
+
+def build_assignment_decision_surface(env: Any, parcel: Any, mask: list[bool]) -> DecisionSurface:
+    """Return the four-agent candidate surface for parcel assignment."""
+
+    candidates = []
+    for action_id, feasible in enumerate(mask):
+        features = build_candidate_action_features(env, parcel, action_id, bool(feasible))
+        candidates.append(
+            ActionCandidate(
+                action_id=action_id,
+                action_type=str(features["action_name"]).split("_", 1)[0],
+                entity_id=str(features["action_name"]),
+                description=str(features["action_name"]),
+                features={key: float(features[key]) for key in CANDIDATE_ACTION_FEATURE_NAMES},
+                feasible=bool(feasible),
+                reasons=tuple(str(reason) for reason in features.get("infeasibility_reasons", ())),
+            )
+        )
+    return DecisionSurface(
+        agent_id="assignment",
+        event_type="PARCEL_RELEASE",
+        entity_id=parcel.parcel_id,
+        features=build_assignment_features(env, parcel),
+        feature_names=assignment_feature_names(env.station_ids),
+        candidates=candidates,
+    )
+
+
+def _common_candidate(
+    action_id: int,
+    action_type: str,
+    entity_id: str,
+    description: str,
+    *,
+    action_type_id: float,
+    estimated_time_norm: float = 0.0,
+    estimated_lateness_norm: float = 0.0,
+    capacity_after_norm: float = 0.0,
+    resource_margin_norm: float = 0.0,
+    idle_flag: float = 0.0,
+    feasible: bool = True,
+    reasons: tuple[str, ...] = (),
+) -> ActionCandidate:
+    return ActionCandidate(
+        action_id=action_id,
+        action_type=action_type,
+        entity_id=entity_id,
+        description=description,
+        features={
+            "action_type_id": action_type_id,
+            "estimated_time_norm": estimated_time_norm,
+            "estimated_lateness_norm": estimated_lateness_norm,
+            "capacity_after_norm": capacity_after_norm,
+            "resource_margin_norm": resource_margin_norm,
+            "idle_flag": idle_flag,
+        },
+        feasible=feasible,
+        reasons=reasons,
+    )
+
+
+def build_truck_decision_surface(env: Any, truck: Any) -> DecisionSurface:
+    """Build candidates for a truck-availability dispatch decision."""
+
+    horizon = max(float(env.horizon_min), 1.0)
+    capacity = max(float(env.config["truck"]["capacity_kg"]), 1.0)
+    pending_tasks = list(getattr(env, "pending_truck_tasks", []))
+    available = truck.available_time <= env.now_min + 1e-9
+    features = [
+        env.now_min / horizon,
+        float(available),
+        len(pending_tasks) / max(len(env.parcels), 1),
+        truck.remaining_capacity_kg / capacity,
+    ]
+    candidates: list[ActionCandidate] = []
+    for index, task in enumerate(pending_tasks):
+        parcel = env.parcels[str(task["parcel_id"])]
+        feasible = available and parcel.weight_kg <= truck.remaining_capacity_kg + 1e-9
+        task_time = float(task.get("estimated_time_min", 0.0))
+        candidates.append(
+            _common_candidate(
+                index,
+                str(task["kind"]),
+                parcel.parcel_id,
+                f"{task['kind']} for {parcel.parcel_id}",
+                action_type_id=1.0,
+                estimated_time_norm=task_time / horizon,
+                estimated_lateness_norm=max(0.0, env.now_min + task_time - parcel.deadline_min) / horizon,
+                capacity_after_norm=max(0.0, truck.remaining_capacity_kg - parcel.weight_kg) / capacity,
+                resource_margin_norm=truck.remaining_capacity_kg / capacity,
+                feasible=feasible,
+                reasons=() if feasible else ("truck_unavailable_or_capacity",),
+            )
+        )
+    candidates.append(
+        _common_candidate(
+            len(candidates),
+            "idle",
+            truck.truck_id,
+            "remain idle",
+            action_type_id=0.0,
+            idle_flag=1.0,
+            feasible=True,
+        )
+    )
+    return DecisionSurface(
+        agent_id="truck",
+        event_type="TRUCK_AVAILABLE",
+        entity_id=truck.truck_id,
+        features=features,
+        feature_names=TRUCK_FEATURE_NAMES,
+        candidates=candidates,
+    )
+
+
+def build_bus_loading_decision_surface(env: Any, trip_id: str) -> DecisionSurface:
+    """Build candidates for a bus-departure parcel loading decision."""
+
+    horizon = max(float(env.horizon_min), 1.0)
+    capacity = max(float(env.config["bus"]["freight_capacity_kg"]), 1.0)
+    ready = list(getattr(env, "bus_terminal_ready", {}).get(trip_id, []))
+    current_load = float(env.bus_freight_kg.get(trip_id, 0.0))
+    remaining = max(0.0, capacity - current_load)
+    loadable = []
+    total_weight = 0.0
+    for parcel_id in ready:
+        parcel = env.parcels[parcel_id]
+        if total_weight + parcel.weight_kg <= remaining + 1e-9:
+            loadable.append(parcel_id)
+            total_weight += parcel.weight_kg
+    candidates: list[ActionCandidate] = []
+    if loadable:
+        latest_deadline = min(env.parcels[parcel_id].deadline_min for parcel_id in loadable)
+        candidates.append(
+            _common_candidate(
+                0,
+                "load_ready",
+                trip_id,
+                "load ready terminal parcels",
+                action_type_id=1.0,
+                estimated_time_norm=env.now_min / horizon,
+                estimated_lateness_norm=max(0.0, env.now_min - latest_deadline) / horizon,
+                capacity_after_norm=(remaining - total_weight) / capacity,
+                resource_margin_norm=remaining / capacity,
+                feasible=True,
+            )
+        )
+    candidates.append(
+        _common_candidate(
+            len(candidates),
+            "idle",
+            trip_id,
+            "depart without loading additional parcels",
+            action_type_id=0.0,
+            capacity_after_norm=remaining / capacity,
+            resource_margin_norm=remaining / capacity,
+            idle_flag=1.0,
+            feasible=True,
+        )
+    )
+    return DecisionSurface(
+        agent_id="bus",
+        event_type="BUS_DEPARTURE",
+        entity_id=trip_id,
+        features=[
+            env.now_min / horizon,
+            len(ready) / max(len(env.parcels), 1),
+            current_load / capacity,
+            remaining / capacity,
+        ],
+        feature_names=BUS_LOADING_FEATURE_NAMES,
+        candidates=candidates,
+    )
+
+
+def build_bus_charging_decision_surface(env: Any, event: Any) -> DecisionSurface:
+    """Build candidates for an integrated-station bus charging decision."""
+
+    trip_id = event.payload["trip_id"]
+    station_id = event.payload["station_id"]
+    station = env.stations[station_id]
+    mask = env._bus_mask(event)
+    horizon = max(float(env.horizon_min), 1.0)
+    battery = max(float(env.config["bus"]["bus_battery_kwh"]), 1.0)
+    capacity = max(float(env.config["bus"]["freight_capacity_kg"]), 1.0)
+    candidates = []
+    for action_id, feasible in enumerate(mask):
+        duration_min = float(env.config["bus"]["charging_actions_sec"][action_id]) / 60.0
+        candidates.append(
+            _common_candidate(
+                action_id,
+                "charge" if duration_min > 0 else "no_charge",
+                f"{trip_id}:{station_id}",
+                f"charge {duration_min:.2f} minutes",
+                action_type_id=2.0 if duration_min > 0 else 0.0,
+                estimated_time_norm=duration_min / horizon,
+                capacity_after_norm=env.bus_soc_kwh[trip_id] / battery,
+                resource_margin_norm=_station_power_margin(env, station) / max(station.power_capacity_kw, 1.0),
+                idle_flag=float(duration_min == 0.0),
+                feasible=bool(feasible),
+                reasons=() if feasible else ("charger_unavailable",),
+            )
+        )
+    return DecisionSurface(
+        agent_id="bus",
+        event_type="BUS_ARRIVAL",
+        entity_id=f"{trip_id}:{station_id}",
+        features=[
+            env.now_min / horizon,
+            env.bus_soc_kwh[trip_id] / battery,
+            env.bus_delay_min[trip_id] / horizon,
+            station.locker_load_kg / max(station.locker_capacity_kg, 1.0),
+            station.full_batteries / max(float(env.config["station"]["initial_full_batteries"]), 1.0),
+            env.bus_freight_kg[trip_id] / capacity,
+        ],
+        feature_names=BUS_CHARGING_FEATURE_NAMES,
+        candidates=candidates,
+    )
+
+
+def build_station_decision_surface(env: Any, station_id: str) -> DecisionSurface:
+    """Build candidates for station drone dispatch and battery operation."""
+
+    station = env.stations[station_id]
+    waiting = list(getattr(env, "waiting_station_parcels", {}).get(station_id, []))
+    horizon = max(float(env.horizon_min), 1.0)
+    idle_drones = sum(value <= env.now_min + 1e-9 for value in station.drone_available_min)
+    candidates: list[ActionCandidate] = []
+    if waiting:
+        parcel = env.parcels[waiting[0]]
+        feasible = idle_drones > 0 and station.full_batteries > 0
+        candidates.append(
+            _common_candidate(
+                0,
+                "dispatch_drone",
+                parcel.parcel_id,
+                f"dispatch {parcel.parcel_id}",
+                action_type_id=1.0,
+                estimated_time_norm=_drone_time(env, station_id, parcel.parcel_id) / horizon,
+                estimated_lateness_norm=max(
+                    0.0,
+                    env.now_min + _drone_time(env, station_id, parcel.parcel_id) / 2.0 - parcel.deadline_min,
+                )
+                / horizon,
+                capacity_after_norm=max(0.0, station.locker_capacity_kg - station.locker_load_kg) / max(station.locker_capacity_kg, 1.0),
+                resource_margin_norm=station.full_batteries / max(float(env.config["station"]["initial_full_batteries"]), 1.0),
+                feasible=feasible,
+                reasons=() if feasible else ("drone_or_battery_unavailable",),
+            )
+        )
+    candidates.append(
+        _common_candidate(
+            len(candidates),
+            "idle",
+            station_id,
+            "no station dispatch",
+            action_type_id=0.0,
+            capacity_after_norm=max(0.0, station.locker_capacity_kg - station.locker_load_kg) / max(station.locker_capacity_kg, 1.0),
+            resource_margin_norm=_station_power_margin(env, station) / max(station.power_capacity_kw, 1.0),
+            idle_flag=1.0,
+            feasible=True,
+        )
+    )
+    return DecisionSurface(
+        agent_id="station",
+        event_type="STATION_OPERATION",
+        entity_id=station_id,
+        features=[
+            env.now_min / horizon,
+            len(waiting) / max(len(env.parcels), 1),
+            station.locker_load_kg / max(station.locker_capacity_kg, 1.0),
+            idle_drones / max(station.drones, 1),
+            station.full_batteries / max(float(env.config["station"]["initial_full_batteries"]), 1.0),
+            _station_power_margin(env, station) / max(station.power_capacity_kw, 1.0),
+        ],
+        feature_names=STATION_OPERATION_FEATURE_NAMES,
+        candidates=candidates,
+    )
 
 
 def build_system_summary(env: Any, parcel: Any) -> dict[str, Any]:
