@@ -15,7 +15,9 @@ def select_integrated_stations(stops: list[dict[str, Any]], config: dict[str, An
     count = int(config["network"]["num_integrated_stations"])
     if count > len(ordered) or count < 1:
         raise ValueError("num_integrated_stations must be between 1 and the number of bus stops")
-    indices = [0] if count == 1 else [round(i * (len(ordered) - 1) / (count - 1)) for i in range(count)]
+    configured = config.get("network", {}).get("integrated_station_stop_indices")
+    indices = [max(0, min(len(ordered) - 1, int(i) - 1)) for i in configured] if configured else ([0] if count == 1 else [round(i * (len(ordered) - 1) / (count - 1)) for i in range(count)])
+    count = len(indices)
     station_config = config["station"]
     stations = []
     for number, index in enumerate(indices, start=1):

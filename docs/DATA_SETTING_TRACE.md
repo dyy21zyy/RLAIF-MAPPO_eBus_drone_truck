@@ -67,3 +67,23 @@ Source labels:
 Formal paper parameters are defined in `configs/paper/base_small.yaml`, `configs/paper/base_medium.yaml`, and `configs/paper/base_large.yaml`. Each medium-instance parameter has provenance in `configs/paper/parameter_provenance.yaml` and is classified as `literature_adapted`, `project_extension`, `real_input`, `fallback_only`, or `derived`.
 
 Project-extension and fallback-only parameters must not be described as real data. Truck count, truck capacities, parcel volume distribution, minimum layover, non-service relocation time, truck costs, truck loading time, and truck unloading time are currently project extensions.
+
+## Phase 1 scenario generation trace
+
+Dynamic scenario generation uses independent seeds for network, parcels,
+passengers, travel times, initial bus energy, and station base load.  A full seed
+tuple reproduces the generated artifacts, while changing only `parcel_seed`
+changes parcel artifacts without changing timetable artifacts.
+
+Each build writes `scenario_manifest.json` with the scenario schema version,
+resolved configuration, configuration SHA-256, all seeds, generated artifact
+paths, artifact SHA-256 hashes, parameter provenance, generation timestamp, and
+best-effort git commit.  Formal paper parcel weights are sampled only from
+`{0.5, 1.0, ..., 4.5}` kg; legacy distributions above this range are treated as
+fallback-only compatibility.
+
+Drone reachability is defined by one-way station-to-customer distance <= 8 km,
+plus independent round-trip mission duration and payload checks.  Deadline
+creation uses nominal earliest feasible TD/TLD/TBD completion estimates before
+sampling tight/moderate/loose slack; these estimates are generation-only and do
+not define an offline assignment plan.

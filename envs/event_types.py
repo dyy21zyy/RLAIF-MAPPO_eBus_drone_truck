@@ -1,7 +1,6 @@
 """Event types for the final dynamic multi-agent contract.
 
-Phase 0 only freezes names used by later phases; it does not implement event
-execution semantics.
+Phase 1 uses PARCEL_RELEASE as the sole transition from UNRELEASED to assignment-ready parcels; assignment decisions must not bind TBD parcels to scheduled trips or vehicles.
 """
 
 from __future__ import annotations

@@ -135,3 +135,19 @@ results, or sensitivity results.
 Target final architecture: dynamic `PARCEL_RELEASE` assignment chooses only delivery mode plus target station (`TD`, `TBD_<station_id>`, `TLD_<station_id>`); `TRUCK_AVAILABLE` later chooses multi-parcel batches and routes; `ScheduledTrip` is distinct from persistent `PhysicalBusState`; station operation jointly decides drone dispatch and depleted-battery charging starts; multi-agent RLAIF covers assignment, truck, bus, and station agents.
 
 Actual current status: these later-phase behaviors are **specified** by contract and schema only. They are not claimed as implemented, runtime-validated, or experiment-validated in Phase 0.
+
+## Phase 1 dynamic parcel-release and assignment semantics
+
+Phase 1 parcels are initialized as `UNRELEASED`.  Reset schedules one `PARCEL_RELEASE`
+event at each parcel `release_time_min`; only that event moves the parcel to
+`PENDING_ASSIGNMENT` and exposes the assignment actor.  Unreleased parcels are not
+eligible for assignment and are excluded from operational truck, bus-terminal,
+station, drone, and pending-parcel queues.
+
+The assignment action space is limited to `TD`, `TBD_<station_id>`, and
+`TLD_<station_id>`.  Assignment records only the selected mode, target station,
+and assignment time/requirement metadata.  In particular, TBD no longer selects
+or reserves a scheduled trip, physical bus, bus departure, truck, route, or drone.
+A TBD parcel is first truck-fed to the bus terminal, waits in the generic terminal
+queue for its downstream station, and can be loaded by a later freight-carrying bus.
+Action-mask construction may estimate feasibility, but must remain side-effect free.
