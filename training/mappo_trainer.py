@@ -14,6 +14,9 @@ import torch
 from torch import nn
 
 from training.mappo_async import (
+    CANDIDATE_SCHEMA_VERSION,
+    EVENT_SCHEMA_VERSION,
+    OBSERVATION_SCHEMA_VERSION,
     RLAIF_AGENT_TYPES,
     VALID_AGENT_EVENTS,
     reward_decomposition,
@@ -21,12 +24,14 @@ from training.mappo_async import (
     validate_decision,
 )
 from training.mappo_buffer import AsyncMAPPOBuffer, AsyncTransition
-from training.mappo_networks import CandidateScoringActor, CentralizedCritic, build_actor_registry
+from training.entity_encoders import ENTITY_ENCODER_SCHEMA_VERSION
+from training.mappo_networks import EVENT_EMBEDDING_SCHEMA_VERSION, CandidateScoringActor, CentralizedCritic, build_actor_registry
 from training.ppo_trainer import create_environment
 from training.reward_model_wrapper import RewardModelWrapper
 
 AGENT_IDS = ("assignment", "truck", "bus", "station")
-FEATURE_SCHEMA_VERSION = 2
+FEATURE_SCHEMA_VERSION = 3
+CHECKPOINT_SCHEMA_VERSION = 3
 ACTOR_POLICY_FIELDS = tuple(f"{agent}_policy_loss" for agent in AGENT_IDS)
 ACTOR_ENTROPY_FIELDS = tuple(f"entropy_{agent}" for agent in AGENT_IDS)
 ACTOR_KL_FIELDS = tuple(f"approx_kl_{agent}" for agent in AGENT_IDS)
@@ -140,7 +145,7 @@ def collect_episode(
             raise RuntimeError(f"No MAPPO actor registered for {agent_id}")
         mask = [bool(value) for value in observation["action_mask"]]
         candidate_features, candidate_feature_names = _candidate_feature_payload(observation)
-        global_state = [float(value) for value in env.get_global_state()]
+        global_state = [float(value) for value in env.get_entity_critic_state()]
         actor = actors[agent_id]
         local_obs = _pad_vector(observation["features"], actor.obs_dim)
         action, log_prob = actor.act(
@@ -182,7 +187,7 @@ def collect_episode(
                     value=value,
                     reward=total_reward,
                     done=done,
-                    next_global_state=[float(value) for value in env.get_global_state()],
+                    next_global_state=[float(value) for value in env.get_entity_critic_state()],
                     event_type=event_type,
                     event_time=float(observation["time_min"]),
                     episode_id=episode_id,
@@ -327,8 +332,9 @@ def save_checkpoint(
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
-            "stage": 9,
-            "algorithm": "four_agent_asynchronous_mappo",
+            "checkpoint_schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "stage": 7,
+            "algorithm": "four_agent_asynchronous_mappo_env_reward_only",
             "actor_state_dicts": actors.state_dict(),
             "critic_state_dict": critic.state_dict(),
             "actor_optimizer_state_dicts": {
@@ -343,6 +349,14 @@ def save_checkpoint(
                 "station": "dispatch_drone or idle",
             },
             "feature_schema_version": FEATURE_SCHEMA_VERSION,
+            "event_schema_version": EVENT_SCHEMA_VERSION,
+            "event_embedding_schema_version": EVENT_EMBEDDING_SCHEMA_VERSION,
+            "observation_schema_version": OBSERVATION_SCHEMA_VERSION,
+            "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
+            "entity_encoder_schema_version": ENTITY_ENCODER_SCHEMA_VERSION,
+            "reward_scale_artifact_hash": config.get("reward", {}).get("scale_artifact_hash", "unavailable"),
+            "training_seed": config.get("training", {}).get("seed"),
+            "code_commit": _code_commit(),
             "training_metrics": metrics,
             "actor_specs": _actor_specs(actors),
             "dimensions": {
@@ -354,10 +368,30 @@ def save_checkpoint(
     )
 
 
+def _code_commit() -> str | None:
+    import subprocess
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        return None
+
+def _require_checkpoint_compatible(checkpoint: dict[str, Any]) -> None:
+    expected = {
+        "checkpoint_schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "event_schema_version": EVENT_SCHEMA_VERSION,
+        "observation_schema_version": OBSERVATION_SCHEMA_VERSION,
+        "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
+        "entity_encoder_schema_version": ENTITY_ENCODER_SCHEMA_VERSION,
+    }
+    for key, value in expected.items():
+        if checkpoint.get(key) != value:
+            raise ValueError(f"Incompatible MAPPO checkpoint {key}: expected {value}, got {checkpoint.get(key)}")
+    if checkpoint.get("stage") != 7 or checkpoint.get("algorithm") != "four_agent_asynchronous_mappo_env_reward_only":
+        raise ValueError("Checkpoint is not a Phase 7 four-agent asynchronous MAPPO environment-reward checkpoint")
+
 def load_checkpoint(path):
     checkpoint = torch.load(Path(path), map_location="cpu", weights_only=False)
-    if checkpoint.get("stage") != 9 or checkpoint.get("algorithm") != "four_agent_asynchronous_mappo":
-        raise ValueError("Checkpoint is not a Stage 9 four-agent asynchronous MAPPO checkpoint")
+    _require_checkpoint_compatible(checkpoint)
     specs_payload = checkpoint["actor_specs"]
     specs = {
         agent: (int(payload["obs_dim"]), int(payload["candidate_feature_dim"]))
@@ -460,7 +494,7 @@ def _models(env, config):
     specs = _collect_actor_specs(env, int(config["training"]["seed"]))
     return (
         build_actor_registry(specs, _actor_hidden_dims(config)),
-        CentralizedCritic(len(env.get_global_state()), config["networks"]["critic_hidden_dims"]),
+        CentralizedCritic(len(env.get_entity_critic_state()), config["networks"]["critic_hidden_dims"]),
     )
 
 
@@ -493,7 +527,7 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
                 buffer,
                 wrapper,
                 episode_id=seed + episode,
-                lambda_rlaif=float(config["rlaif"].get("lambda_rlaif", 1.0)),
+                lambda_rlaif=0.0,
             )
             for episode in range(start, min(start + rollout_episodes, int(training["total_episodes"])))
         ]
@@ -545,7 +579,7 @@ def evaluate_mappo_async(config: dict[str, Any], checkpoint_path, *, output_root
             None,
             wrapper,
             episode_id=int(config["training"]["seed"]) + index,
-            lambda_rlaif=float(config["rlaif"].get("lambda_rlaif", 1.0)),
+            lambda_rlaif=0.0,
             deterministic=True,
         )
         for index in range(episodes)

@@ -37,7 +37,7 @@ def run_smoke_test():
         if row['station_decision_count'] < 1: raise AssertionError('No station transition collected')
         if not all(__import__('math').isfinite(float(row[key])) for key in required): raise AssertionError('Non-finite MAPPO loss')
         actors,critic,checkpoint=load_checkpoint(config['output']['checkpoint_path'])
-        if checkpoint['stage'] != 9 or checkpoint['algorithm'] != 'four_agent_asynchronous_mappo':
+        if checkpoint['stage'] != 7 or checkpoint['algorithm'] != 'four_agent_asynchronous_mappo_env_reward_only':
             raise AssertionError('Checkpoint metadata failed')
         if set(actors) != {'assignment','truck','bus','station'} or critic.global_state_dim < 1:
             raise AssertionError('Checkpoint round trip failed')
@@ -51,6 +51,6 @@ def run_smoke_test():
 
 def main():
     result=run_smoke_test()
-    print(('SKIP: '+result['reason']) if result['skipped'] else 'Stage 9 four-agent asynchronous MAPPO smoke test passed.\n'+str(result))
+    print(('SKIP: '+result['reason']) if result['skipped'] else 'Phase 7 four-agent asynchronous MAPPO smoke test passed.\n'+str(result))
     return 0
 if __name__=='__main__': raise SystemExit(main())

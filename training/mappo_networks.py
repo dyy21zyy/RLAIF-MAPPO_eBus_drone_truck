@@ -8,6 +8,29 @@ import torch
 from torch import Tensor, nn
 from torch.distributions import Categorical
 
+
+EVENT_EMBEDDING_SCHEMA_VERSION = 1
+EVENT_TYPES = (
+    "PARCEL_RELEASE",
+    "TRUCK_AVAILABLE",
+    "BUS_TERMINAL_DEPARTURE",
+    "BUS_STATION_ARRIVAL",
+    "STATION_OPERATION",
+)
+BUS_OPERATION_TYPES = ("loading", "charging")
+
+def event_embedding(event_type: str, *, bus_operation: str | None = None) -> list[float]:
+    """Explicit event embedding; bus loading and charging occupy different slots."""
+    if event_type not in EVENT_TYPES:
+        raise ValueError(f"Unknown event type: {event_type}")
+    values = [1.0 if event_type == item else 0.0 for item in EVENT_TYPES]
+    if event_type == "BUS_TERMINAL_DEPARTURE":
+        bus_operation = "loading"
+    elif event_type == "BUS_STATION_ARRIVAL":
+        bus_operation = "charging"
+    values.extend([1.0 if bus_operation == item else 0.0 for item in BUS_OPERATION_TYPES])
+    return values
+
 MASKED_LOGIT = -1e9
 BUS_CHARGING_ACTIONS = (0, 15, 30, 45, 60, 75, 90, 105, 120)
 
