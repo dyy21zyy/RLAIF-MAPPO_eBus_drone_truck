@@ -13,7 +13,7 @@ BUS_COLUMNS = ["route_id", "stop_id", "stop_name", "stop_sequence", "lat", "lon"
 
 def _fallback_stops(graph: RoadGraph, config: dict[str, Any]) -> list[dict[str, Any]]:
     ordered_nodes = sorted(graph.nodes, key=lambda node: (graph.nodes[node]["y"], graph.nodes[node]["x"]))
-    stop_count = min(20, len(ordered_nodes))
+    stop_count = min(int(config.get("network", {}).get("num_stops", 20)), len(ordered_nodes))
     indices = [round(i * (len(ordered_nodes) - 1) / (stop_count - 1)) for i in range(stop_count)]
     bus = config["bus"]
     return [{

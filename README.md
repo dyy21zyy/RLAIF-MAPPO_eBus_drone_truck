@@ -294,3 +294,17 @@ Current RLAIF support is assignment-agent-only: AI preferences train a reward mo
 The formal Phase 0 paper-code contract is documented in `docs/paper_code_alignment/final_dynamic_contract.md`. The repository now includes schema-level entities, event types, and validators for the target dynamic multi-agent architecture, but later-phase capabilities remain **specified** rather than implemented: truck batching, physical-bus circulation, passenger dynamics, station battery decisions, and multi-agent RLAIF.
 
 Formal paper configurations live in `configs/paper/`: `base_small.yaml`, `base_medium.yaml`, `base_large.yaml`, `train_mappo_env.yaml`, and `train_mappo_rlaif.yaml`. The legacy 20-episode MAPPO config is smoke-only and should not be used as the formal paper training configuration.
+
+### Phase 1 dynamic scenarios
+
+The data pipeline now emits a versioned `scenario_manifest.json` alongside each
+instance.  Use separate seeds (`network_seed`, `parcel_seed`, `passenger_seed`,
+`travel_time_seed`, `initial_bus_energy_seed`, and `station_base_load_seed`) for
+reproducible scenario generation.  Paper parcel scenarios sample weights from
+0.5 kg increments between 0.5 and 4.5 kg, assign release/deadline fields, and
+store reachable station metadata.
+
+The environment treats parcel assignment as a release-time decision over only
+`TD`, `TBD_<station_id>`, and `TLD_<station_id>`.  TBD choices target a downstream
+station and terminal transfer requirement, but do not bind a specific future trip
+or vehicle during assignment.

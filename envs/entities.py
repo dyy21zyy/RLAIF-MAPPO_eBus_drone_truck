@@ -45,6 +45,11 @@ class ParcelAssignment:
     delivery_mode: str
     target_station_id: str | None = None
     assigned_at_min: float = 0.0
+    terminal_transfer_required: bool = False
+
+    def __post_init__(self) -> None:
+        if self.delivery_mode == "TBD" and self.target_station_id is None:
+            raise ValueError("TBD assignments must carry only a downstream target station")
 
 
 @dataclass(frozen=True)

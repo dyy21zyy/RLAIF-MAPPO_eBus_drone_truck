@@ -40,9 +40,9 @@ def run_smoke_test(config_path: str | Path, output_root: str | Path | None = Non
         assert env.terminated and not env.truncated
         assert decisions["assignment"] == instance["counts"]["parcels"]
         assert env.check_invariants() == []
-        delivered = sum(parcel.status == "delivered" for parcel in env.parcels.values())
+        delivered = sum(parcel.status in {"delivered", "DELIVERED"} for parcel in env.parcels.values())
         drone_deliveries = sum(
-            parcel.status == "delivered" and parcel.mode in {"TBD", "TLD"}
+            parcel.status in {"delivered", "DELIVERED"} and parcel.mode in {"TBD", "TLD"}
             for parcel in env.parcels.values()
         )
         return {
