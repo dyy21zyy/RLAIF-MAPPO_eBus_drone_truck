@@ -35,5 +35,9 @@ def collect_environment_metrics(env, *, bus_charging_count=0, bus_charging_energ
         "power_overload_amount": float(getattr(env, "accumulated_power_overload", 0.0)),
         "power_overload_duration": float(getattr(env, "accumulated_power_overload_duration", 0.0)),
         "peak_station_load": float(getattr(env, "peak_station_load_kw", 0.0)),
+        "station_power_overload_kw_min": float(getattr(env, "accumulated_power_overload", 0.0)),
+        "full_battery_count": float(sum(sum(b.status == "FULL" for b in getattr(st, "battery_states", [])) for st in getattr(env, "stations", {}).values())),
+        "depleted_battery_count": float(sum(sum(b.status == "DEPLETED" for b in getattr(st, "battery_states", [])) for st in getattr(env, "stations", {}).values())),
+        "charging_battery_count": float(sum(sum(b.status == "CHARGING" for b in getattr(st, "battery_states", [])) for st in getattr(env, "stations", {}).values())),
         "infeasible_action_count": env.infeasible_action_corrections, "fallback_feasibility_events": fallback_events,
     }

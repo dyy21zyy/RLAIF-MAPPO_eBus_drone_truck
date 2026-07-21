@@ -31,6 +31,13 @@ class ParcelState(str, Enum):
     FAILED = "FAILED"
 
 
+class DroneStatus(str, Enum):
+    AVAILABLE = "AVAILABLE"
+    IN_MISSION = "IN_MISSION"
+    RETURNING = "RETURNING"
+    TURNAROUND = "TURNAROUND"
+
+
 class BatteryState(str, Enum):
     FULL = "FULL"
     IN_USE = "IN_USE"
@@ -192,10 +199,29 @@ class PassengerStopState:
 @dataclass(frozen=True)
 class DroneState:
     drone_id: str
-    station_id: str
-    available_at_min: float
-    battery_id: str | None = None
-    payload_parcel_id: str | None = None
+    home_station_id: str
+    status: str = DroneStatus.AVAILABLE.value
+    available_time_min: float = 0.0
+    active_parcel_id: str | None = None
+    active_battery_id: str | None = None
+
+    @property
+    def station_id(self) -> str:
+        return self.home_station_id
+
+    @property
+    def available_at_min(self) -> float:
+        return self.available_time_min
+
+
+@dataclass(frozen=True)
+class BatteryStateEntity:
+    battery_id: str
+    home_station_id: str
+    status: str = BatteryState.FULL.value
+    charge_start_time_min: float | None = None
+    charge_completion_time_min: float | None = None
+    assigned_drone_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -223,10 +249,35 @@ class StationState:
 class StationOperationCandidate:
     candidate_id: str
     station_id: str
-    drone_parcel_matches: tuple[tuple[str, str], ...]
-    batteries_to_start_charging: tuple[str, ...]
-    feasible: bool
-    reasons: tuple[str, ...] = ()
+    dispatches: tuple[tuple[str, str, str], ...]
+    battery_ids_to_start_charging: tuple[str, ...]
+    estimated_delivery_times: tuple[float, ...] = ()
+    estimated_return_times: tuple[float, ...] = ()
+    estimated_parcel_lateness: tuple[float, ...] = ()
+    full_batteries_remaining: int = 0
+    depleted_batteries_remaining: int = 0
+    available_drones_remaining: int = 0
+    charging_slots_used_after_action: int = 0
+    projected_station_load: float = 0.0
+    projected_overload: float = 0.0
+    power_margin: float = 0.0
+    expected_overload_duration: float = 0.0
+    feasible: bool = True
+    infeasibility_reasons: tuple[str, ...] = ()
+    heuristic_source: str = "unknown"
+    idle_flag: bool = False
+
+    @property
+    def drone_parcel_matches(self) -> tuple[tuple[str, str], ...]:
+        return tuple((d, p) for d, p, _ in self.dispatches)
+
+    @property
+    def batteries_to_start_charging(self) -> tuple[str, ...]:
+        return self.battery_ids_to_start_charging
+
+    @property
+    def reasons(self) -> tuple[str, ...]:
+        return self.infeasibility_reasons
 
 
 @dataclass(frozen=True)

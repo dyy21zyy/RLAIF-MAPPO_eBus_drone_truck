@@ -8,6 +8,7 @@ from typing import Any
 from envs.decision_schema import ActionCandidate, DecisionSurface
 from envs.action_generators.bus_loading_actions import generate_bus_loading_candidates
 from envs.action_generators.bus_charging_actions import generate_bus_charging_candidates
+from envs.action_generators.station_actions import generate_station_operation_candidates, projected_load
 
 
 ASSIGNMENT_GLOBAL_FEATURE_NAMES = (
@@ -94,12 +95,11 @@ BUS_CHARGING_FEATURE_NAMES = (
 )
 
 STATION_OPERATION_FEATURE_NAMES = (
-    "time_norm",
-    "waiting_parcels_norm",
-    "locker_load_norm",
-    "idle_drones_norm",
-    "full_batteries_norm",
-    "power_margin_norm",
+    "time_norm", "waiting_parcels", "earliest_deadline_slack",
+    "available_drones", "busy_drones", "full_batteries", "depleted_batteries",
+    "charging_batteries", "charging_slots_available", "locker_load",
+    "locker_capacity", "active_bus_chargers", "station_base_load", "power_margin",
+    "projected_future_drone_returns", "projected_future_charge_completions",
 )
 
 COMMON_CANDIDATE_FEATURE_NAMES = (
@@ -487,68 +487,68 @@ def build_bus_charging_decision_surface(env: Any, event: Any) -> DecisionSurface
 
 
 def build_station_decision_surface(env: Any, station_id: str) -> DecisionSurface:
-    """Build station candidates: dispatch_drone for the first waiting parcel or idle.
-
-    Drone-battery recharge is scheduled by environment dynamics after dispatch;
-    it is not a learned station-agent action in this codebase.
-    """
-
+    """Build bounded joint station dispatch/charging candidates."""
     station = env.stations[station_id]
     waiting = list(getattr(env, "waiting_station_parcels", {}).get(station_id, []))
     horizon = max(float(env.horizon_min), 1.0)
-    idle_drones = sum(value <= env.now_min + 1e-9 for value in station.drone_available_min)
     candidates: list[ActionCandidate] = []
-    if waiting:
-        parcel = env.parcels[waiting[0]]
-        feasible = idle_drones > 0 and station.full_batteries > 0
-        candidates.append(
-            _common_candidate(
-                0,
-                "dispatch_drone",
-                parcel.parcel_id,
-                f"dispatch {parcel.parcel_id}",
-                action_type_id=1.0,
-                estimated_time_norm=_drone_time(env, station_id, parcel.parcel_id) / horizon,
-                estimated_lateness_norm=max(
-                    0.0,
-                    env.now_min + _drone_time(env, station_id, parcel.parcel_id) / 2.0 - parcel.deadline_min,
-                )
-                / horizon,
-                capacity_after_norm=max(0.0, station.locker_capacity_kg - station.locker_load_kg) / max(station.locker_capacity_kg, 1.0),
-                resource_margin_norm=station.full_batteries / max(float(env.config["station"]["initial_full_batteries"]), 1.0),
-                feasible=feasible,
-                reasons=() if feasible else ("drone_or_battery_unavailable",),
-            )
-        )
-    candidates.append(
-        _common_candidate(
-            len(candidates),
-            "idle",
+    generated = generate_station_operation_candidates(env, station_id)
+    for idx, cand in enumerate(generated):
+        candidates.append(ActionCandidate(
+            idx,
+            "idle" if cand.idle_flag else "dispatch_drone",
             station_id,
-            "no station dispatch",
-            action_type_id=0.0,
-            capacity_after_norm=max(0.0, station.locker_capacity_kg - station.locker_load_kg) / max(station.locker_capacity_kg, 1.0),
-            resource_margin_norm=_station_power_margin(env, station) / max(station.power_capacity_kw, 1.0),
-            idle_flag=1.0,
-            feasible=True,
-        )
-    )
+            f"{cand.heuristic_source}: {len(cand.dispatches)} dispatch(es), {len(cand.battery_ids_to_start_charging)} charge start(s)",
+            {
+                "action_type_id": 0.0 if cand.idle_flag else 1.0,
+                "dispatch_count": float(len(cand.dispatches)),
+                "charge_start_count": float(len(cand.battery_ids_to_start_charging)),
+                "estimated_time_norm": (max(cand.estimated_return_times) if cand.estimated_return_times else env.now_min) / horizon,
+                "estimated_lateness_norm": (sum(cand.estimated_parcel_lateness) / max(len(cand.estimated_parcel_lateness), 1)) / horizon,
+                "capacity_after_norm": max(0.0, station.locker_capacity_kg - station.locker_load_kg) / max(station.locker_capacity_kg, 1.0),
+                "resource_margin_norm": cand.power_margin / max(station.power_capacity_kw, 1.0),
+                "full_batteries_remaining": float(cand.full_batteries_remaining),
+                "depleted_batteries_remaining": float(cand.depleted_batteries_remaining),
+                "available_drones_remaining": float(cand.available_drones_remaining),
+                "charging_slots_used_after_action": float(cand.charging_slots_used_after_action),
+                "projected_station_load": cand.projected_station_load,
+                "projected_overload": cand.projected_overload,
+                "power_margin": cand.power_margin,
+                "expected_overload_duration": cand.expected_overload_duration,
+                "idle_flag": 1.0 if cand.idle_flag else 0.0,
+                "dispatch_payload": list(cand.dispatches),
+                "charge_payload": list(cand.battery_ids_to_start_charging),
+            },
+            cand.feasible,
+            cand.infeasibility_reasons,
+        ))
+    drone_states = getattr(station, "drone_states", [])
+    battery_states = getattr(station, "battery_states", [])
+    available_drones = sum(d.status == "AVAILABLE" and d.available_time_min <= env.now_min + 1e-9 for d in drone_states)
+    busy_drones = len(drone_states) - available_drones
+    full = sum(b.status == "FULL" for b in battery_states)
+    depleted = sum(b.status == "DEPLETED" for b in battery_states)
+    charging = sum(b.status == "CHARGING" for b in battery_states)
+    slots = min(6, int(getattr(station, "charging_slots", 6)))
+    active_bus = sum(end > env.now_min + 1e-9 for end in getattr(station, "active_bus_charges", []))
+    load = projected_load(env, station, 0)
+    deadlines = [env.parcels[pid].deadline_min - env.now_min for pid in waiting]
+    future_returns = sum(d.available_time_min > env.now_min + 1e-9 for d in drone_states)
+    future_completions = sum((b.charge_completion_time_min or 0.0) > env.now_min + 1e-9 for b in battery_states)
     return DecisionSurface(
         agent_id="station",
         event_type="STATION_OPERATION",
         entity_id=station_id,
         features=[
-            env.now_min / horizon,
-            len(waiting) / max(len(env.parcels), 1),
-            station.locker_load_kg / max(station.locker_capacity_kg, 1.0),
-            idle_drones / max(station.drones, 1),
-            station.full_batteries / max(float(env.config["station"]["initial_full_batteries"]), 1.0),
-            _station_power_margin(env, station) / max(station.power_capacity_kw, 1.0),
+            env.now_min / horizon, len(waiting), min(deadlines) if deadlines else 0.0,
+            available_drones, busy_drones, full, depleted, charging, max(0, slots - charging),
+            station.locker_load_kg, station.locker_capacity_kg, active_bus,
+            float(getattr(station, "base_load_kw", env.config["station"].get("base_load_kw", 0.0))),
+            station.power_capacity_kw - load, future_returns, future_completions,
         ],
         feature_names=STATION_OPERATION_FEATURE_NAMES,
         candidates=candidates,
     )
-
 
 def build_system_summary(env: Any, parcel: Any) -> dict[str, Any]:
     feasible_trips = []
