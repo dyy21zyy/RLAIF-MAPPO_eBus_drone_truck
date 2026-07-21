@@ -151,3 +151,9 @@ or reserves a scheduled trip, physical bus, bus departure, truck, route, or dron
 A TBD parcel is first truck-fed to the bus terminal, waits in the generic terminal
 queue for its downstream station, and can be loaded by a later freight-carrying bus.
 Action-mask construction may estimate feasibility, but must remain side-effect free.
+
+## Phase 2 truck batching
+
+Formal truck decisions at `TRUCK_AVAILABLE` now dispatch bounded multi-parcel batches from the `WAITING_TRUCK` pool instead of a one-parcel task list. Eligible parcels must be released, assigned to TD/TBD/TLD, and not already reserved on an active truck route. Candidate generation is side-effect free and includes idle plus deterministic greedy heuristics for earliest deadline, highest priority, nearest-neighbor geography, bus-terminal consolidation, station consolidation, weight utilization, volume utilization, estimated lateness, and mixed destinations.
+
+Batched routes support `CUSTOMER`, `BUS_TERMINAL`, `INTEGRATED_STATION`, and optional `DEPOT` stops. Applying a batch reserves parcels by moving them to `ONBOARD_TRUCK`; each parcel is unloaded only at its own stop (`DELIVERED`, `AT_BUS_TERMINAL`, or `AT_STATION`). Truck cost is charged once per route from fixed dispatch cost, total distance, and operating time; metrics expose total distance, dispatch count, utilization averages, and parcels per route.

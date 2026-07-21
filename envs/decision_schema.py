@@ -6,6 +6,12 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Any
 
+TRUCK_BATCH_CANDIDATE_FEATURE_NAMES = (
+    "batch_size", "weight_utilization", "volume_utilization", "distance",
+    "travel_time", "estimated_lateness", "direct_customer_count",
+    "terminal_delivery_count", "station_delivery_count", "route_stops", "idle_flag",
+)
+
 
 @dataclass(frozen=True)
 class ActionCandidate:

@@ -90,6 +90,7 @@ parcel:
 truck:
   num_trucks: 1
   weight_capacity_kg: 100.0
+  capacity_kg: 100.0  # compatibility alias; formal capacity is weight_capacity_kg plus volume_capacity_m3
   volume_capacity_m3: 1.0
   speed_kmph: 25.0
   max_batch_size: 10

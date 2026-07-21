@@ -118,3 +118,4 @@ truck:
   unloading_time_min: 0.0
   volume_capacity_m3: 1.0
   weight_capacity_kg: 100.0
+  capacity_kg: 100.0  # compatibility alias; formal capacity is weight_capacity_kg plus volume_capacity_m3

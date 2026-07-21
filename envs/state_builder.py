@@ -392,58 +392,47 @@ def _common_candidate(
 
 
 def build_truck_decision_surface(env: Any, truck: Any) -> DecisionSurface:
-    """Build candidates for a truck-availability dispatch decision."""
+    """Build batched parcel-pool candidates for a truck-availability decision."""
+    from envs.action_generators.truck_batch_actions import generate_truck_batch_candidates
 
     horizon = max(float(env.horizon_min), 1.0)
-    capacity = max(float(env.config["truck"]["capacity_kg"]), 1.0)
-    pending_tasks = list(getattr(env, "pending_truck_tasks", []))
+    cfg = env.config.get("truck", {})
+    weight_capacity = max(float(cfg.get("weight_capacity_kg", cfg.get("capacity_kg", 100.0))), 1.0)
+    volume_capacity = max(float(cfg.get("volume_capacity_m3", 1.0)), 1.0)
+    waiting = [p for p in env.parcels.values() if p.status == "WAITING_TRUCK"]
+    urgent = [p for p in waiting if p.deadline_min - env.now_min <= 60.0]
+    terminal = [p for p in waiting if p.mode == "TBD"]
+    station = [p for p in waiting if p.mode == "TLD"]
+    direct = [p for p in waiting if p.mode == "TD"]
+    earliest_slack = min((p.deadline_min - env.now_min for p in waiting), default=horizon)
     available = truck.available_time <= env.now_min + 1e-9
     features = [
         env.now_min / horizon,
         float(available),
-        len(pending_tasks) / max(len(env.parcels), 1),
-        truck.remaining_capacity_kg / capacity,
+        len(waiting) / max(len(env.parcels), 1),
+        len(urgent) / max(len(env.parcels), 1),
+        earliest_slack / horizon,
+        len(terminal) / max(len(env.parcels), 1),
+        len(station) / max(len(env.parcels), 1),
+        len(direct) / max(len(env.parcels), 1),
+        weight_capacity / weight_capacity,
+        volume_capacity / volume_capacity,
+        len([t for t in env.trucks if t.status != "idle"]) / max(len(env.trucks), 1),
     ]
-    candidates: list[ActionCandidate] = []
-    for index, task in enumerate(pending_tasks):
-        parcel = env.parcels[str(task["parcel_id"])]
-        feasible = available and parcel.weight_kg <= truck.remaining_capacity_kg + 1e-9
-        task_time = float(task.get("estimated_time_min", 0.0))
-        candidates.append(
-            _common_candidate(
-                index,
-                str(task["kind"]),
-                parcel.parcel_id,
-                f"{task['kind']} for {parcel.parcel_id}",
-                action_type_id=1.0,
-                estimated_time_norm=task_time / horizon,
-                estimated_lateness_norm=max(0.0, env.now_min + task_time - parcel.deadline_min) / horizon,
-                capacity_after_norm=max(0.0, truck.remaining_capacity_kg - parcel.weight_kg) / capacity,
-                resource_margin_norm=truck.remaining_capacity_kg / capacity,
-                feasible=feasible,
-                reasons=() if feasible else ("truck_unavailable_or_capacity",),
-            )
-        )
-    candidates.append(
-        _common_candidate(
-            len(candidates),
-            "idle",
-            truck.truck_id,
-            "remain idle",
-            action_type_id=0.0,
-            idle_flag=1.0,
-            feasible=True,
-        )
-    )
+    candidates=[]
+    for i, cand in enumerate(generate_truck_batch_candidates(env, truck)):
+        candidates.append(ActionCandidate(
+            action_id=i, action_type="idle" if cand.idle_flag else "truck_batch",
+            entity_id=cand.candidate_id, description=f"{cand.heuristic_source}: {','.join(cand.parcel_ids) or 'idle'}",
+            features=cand.feature_dict(env), feasible=cand.feasible and (available or cand.idle_flag),
+            reasons=cand.infeasibility_reasons if cand.feasible else cand.infeasibility_reasons,
+        ))
     return DecisionSurface(
-        agent_id="truck",
-        event_type="TRUCK_AVAILABLE",
-        entity_id=truck.truck_id,
+        agent_id="truck", event_type="TRUCK_AVAILABLE", entity_id=truck.truck_id,
         features=features,
-        feature_names=TRUCK_FEATURE_NAMES,
+        feature_names=("time_norm","available_now","waiting_parcel_count","urgent_waiting_parcel_count","earliest_deadline_slack","terminal_feeder_count","station_feeder_count","direct_delivery_count","truck_weight_capacity","truck_volume_capacity","active_truck_route_summaries"),
         candidates=candidates,
     )
-
 
 def build_bus_loading_decision_surface(env: Any, trip_id: str) -> DecisionSurface:
     """Build candidates for a bus-departure parcel loading decision."""
