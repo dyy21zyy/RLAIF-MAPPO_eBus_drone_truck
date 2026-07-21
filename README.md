@@ -308,3 +308,7 @@ The environment treats parcel assignment as a release-time decision over only
 `TD`, `TBD_<station_id>`, and `TLD_<station_id>`.  TBD choices target a downstream
 station and terminal transfer requirement, but do not bind a specific future trip
 or vehicle during assignment.
+
+### Phase 2 truck batching
+
+The formal environment supports bounded multi-parcel truck batch actions. Truck candidates are generated from released `WAITING_TRUCK` parcels using deterministic greedy heuristics, hard weight/volume/batch-size masks, and multi-stop routes for direct customers, the bus terminal, and integrated stations. The legacy one-parcel MVP flag remains only in legacy smoke configurations and is not used by `configs/paper/base_*.yaml`.

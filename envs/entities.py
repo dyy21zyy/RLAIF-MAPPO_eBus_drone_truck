@@ -82,12 +82,28 @@ class TruckRoutePlan:
 @dataclass(frozen=True)
 class TruckBatchCandidate:
     candidate_id: str
+    truck_id: str
     parcel_ids: tuple[str, ...]
-    route_plan: TruckRoutePlan
+    ordered_route_stops: tuple[TruckRouteStop, ...]
     total_weight_kg: float
     total_volume_m3: float
+    weight_utilization: float
+    volume_utilization: float
+    estimated_distance_km: float
+    estimated_travel_time_min: float
+    estimated_loading_time_min: float
+    estimated_unloading_time_min: float
+    estimated_completion_time_min: float
+    estimated_lateness_min: float
+    remaining_weight_capacity_kg: float
+    remaining_volume_capacity_m3: float
+    number_of_direct_customers: int
+    number_of_terminal_deliveries: int
+    number_of_station_deliveries: int
     feasible: bool
-    reasons: tuple[str, ...] = ()
+    infeasibility_reasons: tuple[str, ...] = ()
+    heuristic_source: str = "unknown"
+    idle_flag: bool = False
 
 
 @dataclass(frozen=True)

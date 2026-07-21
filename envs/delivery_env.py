@@ -37,6 +37,10 @@ EVENT_PRIORITY = {
     "parcel_station_arrival": 6,
     "bus_departure": 7,
     "bus_arrival": 8,
+    "truck_departure": 6,
+    "truck_arrive_stop": 6,
+    "truck_unload": 6,
+    "truck_route_complete": 6,
     "truck_available": 9,
     "parcel_release": 10,
 }
@@ -95,12 +99,13 @@ class StationState:
 
 @dataclass
 class TruckState:
-    """Explicit state for a one-parcel-per-trip truck schedule."""
+    """Explicit state for batched multi-stop truck route execution."""
 
     truck_id: str
     current_location_id: str
     available_time: float
     remaining_capacity_kg: float
+    remaining_volume_m3: float = 0.0
     onboard_parcels: list[str] = field(default_factory=list)
     total_distance: float = 0.0
     total_travel_time: float = 0.0
@@ -261,13 +266,14 @@ class DynamicDeliveryEnv:
         self.current_decision: Decision | None = None
         self.terminated = False
         self.truncated = False
-        truck_capacity = float(self.config["truck"]["capacity_kg"])
+        truck_capacity = float(self.config["truck"].get("weight_capacity_kg", self.config["truck"].get("capacity_kg", 100.0)))
         self.trucks = [
             TruckState(
                 truck_id=f"truck_{index:03d}",
                 current_location_id="depot_01",
                 available_time=0.0,
                 remaining_capacity_kg=truck_capacity,
+                remaining_volume_m3=float(self.config["truck"].get("volume_capacity_m3", 1.0)),
             )
             for index in range(int(self.config["truck"]["num_trucks"]))
         ]
@@ -276,7 +282,7 @@ class DynamicDeliveryEnv:
         self.bus_freight_kg: dict[str, float] = {trip_id: 0.0 for trip_id in self.trip_rows}
         self.bus_segment_index: dict[str, int] = {trip_id: 0 for trip_id in self.trip_rows}
         self.pending_bus_parcels: dict[tuple[str, str], list[str]] = {}
-        self.pending_truck_tasks: list[dict[str, Any]] = []
+        self.pending_truck_tasks: list[dict[str, Any]] = []  # legacy mirror; formal truck decisions use WAITING_TRUCK parcel pool
         self.pending_truck_decision_min: dict[int, float] = {}
         self.bus_terminal_ready: dict[str, list[str]] = {}
         self.waiting_station_parcels: dict[str, list[str]] = {}
@@ -289,6 +295,10 @@ class DynamicDeliveryEnv:
         self.accumulated_locker_overflow = 0.0
         self.accumulated_locker_overflow_duration = 0.0
         self.peak_station_load_kw = max((float(row["base_load_kw"]) if "base_load_kw" in row else float(self.config["station"]["base_load_kw"]) for row in self.station_rows), default=0.0)
+        self.truck_dispatch_count = 0
+        self.truck_parcels_routed = 0
+        self.truck_weight_utilization_sum = 0.0
+        self.truck_volume_utilization_sum = 0.0
         self.cost_components = {name: 0.0 for name in (
             "passenger_delay", "bus_operating_delay", "parcel_lateness", "energy_cost", "power_overload",
             "bus_battery_violation", "locker_overflow", "truck_cost", "undelivered", "battery_shortage", "infeasible_action")}
@@ -398,7 +408,7 @@ class DynamicDeliveryEnv:
                 if scheduled_time is None or abs(scheduled_time - event.time_min) > EPSILON:
                     continue
                 self.pending_truck_decision_min.pop(truck_index, None)
-                if not self.pending_truck_tasks:
+                if not any(p.status == "WAITING_TRUCK" for p in self.parcels.values()):
                     continue
                 truck = self.trucks[truck_index]
                 if truck.available_time > self.now_min + EPSILON:
@@ -406,6 +416,28 @@ class DynamicDeliveryEnv:
                     continue
                 surface = build_truck_decision_surface(self, truck)
                 self.current_decision = Decision("truck", event, surface.action_mask())
+            elif event.kind == "truck_departure":
+                pass
+            elif event.kind == "truck_arrive_stop":
+                self.trucks[[t.truck_id for t in self.trucks].index(event.payload["truck_id"])].current_location_id = event.payload["stop_id"]
+            elif event.kind == "truck_unload":
+                st=event.payload["stop_type"]
+                for pid in event.payload.get("parcel_ids", []):
+                    parcel=self.parcels[pid]
+                    if st == "CUSTOMER":
+                        parcel.status, parcel.delivered_time_min = "DELIVERED", self.now_min
+                        lateness=max(0.0,self.now_min-parcel.deadline_min)*parcel.priority
+                        parcel.cost += lateness; reward += self._charge_cost("parcel_lateness", lateness)
+                    elif st == "BUS_TERMINAL":
+                        parcel.status = "AT_BUS_TERMINAL"
+                        self.bus_terminal_ready.setdefault(parcel.station_id or "", []).append(pid)
+                    elif st == "INTEGRATED_STATION":
+                        reward += self._handle_station_arrival(pid, parcel.station_id or event.payload["stop_id"])
+            elif event.kind == "truck_route_complete":
+                truck=self.trucks[[t.truck_id for t in self.trucks].index(event.payload["truck_id"])]
+                truck.current_location_id=event.payload["final_location_id"]; truck.onboard_parcels.clear(); truck.status="idle"
+                truck.remaining_capacity_kg=float(self.config["truck"].get("weight_capacity_kg", self.config["truck"].get("capacity_kg",100.0)))
+                truck.remaining_volume_m3=float(self.config["truck"].get("volume_capacity_m3",1.0))
             elif event.kind == "bus_departure":
                 surface = build_bus_loading_decision_surface(self, event.payload["trip_id"])
                 self.current_decision = Decision("bus", event, surface.action_mask())
@@ -464,6 +496,7 @@ class DynamicDeliveryEnv:
             if truck.available_time <= time_min + EPSILON:
                 truck.current_location_id = truck.route_history[-1][-1] if truck.route_history else "depot_01"
                 truck.remaining_capacity_kg = capacity
+                truck.remaining_volume_m3 = float(self.config["truck"].get("volume_capacity_m3", 1.0))
                 truck.onboard_parcels.clear()
                 truck.status = "idle"
 
@@ -560,7 +593,7 @@ class DynamicDeliveryEnv:
                 if self.config["truck"]["return_to_depot"]
                 else 0.0
             )
-            parcel.status, parcel.station_id = "awaiting_truck", station_id
+            parcel.status, parcel.station_id = "WAITING_TRUCK", station_id
             self.pending_truck_tasks.append(
                 {
                     "kind": "bus_terminal_feeder",
@@ -576,7 +609,7 @@ class DynamicDeliveryEnv:
 
         parcel.mode = "TLD"
         station_id = self.station_ids[station_offset - len(self.station_ids)]
-        parcel.status, parcel.station_id = "awaiting_truck", station_id
+        parcel.status, parcel.station_id = "WAITING_TRUCK", station_id
         depot = self.truck_location_index["depot_01"]
         station = self.truck_location_index[station_id]
         travel = float(self.truck_time_min[depot, station])
@@ -598,8 +631,18 @@ class DynamicDeliveryEnv:
 
     def _apply_truck_action(self, event: Event, action: int) -> float:
         truck = self.trucks[int(event.payload["truck_index"])]
-        if action >= len(self.pending_truck_tasks):
+        from envs.action_generators.truck_batch_actions import generate_truck_batch_candidates
+        from envs.dynamics.truck_dynamics import apply_truck_batch
+        surface_candidates = generate_truck_batch_candidates(self, truck)
+        if action >= len(surface_candidates):
             return 0.0
+        candidate = surface_candidates[action]
+        if not candidate.feasible:
+            return self._charge_cost("infeasible_action", 1.0)
+        if not candidate.idle_flag:
+            for pid in candidate.parcel_ids:
+                self.pending_truck_tasks = [t for t in self.pending_truck_tasks if t.get("parcel_id") != pid]
+        return apply_truck_batch(self, truck, candidate)
         task = self.pending_truck_tasks.pop(action)
         parcel = self.parcels[task["parcel_id"]]
         if parcel.weight_kg > truck.remaining_capacity_kg + EPSILON:
@@ -793,7 +836,7 @@ class DynamicDeliveryEnv:
         return self._assignment_feasibility(parcel)[0]
 
     def _assignment_feasibility(self, parcel: ParcelState) -> tuple[list[bool], bool]:
-        truck_capacity = float(self.config["truck"]["capacity_kg"])
+        truck_capacity = float(self.config["truck"].get("weight_capacity_kg", self.config["truck"].get("capacity_kg", 100.0)))
         has_capable_truck = bool(self.truck_available_min) and parcel.weight_kg <= truck_capacity + EPSILON
         depot = self.truck_location_index["depot_01"]
         customer = self.truck_location_index[parcel.parcel_id]
@@ -1185,6 +1228,10 @@ class DynamicDeliveryEnv:
             "locker_overflow_amount": self.accumulated_locker_overflow,
             "locker_overflow_duration": self.accumulated_locker_overflow_duration,
             "truck_total_distance": sum(truck.total_distance for truck in self.trucks),
+            "truck_dispatch_count": self.truck_dispatch_count,
+            "average_weight_utilization": self.truck_weight_utilization_sum / max(self.truck_dispatch_count, 1),
+            "average_volume_utilization": self.truck_volume_utilization_sum / max(self.truck_dispatch_count, 1),
+            "average_parcels_per_route": self.truck_parcels_routed / max(self.truck_dispatch_count, 1),
             "truck_operating_cost": (
                 self.cost_components["truck_cost"]
                 / max(float(self.config["reward"]["truck_cost"]), EPSILON)
