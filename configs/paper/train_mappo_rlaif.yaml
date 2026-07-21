@@ -1,29 +1,10 @@
+address: {}
+env:
+  config_path: configs/paper/base_medium.yaml
+  fallback: true
 mode: rlaif_reward
-training:
-  total_episodes: 3000
-  evaluation_scenarios: 100
-  training_seeds:
-  - 1
-  - 2
-  - 3
-  optimizer: Adam
-  lr_actor: 5.0e-05
-  lr_critic: 5.0e-05
-  gamma: 0.997
-  gae_lambda: 0.95
-  clip_eps: 0.2
-  ppo_epochs: 5
-  batch_size: 128
-  entropy_coef: 0.01
-  value_coef: 0.5
-  max_grad_norm: 0.5
-  event_time_reference_min: 1.0
 networks:
   assignment_hidden_dims:
-  - 256
-  - 256
-  - 128
-  truck_hidden_dims:
   - 256
   - 256
   - 128
@@ -31,14 +12,41 @@ networks:
   - 256
   - 256
   - 128
-  station_hidden_dims:
-  - 256
-  - 256
-  - 128
   critic_hidden_dims:
   - 256
   - 256
   - 128
+  station_hidden_dims:
+  - 256
+  - 256
+  - 128
+  truck_hidden_dims:
+  - 256
+  - 256
+  - 128
+output:
+  checkpoint_name_template: mappo_rlaif_seed_{seed}.pt
+  eval_name_template: mappo_rlaif_seed_{seed}_eval.json
+  output_root: results/formal/mappo_rlaif
+  resolved_config_name_template: mappo_rlaif_seed_{seed}_resolved.yaml
+  training_log_name_template: mappo_rlaif_seed_{seed}.csv
+project:
+  seed: 1
+reward:
+  apply_reference_scales: true
+  battery_shortage: 1.0
+  bus_battery_violation: 5.0
+  bus_operating_delay: 1.0
+  energy_cost: 0.2
+  infeasible_action: 5.0
+  locker_overflow: 1.0
+  parcel_lateness: 1.0
+  passenger_delay: 1.0
+  power_overload: 1.0
+  scale_artifact: outputs/reward_reference_scales_v1.json
+  scale_artifact_hash: null
+  truck_cost: 1.0
+  undelivered: 10.0
 rlaif:
   enabled: true
   fallback_to_env_reward: false
@@ -67,4 +75,24 @@ rlaif:
   validation:
     enabled: true
     min_samples: 1000
-    min_pairwise_accuracy: 0.70
+    min_pairwise_accuracy: 0.7
+training:
+  batch_size: 128
+  clip_eps: 0.2
+  entropy_coef: 0.01
+  event_time_reference_min: 1.0
+  gae_lambda: 0.95
+  gamma: 0.997
+  lr_actor: 5.0e-05
+  lr_critic: 5.0e-05
+  max_grad_norm: 0.5
+  optimizer: Adam
+  ppo_epochs: 5
+  rollout_episodes: 10
+  seed: 1
+  total_episodes: 3000
+  training_seeds:
+  - 1
+  - 2
+  - 3
+  value_coef: 0.5

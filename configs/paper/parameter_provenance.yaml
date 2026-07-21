@@ -238,3 +238,62 @@ truck.weight_capacity_kg:
 truck.capacity_kg:
   category: project_extension
   source: Compatibility alias for truck.weight_capacity_kg used by legacy fallback configuration.
+reward:
+  source: project_extension
+  notes: Explicit nonzero Phase 1 reward weights; not literature-derived unless separately documented.
+reward.passenger_delay:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.bus_operating_delay:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.parcel_lateness:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.energy_cost:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.power_overload:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.bus_battery_violation:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.locker_overflow:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.truck_cost:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.undelivered:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.battery_shortage:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.infeasible_action:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.apply_reference_scales:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.scale_artifact:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+reward.scale_artifact_hash:
+  category: project_extension
+  source: Phase 1 runtime reward validation and normalization contract.
+  notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.

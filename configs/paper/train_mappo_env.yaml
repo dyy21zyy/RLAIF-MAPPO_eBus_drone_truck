@@ -1,11 +1,18 @@
 mode: environment_reward
+env:
+  config_path: configs/paper/base_medium.yaml
+  fallback: true
+project:
+  seed: 1
+address: {}
 training:
-  total_episodes: 3000
-  evaluation_scenarios: 100
+  seed: 1
   training_seeds:
   - 1
   - 2
   - 3
+  total_episodes: 3000
+  rollout_episodes: 10
   optimizer: Adam
   lr_actor: 5.0e-05
   lr_critic: 5.0e-05
@@ -15,9 +22,7 @@ training:
   ppo_epochs: 5
   batch_size: 128
   entropy_coef: 0.01
-  ent_coef: 0.01
   value_coef: 0.5
-  vf_coef: 0.5
   max_grad_norm: 0.5
   event_time_reference_min: 1.0
 networks:
@@ -41,8 +46,28 @@ networks:
   - 256
   - 256
   - 128
-
+rlaif:
+  enabled: false
+  fallback_to_env_reward: false
+  fail_on_invalid_reward_model: true
+output:
+  output_root: results/formal/mappo_env
+  checkpoint_name_template: mappo_env_seed_{seed}.pt
+  training_log_name_template: mappo_env_seed_{seed}.csv
+  eval_name_template: mappo_env_seed_{seed}_eval.json
+  resolved_config_name_template: mappo_env_seed_{seed}_resolved.yaml
 reward:
+  passenger_delay: 1.0
+  bus_operating_delay: 1.0
+  parcel_lateness: 1.0
+  energy_cost: 0.2
+  power_overload: 1.0
+  bus_battery_violation: 5.0
+  locker_overflow: 1.0
+  truck_cost: 1.0
+  undelivered: 10.0
+  battery_shortage: 1.0
+  infeasible_action: 5.0
+  apply_reference_scales: true
   scale_artifact: outputs/reward_reference_scales_v1.json
-  scale_artifact_hash: freeze-after-estimation
-  rlaif_enabled: false
+  scale_artifact_hash: null

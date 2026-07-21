@@ -9,7 +9,7 @@ from typing import Any
 from data_pipeline.common import haversine_km, write_csv
 from data_pipeline.download_osm import RoadGraph, nearest_node
 
-PARCEL_COLUMNS = ["parcel_id", "release_time_min", "deadline_min", "deadline_class", "priority", "weight_kg", "volume_m3", "customer_lat", "customer_lon", "nearest_road_node", "reachable_station_ids", "nearest_reachable_station_id", "nearest_station_id", "drone_feasible", "nominal_feasible_modes", "release_time", "deadline", "deadline_type", "weight", "volume"]
+PARCEL_COLUMNS = ["parcel_id", "release_time_min", "deadline_min", "deadline_class", "priority", "weight_kg", "volume_m3", "customer_lat", "customer_lon", "nearest_road_node", "reachable_station_ids", "nearest_reachable_station_id", "nearest_station_id", "drone_feasible", "nominal_feasible_modes", "release_time", "deadline", "deadline_type", "is_urgent", "weight", "volume"]
 
 
 def calculate_drone_feasible(weight: float, station_lat: float, station_lon: float, customer_lat: float, customer_lon: float, config: dict[str, Any]) -> bool:
@@ -77,7 +77,7 @@ def generate_parcels(config: dict[str, Any], graph: RoadGraph, stations: list[di
             cls = _weighted_choice(rng, [("tight", .3), ("moderate", .5), ("loose", .2)])
             low, high = {"tight": (20, 40), "moderate": (40, 80), "loose": (80, 140)}[cls]
             parcel.update({"deadline_class": cls, "deadline_min": round(release + rng.uniform(low, high), 6), "priority": {"tight":3,"moderate":2,"loose":1}[cls], "nominal_feasible_modes": "TD"})
-        parcel.update({"release_time": parcel["release_time_min"], "deadline": parcel["deadline_min"], "deadline_type": parcel["deadline_class"], "weight": parcel["weight_kg"], "volume": parcel["volume_m3"]})
+        parcel.update({"release_time": parcel["release_time_min"], "deadline": parcel["deadline_min"], "deadline_type": parcel["deadline_class"], "is_urgent": parcel["deadline_class"] == "tight", "weight": parcel["weight_kg"], "volume": parcel["volume_m3"]})
         if isinstance(parcel.get("nominal_feasible_modes"), list): parcel["nominal_feasible_modes"] = "|".join(parcel["nominal_feasible_modes"])
         parcels.append(parcel)
     write_csv(output_dir / "parcels.csv", parcels, PARCEL_COLUMNS)
