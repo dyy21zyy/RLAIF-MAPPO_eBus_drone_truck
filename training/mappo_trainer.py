@@ -28,6 +28,7 @@ from training.entity_encoders import ENTITY_ENCODER_SCHEMA_VERSION
 from training.mappo_networks import EVENT_EMBEDDING_SCHEMA_VERSION, CandidateScoringActor, CentralizedCritic, build_actor_registry
 from training.ppo_trainer import create_environment
 from training.reward_model_wrapper import RewardModelWrapper
+from rlaif.reward_registry import RewardRegistry
 
 AGENT_IDS = ("assignment", "truck", "bus", "station")
 FEATURE_SCHEMA_VERSION = 3
@@ -125,7 +126,7 @@ def collect_episode(
     actors: nn.ModuleDict,
     critic: CentralizedCritic,
     buffer: AsyncMAPPOBuffer | None,
-    reward_wrapper: RewardModelWrapper,
+    reward_wrapper: RewardModelWrapper | RewardRegistry,
     *,
     episode_id: int,
     lambda_rlaif: float,
@@ -162,15 +163,19 @@ def collect_episode(
         action_features = candidate_features[action] if agent_id in RLAIF_AGENT_TYPES else None
         next_observation, env_reward, terminated, truncated, info = env.step(action)
         done = bool(terminated or truncated)
-        total_reward, learned_reward = transition_reward(
-            agent_id,
-            float(env_reward),
-            reward_wrapper,
-            lambda_rlaif=lambda_rlaif,
-            state_features=local_obs,
-            action_features=action_features,
-            action_id=action,
-        )
+        if isinstance(reward_wrapper, RewardRegistry):
+            total_reward, learned_reward = reward_wrapper.total_reward(agent_id, event_type, float(env_reward), local_obs, action_features, action)
+        else:
+            total_reward, learned_reward = transition_reward(
+                agent_id,
+                float(env_reward),
+                reward_wrapper,
+                lambda_rlaif=lambda_rlaif,
+                state_features=local_obs,
+                action_features=action_features,
+                action_id=action,
+                event_type=event_type,
+            )
         env_total += float(env_reward)
         rlaif_total += learned_reward * float(lambda_rlaif)
         if buffer is not None:
@@ -508,13 +513,17 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
         for agent, actor in actors.items()
     }
     critic_optimizer = torch.optim.Adam(critic.parameters(), lr=float(training["lr_critic"]))
-    wrapper = RewardModelWrapper(
-        config["rlaif"].get("reward_model_checkpoint"),
-        enabled=bool(config["rlaif"].get("enabled", False)),
-        validation=config["rlaif"].get("validation", {}),
-        fallback_to_env_reward=bool(config["rlaif"].get("fallback_to_env_reward", True)),
-        fail_on_invalid_reward_model=bool(config["rlaif"].get("fail_on_invalid_reward_model", False)),
-        reward_clip=config["rlaif"].get("reward_clip"),
+    wrapper = (
+        RewardRegistry(config)
+        if "agents" in config.get("rlaif", {})
+        else RewardModelWrapper(
+            config["rlaif"].get("reward_model_checkpoint"),
+            enabled=bool(config["rlaif"].get("enabled", False)),
+            validation=config["rlaif"].get("validation", {}),
+            fallback_to_env_reward=bool(config["rlaif"].get("fallback_to_env_reward", True)),
+            fail_on_invalid_reward_model=bool(config["rlaif"].get("fail_on_invalid_reward_model", False)),
+            reward_clip=config["rlaif"].get("reward_clip"),
+        )
     )
     buffer, rng, rows = AsyncMAPPOBuffer(), np.random.default_rng(seed), []
     rollout_episodes = int(training["rollout_episodes"])
@@ -527,7 +536,7 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
                 buffer,
                 wrapper,
                 episode_id=seed + episode,
-                lambda_rlaif=0.0,
+                lambda_rlaif=float(config.get("rlaif", {}).get("lambda", 0.0)),
             )
             for episode in range(start, min(start + rollout_episodes, int(training["total_episodes"])))
         ]
@@ -563,13 +572,17 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
 def evaluate_mappo_async(config: dict[str, Any], checkpoint_path, *, output_root=None, episodes: int = 1):
     env = create_environment(config, output_root=output_root)
     actors, critic, _ = load_checkpoint(checkpoint_path)
-    wrapper = RewardModelWrapper(
-        config["rlaif"].get("reward_model_checkpoint"),
-        enabled=bool(config["rlaif"].get("enabled", False)),
-        validation=config["rlaif"].get("validation", {}),
-        fallback_to_env_reward=bool(config["rlaif"].get("fallback_to_env_reward", True)),
-        fail_on_invalid_reward_model=bool(config["rlaif"].get("fail_on_invalid_reward_model", False)),
-        reward_clip=config["rlaif"].get("reward_clip"),
+    wrapper = (
+        RewardRegistry(config)
+        if "agents" in config.get("rlaif", {})
+        else RewardModelWrapper(
+            config["rlaif"].get("reward_model_checkpoint"),
+            enabled=bool(config["rlaif"].get("enabled", False)),
+            validation=config["rlaif"].get("validation", {}),
+            fallback_to_env_reward=bool(config["rlaif"].get("fallback_to_env_reward", True)),
+            fail_on_invalid_reward_model=bool(config["rlaif"].get("fail_on_invalid_reward_model", False)),
+            reward_clip=config["rlaif"].get("reward_clip"),
+        )
     )
     results = [
         collect_episode(
@@ -579,7 +592,7 @@ def evaluate_mappo_async(config: dict[str, Any], checkpoint_path, *, output_root
             None,
             wrapper,
             episode_id=int(config["training"]["seed"]) + index,
-            lambda_rlaif=0.0,
+            lambda_rlaif=float(config.get("rlaif", {}).get("lambda", 0.0)),
             deterministic=True,
         )
         for index in range(episodes)

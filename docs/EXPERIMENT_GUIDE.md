@@ -75,3 +75,7 @@ python -m experiments.run_sensitivity --config configs/sensitivity.yaml
 ## Phase 7 MAPPO reward-scale artifact
 
 Before full environment-only MAPPO training, run `python -m experiments.estimate_reward_reference_scales --config configs/shanghai_small.yaml`. The command collects seeded preliminary policy rollouts, estimates robust nonzero component scales, stores project-specific component names, and writes a frozen versioned JSON artifact for training/checkpoint provenance.
+
+### Phase 8 smoke pipeline
+
+Replay fixtures may be used only to validate the pipeline mechanics, not to claim final reward-model quality. A Phase 8 smoke run should: collect four-agent preference states, build prompts, validate replay labels, build grouped splits, train smoke reward models, evaluate them, load all four wrappers, and run one RLAIF-MAPPO rollout. Formal experiments must use real external or validated replay labels and formal sample/accuracy thresholds.

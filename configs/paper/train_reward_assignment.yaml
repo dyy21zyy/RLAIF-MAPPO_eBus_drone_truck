@@ -1,0 +1,18 @@
+# Phase 8 formal reward-model training config for assignment.
+agent_type: assignment
+preference_schema_version: v2
+candidate_schema_version: v2
+input:
+  states: results/rlaif/assignment_states.jsonl
+  preferences: results/rlaif/assignment_preferences.jsonl
+  split_manifest: results/rlaif/assignment_split_manifest.json
+output:
+  checkpoint: results/checkpoints/reward_assignment.pt
+training:
+  loss: bradley_terry
+  exclude_answers: [tie, abstain]
+  min_samples: 1000
+  smoke_min_samples: 2
+validation:
+  grouped_holdout: true
+  min_pairwise_accuracy: 0.70

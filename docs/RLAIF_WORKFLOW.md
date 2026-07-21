@@ -292,3 +292,13 @@ Runtime readiness therefore requires a working PyTorch environment, a Stage 5
 Runtime Gate-trained `reward_model.pt`, a trained `assignment_ppo.pt` and/or
 `mappo_async.pt`, and the configured benchmark/ablation/sensitivity runs. Code-gate
 smoke artifacts do not satisfy any of these runtime prerequisites.
+
+## Phase 8 multi-agent RLAIF workflow
+
+Phase 8 extends preference learning from assignment decisions to the assignment, truck, bus, and station agents. Preference-state records use `schema_version: v2` and must preserve `scenario_id`, `episode_id`, `state_id`, `decision_id`, `agent_type`, canonical event metadata, state/candidate feature names and values, action masks, data provenance, collection policy provenance, and checkpoint provenance. Bus records preserve distinct `BUS_TERMINAL_DEPARTURE` loading decisions and `BUS_STATION_ARRIVAL` charging decisions.
+
+State collection records the policy source (`random`, environment-reward MAPPO checkpoint, or heuristic) but never treats the selected action as a preference label. Pair selection is heuristic only: it may prioritize close objective estimates, entropy, uncertainty, disagreement, urgent deadlines, truck capacity pressure, passenger congestion, low bus SoC, locker congestion, battery scarcity, or station power risk, but it must not create labels.
+
+Labels are valid only when produced by an external evaluator API or by validated replay labels. Offline prompt-building mode creates zero labels. A/B order is randomized reproducibly and records original order, display order, evaluator answer, and resolved original winner. `tie` and `abstain` are accepted but excluded from Bradley--Terry training.
+
+Reward models default to four independent checkpoints: `results/checkpoints/reward_assignment.pt`, `results/checkpoints/reward_truck.pt`, `results/checkpoints/reward_bus.pt`, and `results/checkpoints/reward_station.pt`. Each checkpoint stores agent type, compatible events, v2 schema versions, feature names/dimensions, normalization statistics, reward mean/std, data and split hashes, validation metrics, and model configuration. Formal MAPPO RLAIF training fails closed when an enabled agent checkpoint is missing or incompatible.

@@ -54,7 +54,7 @@ def build_prompt_text(state: dict[str, Any], action_a: str, action_b: str) -> st
     }
     return f"""You are evaluating two parcel-assignment actions. Choose the operationally preferred assignment.
 Consider: (1) hard feasibility; (2) deadline reliability; (3) parcel weight and drone payload feasibility;
-(4) truck travel burden; (5) electric bus as lower-carbon line-haul; (6) locker congestion risk;
+(4) truck travel burden; (5) quantified bus opportunity and passenger impact when available; (6) locker congestion risk;
 (7) drone availability; (8) full battery availability; (9) station power stress; (10) urgent parcel service;
 (11) remote customer service; and (12) avoiding excessive passenger-service impact.
 Do not choose an infeasible action unless both options are infeasible.
