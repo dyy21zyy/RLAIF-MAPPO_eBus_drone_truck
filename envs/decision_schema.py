@@ -6,6 +6,16 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Any
 
+BUS_LOADING_CANDIDATE_FEATURE_NAMES = (
+    "parcel_count", "total_weight_kg", "freight_capacity_utilization",
+    "loading_time_min", "maximum_single_station_unload_kg",
+    "estimated_lateness_min", "estimated_passenger_impact_min", "idle_flag",
+)
+BUS_CHARGING_CANDIDATE_FEATURE_NAMES = (
+    "duration_sec", "energy_added_kwh", "projected_soc_kwh",
+    "projected_station_load_kw", "projected_overload_kw", "idle_flag",
+)
+
 TRUCK_BATCH_CANDIDATE_FEATURE_NAMES = (
     "batch_size", "weight_utilization", "volume_utilization", "distance",
     "travel_time", "estimated_lateness", "direct_customer_count",

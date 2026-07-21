@@ -143,6 +143,41 @@ class PhysicalBusState:
 
 
 @dataclass(frozen=True)
+class BusLoadingBatchCandidate:
+    candidate_id: str
+    physical_bus_id: str
+    trip_id: str
+    parcel_ids: tuple[str, ...]
+    target_station_ids: tuple[str, ...]
+    total_weight_kg: float
+    freight_capacity_utilization: float
+    loading_time_min: float
+    unload_weight_by_station: dict[str, float]
+    estimated_unloading_time_by_station: dict[str, float]
+    maximum_single_station_unload_kg: float
+    estimated_lateness_min: float
+    estimated_passenger_impact_min: float
+    feasible: bool
+    infeasibility_reasons: tuple[str, ...] = ()
+    heuristic_source: str = "unknown"
+    idle_flag: bool = False
+
+
+@dataclass(frozen=True)
+class BusChargingDurationCandidate:
+    candidate_id: str
+    physical_bus_id: str
+    station_id: str
+    duration_sec: int
+    energy_added_kwh: float
+    projected_soc_kwh: float
+    projected_overload_kw: float
+    feasible: bool
+    infeasibility_reasons: tuple[str, ...] = ()
+    idle_flag: bool = False
+
+
+@dataclass(frozen=True)
 class PassengerStopState:
     stop_id: str
     waiting_by_destination: dict[str, int] = field(default_factory=dict)
