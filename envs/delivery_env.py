@@ -27,6 +27,8 @@ from envs.state_builder import (
 from utils.config import load_config
 from envs.dynamics.bus_circulation import RuntimePhysicalBus, assert_no_overlaps
 from envs.dynamics.passenger_dynamics import PassengerArrivalEvent, PassengerArrivalIndex, PassengerStopRuntimeState, process_bus_stop
+from envs.action_generators.bus_loading_actions import generate_bus_loading_candidates
+from envs.action_generators.bus_charging_actions import generate_bus_charging_candidates, energy_added_kwh
 
 EPSILON = 1e-9
 EVENT_PRIORITY = {
@@ -304,6 +306,7 @@ class DynamicDeliveryEnv:
         self.bus_freight_kg: dict[str, float] = {trip_id: 0.0 for trip_id in self.trip_rows}
         self.bus_segment_index: dict[str, int] = {trip_id: 0 for trip_id in self.trip_rows}
         self.pending_bus_parcels: dict[tuple[str, str], list[str]] = {}
+        self.parcel_bus_assignment: dict[str, tuple[str, str]] = {}
         self.pending_truck_tasks: list[dict[str, Any]] = []  # legacy mirror; formal truck decisions use WAITING_TRUCK parcel pool
         self.pending_truck_decision_min: dict[int, float] = {}
         self.bus_terminal_ready: dict[str, list[str]] = {}
@@ -353,7 +356,7 @@ class DynamicDeliveryEnv:
             self._push(parcel.release_time_min, "parcel_release", {"parcel_id": parcel.parcel_id})
         for trip_id, rows in self.trip_stop_times.items():
             if self._as_bool(self.trip_rows[trip_id]["freight_allowed"]):
-                self._push(float(rows[0]["departure_time"]), "bus_departure", {"trip_id": trip_id})
+                self._push(float(rows[0]["departure_time"]), "bus_departure", {"trip_id": trip_id, "physical_bus_id": self.trip_to_bus.get(trip_id)})
             first_station_index = next((i for i, row in enumerate(rows) if row["stop_id"] in self.stop_to_station), None)
             if first_station_index is not None:
                 self.bus_segment_index[trip_id] = first_station_index
@@ -1053,8 +1056,11 @@ class DynamicDeliveryEnv:
         unloading = 0.0
         for parcel_id in self.pending_bus_parcels.pop((trip_id, station_id), []):
             parcel = self.parcels[parcel_id]
-            unloading += parcel.weight_kg * float(self.config["bus"]["station_unloading_time_min_per_kg"])
+            unloading += parcel.weight_kg * 6.0 / 60.0
             self.bus_freight_kg[trip_id] -= parcel.weight_kg
+            if parcel_id in bus.onboard_parcel_ids:
+                bus.onboard_parcel_ids.remove(parcel_id)
+            self.parcel_bus_assignment.pop(parcel_id, None)
             self._push(self.now_min + unloading, "parcel_station_arrival", {"parcel_id": parcel_id, "station_id": station_id})
         event.payload["unloading_delay_min"] = unloading
         return reward
@@ -1062,29 +1068,16 @@ class DynamicDeliveryEnv:
     def _bus_mask(self, event: Event) -> list[bool]:
         station = self.stations[event.payload["station_id"]]
         station.active_bus_charges = [end for end in station.active_bus_charges if end > self.now_min + EPSILON]
-        charger_available = len(station.active_bus_charges) < int(next(row["charger_num"] for row in self.station_rows if row["station_id"] == station.station_id))
-        # Power capacity is a soft constraint: expose charging whenever a physical
-        # charger is available, then price any overload in ``_apply_bus_action``.
-        return [True] + [charger_available] * (self.bus_action_size - 1)
+        cands = generate_bus_charging_candidates(self, event)
+        return [c.feasible for c in cands]
 
     def _apply_bus_loading_action(self, event: Event, action: int) -> float:
         trip_id = event.payload["trip_id"]
-        surface = build_bus_loading_decision_surface(self, trip_id)
-        candidate = surface.candidates[action]
-        if candidate.action_type != "load_ready":
+        candidate = generate_bus_loading_candidates(self, trip_id)[action]
+        if candidate.idle_flag or not candidate.feasible:
             return 0.0
-        ready = [pid for q in self.bus_terminal_ready.values() for pid in q]
-        capacity = float(self.config["bus"]["freight_capacity_kg"])
-        remaining = max(0.0, capacity - self.bus_freight_kg[trip_id])
-        loaded: list[str] = []
-        total_weight = 0.0
-        for parcel_id in list(ready):
-            parcel = self.parcels[parcel_id]
-            if total_weight + parcel.weight_kg <= remaining + EPSILON:
-                loaded.append(parcel_id)
-                total_weight += parcel.weight_kg
-        for parcel_id in loaded:
-
+        bus = self.physical_buses[self.trip_to_bus[trip_id]]
+        for parcel_id in candidate.parcel_ids:
             for q in self.bus_terminal_ready.values():
                 if parcel_id in q:
                     q.remove(parcel_id); break
@@ -1092,8 +1085,13 @@ class DynamicDeliveryEnv:
             station_id = str(parcel.station_id)
             self.bus_freight_kg[trip_id] += parcel.weight_kg
             self.pending_bus_parcels.setdefault((trip_id, station_id), []).append(parcel_id)
+            self.parcel_bus_assignment[parcel_id] = (bus.physical_bus_id, trip_id)
+            bus.onboard_parcel_ids.append(parcel_id)
             parcel.status = "ONBOARD_BUS"
-        return 0.0
+        load_delay = candidate.loading_time_min
+        bus.schedule_delay_min += load_delay
+        self.bus_delay_min[trip_id] = bus.schedule_delay_min
+        return self._charge_cost("bus_operating_delay", load_delay) if load_delay else 0.0
 
     def _apply_bus_action(self, event: Event, action: int) -> float:
         trip_id, stop_index = event.payload["trip_id"], event.payload["stop_index"]
@@ -1105,7 +1103,10 @@ class DynamicDeliveryEnv:
             station.active_bus_charges.append(self.now_min + duration_min)
             energy = float(self.config["bus"]["charging_power_kw"]) * duration_min / 60
             bus = self.physical_buses[self.trip_to_bus[trip_id]]
-            bus.soc_kwh = min(float(self.config["bus"]["bus_battery_kwh"]), bus.soc_kwh + energy * float(self.config["bus"]["charging_efficiency"]))
+            added = energy_added_kwh(int(float(self.config["bus"]["charging_actions_sec"][action])), float(self.config["bus"]["charging_power_kw"]), float(self.config["bus"].get("charging_efficiency", 0.95)))
+            if bus.soc_kwh + added > float(self.config["bus"]["bus_battery_kwh"]) + EPSILON:
+                raise ValueError("overcharge action was not masked")
+            bus.soc_kwh = bus.soc_kwh + added
             self.bus_soc_kwh[trip_id] = bus.soc_kwh
             reward += self._charge_cost("energy_cost", energy)
             station_load_kw = self._station_load_kw(station, self.now_min)
@@ -1115,11 +1116,13 @@ class DynamicDeliveryEnv:
         bus = self.physical_buses[self.trip_to_bus[trip_id]]
         bus.schedule_delay_min += delay
         self.bus_delay_min[trip_id] = bus.schedule_delay_min
-        extra_onboard = self.physical_buses[self.trip_to_bus[trip_id]].passenger_manifest.total_onboard_passengers * (duration_min + unloading)
-        self.passenger_onboard_delay_minutes += extra_onboard
-        reward += self._charge_cost("passenger_delay", extra_onboard)
-        reward += self._charge_cost("bus_operating_delay", delay)
         rows = self.trip_stop_times[trip_id]
+        waiting = getattr(self.passenger_stops.get(rows[stop_index]["stop_id"]), "total_waiting", 0)
+        extra_onboard = self.physical_buses[self.trip_to_bus[trip_id]].passenger_manifest.total_onboard_passengers * (duration_min + unloading)
+        extra_waiting = waiting * (duration_min + unloading)
+        self.passenger_onboard_delay_minutes += extra_onboard
+        reward += self._charge_cost("passenger_delay", extra_onboard + extra_waiting)
+        reward += self._charge_cost("bus_operating_delay", delay)
         next_index = next((i for i in range(stop_index + 1, len(rows)) if rows[i]["stop_id"] in self.stop_to_station), None)
         if next_index is not None:
             scheduled_delta = float(rows[next_index]["arrival_time"]) - float(rows[stop_index]["arrival_time"])
@@ -1245,7 +1248,8 @@ class DynamicDeliveryEnv:
         return {
             "agent": surface.agent_id,
             "agent_id": surface.agent_id,
-            "event_type": surface.event_type,
+            "event_type": ("BUS_DEPARTURE" if surface.event_type == "BUS_TERMINAL_DEPARTURE" else "BUS_ARRIVAL" if surface.event_type == "BUS_STATION_ARRIVAL" else surface.event_type),
+            "event_type_detail": surface.event_type,
             "entity_id": surface.entity_id,
             "time_min": self.now_min,
             "features": list(surface.features),

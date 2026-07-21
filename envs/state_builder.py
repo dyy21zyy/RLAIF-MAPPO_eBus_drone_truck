@@ -6,6 +6,8 @@ from statistics import fmean
 from typing import Any
 
 from envs.decision_schema import ActionCandidate, DecisionSurface
+from envs.action_generators.bus_loading_actions import generate_bus_loading_candidates
+from envs.action_generators.bus_charging_actions import generate_bus_charging_candidates
 
 
 ASSIGNMENT_GLOBAL_FEATURE_NAMES = (
@@ -445,116 +447,41 @@ def build_truck_decision_surface(env: Any, truck: Any) -> DecisionSurface:
     )
 
 def build_bus_loading_decision_surface(env: Any, trip_id: str) -> DecisionSurface:
-    """Build candidates for a bus-departure parcel loading decision."""
-
+    """Build bounded physical-bus loading-batch candidates."""
     horizon = max(float(env.horizon_min), 1.0)
-    capacity = max(float(env.config["bus"]["freight_capacity_kg"]), 1.0)
-    ready = list(getattr(env, "bus_terminal_ready", {}).get(trip_id, []))
+    capacity = max(float(env.config["bus"].get("freight_capacity_kg", 20.0)), 1.0)
+    bus_id = env.trip_to_bus.get(trip_id, trip_id)
+    bus = env.physical_buses.get(bus_id)
+    candidates = []
+    generated = generate_bus_loading_candidates(env, trip_id)
+    for i, cand in enumerate(generated):
+        candidates.append(ActionCandidate(
+            action_id=i, action_type="idle" if cand.idle_flag else "loading_batch",
+            entity_id=cand.candidate_id, description=f"{cand.heuristic_source}: {','.join(cand.parcel_ids) or 'idle'}",
+            features=cand.feature_dict(), feasible=cand.feasible, reasons=cand.infeasibility_reasons,
+        ))
+    terminal_ready = sum(1 for p in env.parcels.values() if getattr(p, "status", None) == "AT_BUS_TERMINAL" and getattr(p, "mode", None) == "TBD")
     current_load = float(env.bus_freight_kg.get(trip_id, 0.0))
-    remaining = max(0.0, capacity - current_load)
-    loadable = []
-    total_weight = 0.0
-    for parcel_id in ready:
-        parcel = env.parcels[parcel_id]
-        if total_weight + parcel.weight_kg <= remaining + 1e-9:
-            loadable.append(parcel_id)
-            total_weight += parcel.weight_kg
-    candidates: list[ActionCandidate] = []
-    if loadable:
-        latest_deadline = min(env.parcels[parcel_id].deadline_min for parcel_id in loadable)
-        candidates.append(
-            _common_candidate(
-                0,
-                "load_ready",
-                trip_id,
-                "load ready terminal parcels",
-                action_type_id=1.0,
-                estimated_time_norm=env.now_min / horizon,
-                estimated_lateness_norm=max(0.0, env.now_min - latest_deadline) / horizon,
-                capacity_after_norm=(remaining - total_weight) / capacity,
-                resource_margin_norm=remaining / capacity,
-                feasible=True,
-            )
-        )
-    candidates.append(
-        _common_candidate(
-            len(candidates),
-            "idle",
-            trip_id,
-            "depart without loading additional parcels",
-            action_type_id=0.0,
-            capacity_after_norm=remaining / capacity,
-            resource_margin_norm=remaining / capacity,
-            idle_flag=1.0,
-            feasible=True,
-        )
-    )
+    target_profile = len({sid for cand in generated for sid in cand.target_station_ids})
     return DecisionSurface(
-        agent_id="bus",
-        event_type="BUS_DEPARTURE",
-        entity_id=trip_id,
-        features=[
-            env.now_min / horizon,
-            len(ready) / max(len(env.parcels), 1),
-            current_load / capacity,
-            remaining / capacity,
-        ],
-        feature_names=BUS_LOADING_FEATURE_NAMES,
+        agent_id="bus", event_type="BUS_TERMINAL_DEPARTURE", entity_id=trip_id,
+        features=[env.now_min / horizon, current_load / capacity, max(0.0, capacity-current_load)/capacity, terminal_ready / max(len(env.parcels), 1), float(getattr(getattr(bus, "passenger_manifest", None), "total_onboard_passengers", 0)) / max(float(env.config["bus"].get("bus_capacity_passenger",80)),1.0), float(getattr(bus, "soc_kwh", 0.0)) / max(float(env.config["bus"].get("bus_battery_kwh",160.0)),1.0), target_profile / max(len(env.station_ids),1)],
+        feature_names=("time_norm","freight_load_norm","capacity_remaining_norm","terminal_ready_parcel_count_norm","onboard_passengers_norm","soc_norm","target_station_profile_norm"),
         candidates=candidates,
     )
 
-
 def build_bus_charging_decision_surface(env: Any, event: Any) -> DecisionSurface:
-    """Build candidates for an integrated-station bus charging decision."""
-
-    trip_id = event.payload["trip_id"]
-    station_id = event.payload["station_id"]
-    station = env.stations[station_id]
-    mask = env._bus_mask(event)
-    horizon = max(float(env.horizon_min), 1.0)
-    battery = max(float(env.config["bus"]["bus_battery_kwh"]), 1.0)
-    capacity = max(float(env.config["bus"]["freight_capacity_kg"]), 1.0)
-    candidates = []
-    for action_id, feasible in enumerate(mask):
-        duration_min = float(env.config["bus"]["charging_actions_sec"][action_id]) / 60.0
-        candidates.append(
-            _common_candidate(
-                action_id,
-                "charge" if duration_min > 0 else "no_charge",
-                f"{trip_id}:{station_id}",
-                f"charge {duration_min:.2f} minutes",
-                action_type_id=2.0 if duration_min > 0 else 0.0,
-                estimated_time_norm=duration_min / horizon,
-                capacity_after_norm=env.physical_buses[env.trip_to_bus[trip_id]].soc_kwh / battery,
-                resource_margin_norm=_station_power_margin(env, station) / max(station.power_capacity_kw, 1.0),
-                idle_flag=float(duration_min == 0.0),
-                feasible=bool(feasible),
-                reasons=() if feasible else ("charger_unavailable",),
-            )
-        )
+    """Build masked physical-bus flash-charging candidates."""
+    trip_id = event.payload["trip_id"]; station_id = event.payload["station_id"]
+    station = env.stations[station_id]; bus = env.physical_buses[env.trip_to_bus[trip_id]]
+    horizon = max(float(env.horizon_min), 1.0); battery = max(float(env.config["bus"].get("bus_battery_kwh",160.0)), 1.0)
+    generated = generate_bus_charging_candidates(env, event)
+    candidates=[ActionCandidate(i, "charge" if c.duration_sec else "no_charge", c.candidate_id, f"charge {c.duration_sec} seconds", c.feature_dict(), c.feasible, c.infeasibility_reasons) for i,c in enumerate(generated)]
+    waiting = getattr(env.passenger_stops.get(env.trip_stop_times[trip_id][event.payload["stop_index"]]["stop_id"]), "total_waiting", 0)
     return DecisionSurface(
-        agent_id="bus",
-        event_type="BUS_ARRIVAL",
-        entity_id=f"{trip_id}:{station_id}",
-        features=[
-            env.now_min / horizon,
-            env.physical_buses[env.trip_to_bus[trip_id]].soc_kwh / battery,
-            env.physical_buses[env.trip_to_bus[trip_id]].schedule_delay_min / horizon,
-            station.locker_load_kg / max(station.locker_capacity_kg, 1.0),
-            station.full_batteries / max(float(env.config["station"]["initial_full_batteries"]), 1.0),
-            env.bus_freight_kg[trip_id] / capacity,
-            env.physical_buses[env.trip_to_bus[trip_id]].passenger_manifest.total_onboard_passengers / max(float(env.config["bus"].get("bus_capacity_passenger", 80)), 1.0),
-            env.physical_buses[env.trip_to_bus[trip_id]].passenger_manifest.remaining_capacity() / max(float(env.config["bus"].get("bus_capacity_passenger", 80)), 1.0),
-            getattr(env.passenger_stops.get(env.trip_stop_times[trip_id][event.payload["stop_index"]]["stop_id"]), "total_waiting", 0) / max(float(env.config["bus"].get("bus_capacity_passenger", 80)), 1.0),
-            sum(st.total_waiting for st in getattr(env, "passenger_stops", {}).values()) / max(float(env.config["bus"].get("bus_capacity_passenger", 80)) * max(len(getattr(env, "passenger_stops", {})), 1), 1.0),
-            float(event.payload.get("passenger_boarding_count", 0)) / max(float(env.config["bus"].get("bus_capacity_passenger", 80)), 1.0),
-            float(event.payload.get("passenger_alighting_count", 0)) / max(float(env.config["bus"].get("bus_capacity_passenger", 80)), 1.0),
-            float(getattr(env, "passenger_waiting_minutes", 0.0)) / horizon,
-            float(getattr(env, "passenger_onboard_delay_minutes", 0.0)) / horizon,
-            float(event.payload.get("passenger_boarding_count", 0)) * float(env.config.get("passenger", {}).get("boarding_time_sec_per_passenger", 3.0)) / 60.0 / horizon,
-            float(event.payload.get("passenger_alighting_count", 0)) * float(env.config.get("passenger", {}).get("alighting_time_sec_per_passenger", 1.5)) / 60.0 / horizon,
-        ],
-        feature_names=BUS_CHARGING_FEATURE_NAMES,
+        agent_id="bus", event_type="BUS_STATION_ARRIVAL", entity_id=f"{trip_id}:{station_id}",
+        features=[env.now_min/horizon, bus.soc_kwh/battery, max(0.0,bus.soc_kwh-bus.minimum_safe_energy_kwh)/battery, bus.schedule_delay_min/horizon, float(event.payload.get("unloading_delay_min",0.0))/horizon, float(bus.passenger_manifest.total_onboard_passengers)/max(float(env.config["bus"].get("bus_capacity_passenger",80)),1.0), float(waiting)/max(float(env.config["bus"].get("bus_capacity_passenger",80)),1.0), (station.power_capacity_kw-env._station_load_kw(station,env.now_min))/max(station.power_capacity_kw,1.0)],
+        feature_names=("time_norm","soc_norm","safety_energy_margin_norm","current_delay_norm","unloading_time_norm","passenger_load_norm","stop_queue_norm","station_power_margin_norm"),
         candidates=candidates,
     )
 

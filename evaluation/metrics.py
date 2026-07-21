@@ -4,7 +4,7 @@ from statistics import fmean
 
 
 def collect_environment_metrics(env, *, bus_charging_count=0, bus_charging_energy=0.0, fallback_events=0):
-    delivered = [p for p in env.parcels.values() if p.status == "delivered" and p.delivered_time_min is not None]
+    delivered = [p for p in env.parcels.values() if str(p.status).upper() == "DELIVERED" and p.delivered_time_min is not None]
     lateness = [max(0.0, float(p.delivered_time_min) - p.deadline_min) for p in delivered]
     urgent = [p for p in delivered if p.priority > 1]
     on_time = sum(value <= 0.0 for value in lateness)
@@ -26,6 +26,7 @@ def collect_environment_metrics(env, *, bus_charging_count=0, bus_charging_energ
         "truck_operating_cost": raw_cost("truck_cost"), "truck_direct_count": modes.count("TD"),
         "truck_to_terminal_count": modes.count("TBD"), "truck_to_locker_count": modes.count("TLD"),
         "bus_charging_count": bus_charging_count, "bus_charging_energy": bus_charging_energy,
+        "bus_loading_events": int(getattr(env, "decision_counts", {}).get("bus", 0)),
         "passenger_delay": raw_cost("passenger_delay"), "bus_operating_delay": raw_cost("bus_operating_delay"),
         "minimum_bus_soc": minimum_soc, "drone_delivery_count": sum(m in {"TBD", "TLD"} for m in modes),
         "battery_shortage_count": raw_cost("battery_shortage"),

@@ -179,3 +179,21 @@ Each stop maintains `waiting_by_destination`, `total_waiting`, `last_queue_updat
 Stop service is chronological: integrate arrivals through bus arrival, alight destination passengers, add alighting time (1.5 s/passenger), board up to capacity, add boarding time (3 s/passenger), apply freight unloading and charging, then include pre-generated arrivals during dwell and board them if capacity remains.  The dwell fixed point is bounded to prevent infinite loops.
 
 Passenger delay is waiting passenger-minutes plus onboard additional-delay passenger-minutes, not charging time alone.  Onboard additional delay uses `max(0, realized_dwell - baseline_dwell)` and counts passengers remaining onboard after alighting and after any boarding in that dwell component; normal line-haul travel is not counted as passenger delay.
+
+### Phase 5 bus decisions
+
+The bus actor now uses separate event surfaces for `BUS_TERMINAL_DEPARTURE` and
+`BUS_STATION_ARRIVAL`. Terminal departures expose bounded loading-batch
+candidates rather than a greedy load-all action. Eligible freight must be
+`AT_BUS_TERMINAL`, `TBD`, unreserved, physically present before the departure
+cutoff, targeted to a downstream station, and feasible under the hard 20 kg
+onboard and 10 kg per-station unloading limits.
+
+Station arrivals expose flash-charging candidates of 0, 15, 30, 45, 60, 75, 90,
+105, and 120 seconds. Action 0 is always feasible. Nonzero actions require one
+of two physical pantograph chargers and are masked if their 500 kW, 95% efficient
+energy addition would exceed the 160 kWh physical bus battery. Station power
+capacity remains a soft reward penalty and is surfaced as projected overload.
+Passenger-aware dwell includes passenger exchange, parcel unloading at 6
+seconds/kg, charging duration, and passenger queues during dwell so equal charge
+durations can have different costs for different passenger states.
