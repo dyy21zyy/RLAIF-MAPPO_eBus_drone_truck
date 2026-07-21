@@ -39,6 +39,7 @@ class RewardModelWrapper:
         fallback_to_env_reward: bool = False,
         fail_on_invalid_reward_model: bool = True,
         reward_clip: float | None = None,
+        agent_type: str = "assignment",
     ) -> None:
         self.requested_enabled = bool(enabled)
         self.enabled = False
@@ -52,6 +53,7 @@ class RewardModelWrapper:
         self.fallback_to_env_reward = bool(fallback_to_env_reward)
         self.fail_on_invalid_reward_model = bool(fail_on_invalid_reward_model)
         self.reward_clip = None if reward_clip is None else abs(float(reward_clip))
+        self.agent_type = str(agent_type)
         if not self.requested_enabled:
             LOGGER.info("RLAIF disabled; using pure environment reward.")
             return
@@ -83,9 +85,22 @@ class RewardModelWrapper:
         try:
             torch = importlib.import_module("torch")
             from rlaif.reward_model import AssignmentRewardModel
+            from rlaif.multi_agent_reward_model import MultiAgentRewardModel
             checkpoint = torch.load(self.checkpoint_path, map_location="cpu", weights_only=False)
-            if not isinstance(checkpoint, dict) or self.REQUIRED_KEYS - checkpoint.keys():
-                missing = sorted(self.REQUIRED_KEYS - set(checkpoint) if isinstance(checkpoint, dict) else self.REQUIRED_KEYS)
+            if not isinstance(checkpoint, dict):
+                raise ValueError("checkpoint is not a dictionary")
+            if checkpoint.get("agent_type") is not None:
+                if checkpoint.get("agent_type") != self.agent_type:
+                    raise ValueError(f"checkpoint agent_type {checkpoint.get('agent_type')} does not match requested {self.agent_type}")
+                if checkpoint.get("state_schema_version") not in {"v2", 2}:
+                    raise ValueError("unsupported state_schema_version")
+                for key in ("model_state_dict","state_feature_dim","candidate_feature_dim","state_feature_mean","state_feature_std","candidate_feature_mean","candidate_feature_std","reward_mean","reward_std","compatible_event_types"):
+                    if key not in checkpoint: raise ValueError(f"missing checkpoint key: {key}")
+                model_config = checkpoint.get("model_config", checkpoint.get("config", {}).get("reward_model", {}))
+                model = MultiAgentRewardModel(int(checkpoint["state_feature_dim"]), int(checkpoint["candidate_feature_dim"]), checkpoint["compatible_event_types"], hidden_dims=model_config.get("hidden_dims", [64,64]), dropout=float(model_config.get("dropout",0.0)))
+                model.load_state_dict(checkpoint["model_state_dict"]); model.eval(); self.torch=torch; self.checkpoint=checkpoint; self.model=model; return
+            if self.REQUIRED_KEYS - checkpoint.keys():
+                missing = sorted(self.REQUIRED_KEYS - set(checkpoint))
                 raise ValueError(f"missing checkpoint keys: {missing}")
             model_config = checkpoint.get("config", {}).get("reward_model", {})
             model = AssignmentRewardModel(
@@ -131,20 +146,29 @@ class RewardModelWrapper:
         if acc < min_acc:
             raise RewardModelCheckpointError(f"RLAIF validation pairwise accuracy {acc:.3f} below min_pairwise_accuracy={min_acc:.3f}")
 
-    def score(self, state_features: Sequence[float], action_features: Sequence[float], action_id: int) -> float:
+    def score(self, state_features: Sequence[float], action_features: Sequence[float], action_id: int, event_type: str | None = None) -> float:
         if not self.enabled or self.model is None or self.checkpoint is None:
             raise RuntimeError("RLAIF scoring is disabled; no substitute reward is available")
         torch = self.torch
         state = torch.tensor([state_features], dtype=torch.float32)
         action = torch.tensor([action_features], dtype=torch.float32)
+        cand_key = "candidate_feature_dim" if "candidate_feature_dim" in self.checkpoint else "action_feature_dim"
+        if event_type is not None and "compatible_event_types" in self.checkpoint and event_type not in self.checkpoint["compatible_event_types"]:
+            raise RewardModelCheckpointError(f"event {event_type} is not compatible with checkpoint for {self.agent_type}")
         if state.shape[-1] != int(self.checkpoint["state_feature_dim"]):
             raise ValueError("State feature dimension does not match reward checkpoint")
-        if action.shape[-1] != int(self.checkpoint["action_feature_dim"]):
+        if action.shape[-1] != int(self.checkpoint[cand_key]):
             raise ValueError("Action feature dimension does not match reward checkpoint")
         state = (state - self.checkpoint["state_feature_mean"]) / (self.checkpoint["state_feature_std"] + 1e-6)
-        action = (action - self.checkpoint["action_feature_mean"]) / (self.checkpoint["action_feature_std"] + 1e-6)
+        action_mean_key = "candidate_feature_mean" if "candidate_feature_mean" in self.checkpoint else "action_feature_mean"
+        action_std_key = "candidate_feature_std" if "candidate_feature_std" in self.checkpoint else "action_feature_std"
+        action = (action - self.checkpoint[action_mean_key]) / (self.checkpoint[action_std_key] + 1e-6)
         with torch.no_grad():
-            raw = self.model(state, action, torch.tensor([int(action_id)], dtype=torch.long))
+            if "compatible_event_types" in self.checkpoint:
+                eid = self.checkpoint["compatible_event_types"].index(event_type or self.checkpoint["compatible_event_types"][0])
+                raw = self.model(state, action, torch.tensor([eid], dtype=torch.long))
+            else:
+                raw = self.model(state, action, torch.tensor([int(action_id)], dtype=torch.long))
             normalized = (raw - float(self.checkpoint["reward_mean"])) / (float(self.checkpoint["reward_std"]) + 1e-6)
         result = float(normalized.item())
         if self.reward_clip is not None:

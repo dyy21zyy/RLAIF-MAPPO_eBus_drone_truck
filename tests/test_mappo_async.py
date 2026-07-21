@@ -29,13 +29,13 @@ def test_disabled_rlaif_needs_no_checkpoint(tmp_path):
 def test_enabled_rlaif_requires_real_checkpoint(tmp_path):
     with pytest.raises(RewardModelCheckpointError): RewardModelWrapper(tmp_path/'missing.pt',enabled=True)
 
-def test_rlaif_only_assignment_and_never_other_agents():
+def test_rlaif_supports_all_phase8_agents():
     class Wrapper:
         enabled=True
         def score(self,*args): return 3.0
     assert transition_reward('assignment',2.0,Wrapper(),lambda_rlaif=.5,state_features=[0],action_features=[0],action_id=0)==(3.5,3.0)
     for agent in ("truck", "bus", "station"):
-        assert transition_reward(agent,2.0,Wrapper(),lambda_rlaif=99)==(2.0,0.0)
+        assert transition_reward(agent,2.0,Wrapper(),lambda_rlaif=.5,state_features=[0],action_features=[0],action_id=0)==(3.5,3.0)
 
 def test_smoke_contract_collects_four_agent_transitions():
     from experiments.smoke_test_mappo_async import run_smoke_test

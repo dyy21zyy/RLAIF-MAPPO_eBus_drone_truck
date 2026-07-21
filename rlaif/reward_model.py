@@ -44,3 +44,7 @@ def normalize_reward(scores: Tensor, reward_mean: float | Tensor, reward_std: fl
     return (scores - torch.as_tensor(reward_mean, dtype=scores.dtype, device=scores.device)) / (
         torch.as_tensor(reward_std, dtype=scores.dtype, device=scores.device) + epsilon
     )
+
+
+# Phase 8 alias; independent multi-agent models are defined without action-ID embeddings.
+from rlaif.multi_agent_reward_model import MultiAgentRewardModel, bradley_terry_loss

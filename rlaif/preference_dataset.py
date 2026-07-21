@@ -249,3 +249,21 @@ def split_preference_examples(examples: Sequence[PreferenceExample], train_ratio
         validation=shuffled[train_count:train_count + val_count],
         test=shuffled[train_count + val_count:],
     )
+
+VALID_LABEL_SOURCES_V2 = {"external_evaluator_api", "validated_replay"}
+NON_TRAINING_ANSWERS_V2 = {"tie", "abstain"}
+
+def validate_preference_v2(record: dict[str, Any]) -> dict[str, Any]:
+    """Validate v2 labels without fabricating winners from rules or objective fields."""
+    source = record.get("label_source")
+    if source not in VALID_LABEL_SOURCES_V2:
+        raise ValueError("label_source must be external_evaluator_api or validated_replay")
+    answer = str(record.get("evaluator_answer", "")).lower()
+    if answer not in {"a", "b", "tie", "abstain"}:
+        raise ValueError("evaluator_answer must be A, B, tie, or abstain")
+    from rlaif.pair_selector import resolve_original_winner
+    return resolve_original_winner(record)
+
+def training_preferences_v2(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return only chosen/rejected labels; ties and abstentions are excluded from BT training."""
+    return [r for r in records if r.get("usable_for_training") is True and r.get("resolved_original_winner") not in NON_TRAINING_ANSWERS_V2]

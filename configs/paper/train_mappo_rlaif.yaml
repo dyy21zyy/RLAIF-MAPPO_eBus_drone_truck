@@ -39,3 +39,32 @@ networks:
   - 256
   - 256
   - 128
+rlaif:
+  enabled: true
+  fallback_to_env_reward: false
+  fail_on_invalid_reward_model: true
+  agents:
+    assignment:
+      enabled: true
+      checkpoint: results/checkpoints/reward_assignment.pt
+      lambda: 0.2
+      reward_clip: 2.0
+    truck:
+      enabled: true
+      checkpoint: results/checkpoints/reward_truck.pt
+      lambda: 0.2
+      reward_clip: 2.0
+    bus:
+      enabled: true
+      checkpoint: results/checkpoints/reward_bus.pt
+      lambda: 0.2
+      reward_clip: 2.0
+    station:
+      enabled: true
+      checkpoint: results/checkpoints/reward_station.pt
+      lambda: 0.2
+      reward_clip: 2.0
+  validation:
+    enabled: true
+    min_samples: 1000
+    min_pairwise_accuracy: 0.70

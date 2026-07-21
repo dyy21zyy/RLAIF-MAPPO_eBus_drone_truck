@@ -332,3 +332,7 @@ Station agents now choose bounded joint actions that can dispatch multiple expli
 ### Phase 7 asynchronous MAPPO
 
 The Phase 7 trainer is a four-agent asynchronous MAPPO implementation trained only on environment reward. It registers independent candidate-scoring actor heads for assignment, truck, bus, and station decisions, uses a fixed-dimensional pooled entity critic, stores schema versions in checkpoints, and defers all RLAIF reward integration to Phase 8.
+
+### Phase 8: multi-agent RLAIF
+
+The RLAIF stack now has v2 schemas for four agent types (`assignment`, `truck`, `bus`, `station`), agent-specific prompt builders, informative pair selection, grouped scenario/episode/state splits, independent reward models, and a reward registry that loads the correct checkpoint for each active agent. Formal RLAIF configuration is fail-closed and uses per-agent `lambda` and clipping after reward normalization.
