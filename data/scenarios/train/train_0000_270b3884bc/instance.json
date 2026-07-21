@@ -471,6 +471,13 @@
     }
   },
   "warnings": [],
+  "data_provenance": {
+    "scenario_fixture": {
+      "source_type": "fallback_test_only",
+      "source_file": "configs/shanghai_small.yaml",
+      "notes": "Committed deterministic scenario-bank fixture for integration tests; not real transit data or formal experiment output."
+    }
+  },
   "config_snapshot": {
     "project": {
       "name": "rlaif_mappo_dynamic_delivery",
