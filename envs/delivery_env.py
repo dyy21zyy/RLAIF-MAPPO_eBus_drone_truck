@@ -26,6 +26,7 @@ from envs.state_builder import (
 )
 from utils.config import load_config
 from envs.dynamics.bus_circulation import RuntimePhysicalBus, assert_no_overlaps
+from envs.dynamics.passenger_dynamics import PassengerArrivalEvent, PassengerArrivalIndex, PassengerStopRuntimeState, process_bus_stop
 
 EPSILON = 1e-9
 EVENT_PRIORITY = {
@@ -171,6 +172,7 @@ class DynamicDeliveryEnv:
         trip_rows = self._read_csv(self._artifact("bus_trips"))
         stop_time_rows = self._read_csv(self._artifact("bus_stop_times"))
         physical_rows = self._read_csv(self._artifact("physical_buses")) if self.manifest.get("artifacts", {}).get("physical_buses") else []
+        passenger_rows = self._read_csv(self._artifact("passenger_arrivals")) if self.manifest.get("artifacts", {}).get("passenger_arrivals") else []
         trip_to_bus_rows = self._read_csv(self._artifact("trip_to_bus")) if self.manifest.get("artifacts", {}).get("trip_to_bus") else []
         if not parcel_rows or not station_rows or not trip_rows or not stop_time_rows:
             raise InstanceValidationError("Parcels, stations, trips, and stop times must be non-empty")
@@ -208,6 +210,7 @@ class DynamicDeliveryEnv:
         self.trip_rows = {row["trip_id"]: row for row in trip_rows}
         self.physical_bus_rows = physical_rows
         self.trip_to_bus_rows = trip_to_bus_rows
+        self.passenger_rows = passenger_rows
         self.trip_to_bus = {row["trip_id"]: row["bus_id"] for row in trip_to_bus_rows}
         if trip_to_bus_rows:
             if set(self.trip_to_bus) != set(self.trip_rows):
@@ -304,6 +307,13 @@ class DynamicDeliveryEnv:
         self.pending_truck_tasks: list[dict[str, Any]] = []  # legacy mirror; formal truck decisions use WAITING_TRUCK parcel pool
         self.pending_truck_decision_min: dict[int, float] = {}
         self.bus_terminal_ready: dict[str, list[str]] = {}
+        stop_ids = [row["stop_id"] for rows in self.trip_stop_times.values() for row in rows]
+        self.passenger_stops = {sid: PassengerStopRuntimeState(sid) for sid in dict.fromkeys(stop_ids)}
+        passenger_events = [PassengerArrivalEvent(row["passenger_event_id"], row["origin_stop_id"], row["destination_stop_id"], float(row["arrival_time_min"]), int(row.get("passenger_count", 1))) for row in self.passenger_rows]
+        self.passenger_arrivals = PassengerArrivalIndex(passenger_events)
+        self.passenger_waiting_minutes = 0.0
+        self.passenger_onboard_delay_minutes = 0.0
+        self.last_passenger_stop_result = None
         self.waiting_station_parcels: dict[str, list[str]] = {}
         self.reward_total = 0.0
         self.decision_counts = {"assignment": 0, "truck": 0, "bus": 0, "station": 0}
@@ -1009,7 +1019,8 @@ class DynamicDeliveryEnv:
     def _handle_bus_arrival(self, event: Event) -> float:
         trip_id, stop_index = event.payload["trip_id"], event.payload["stop_index"]
         rows = self.trip_stop_times[trip_id]
-        station_id = self.stop_to_station[rows[stop_index]["stop_id"]]
+        stop_id = rows[stop_index]["stop_id"]
+        station_id = self.stop_to_station[stop_id]
         event.payload["station_id"] = station_id
         reward = 0.0
         previous_stop_index = event.payload.get("previous_stop_index")
@@ -1029,6 +1040,16 @@ class DynamicDeliveryEnv:
             shortage = max(0.0, float(self.config["bus"]["bus_min_soc_kwh"]) - bus.soc_kwh)
             if shortage:
                 reward += self._charge_cost("bus_battery_violation", shortage)
+        bus = self.physical_buses[self.trip_to_bus[trip_id]]
+        presult = process_bus_stop(self.passenger_stops.setdefault(stop_id, PassengerStopRuntimeState(stop_id)), bus.passenger_manifest, self.passenger_arrivals, self.now_min, baseline_dwell_min=float(self.config.get("passenger", {}).get("baseline_dwell_min", 0.0)), boarding_time_sec=float(self.config.get("passenger", {}).get("boarding_time_sec_per_passenger", 3.0)), alighting_time_sec=float(self.config.get("passenger", {}).get("alighting_time_sec_per_passenger", 1.5)))
+        event.payload["passenger_dwell_min"] = presult.realized_dwell_min
+        event.payload["passenger_departure_time_min"] = presult.departure_time_min
+        event.payload["passenger_boarding_count"] = presult.boarding_count
+        event.payload["passenger_alighting_count"] = presult.alighting_count
+        self.passenger_waiting_minutes = sum(st.cumulative_waiting_passenger_minutes for st in self.passenger_stops.values())
+        self.passenger_onboard_delay_minutes = sum(b.passenger_manifest.onboard_additional_delay_passenger_minutes for b in self.physical_buses.values())
+        self.last_passenger_stop_result = presult
+        reward += self._charge_cost("passenger_delay", (self.passenger_waiting_minutes + self.passenger_onboard_delay_minutes) - (self.cost_components["passenger_delay"] / max(float(self.config["reward"].get("passenger_delay", 1.0)), EPSILON)))
         unloading = 0.0
         for parcel_id in self.pending_bus_parcels.pop((trip_id, station_id), []):
             parcel = self.parcels[parcel_id]
@@ -1089,11 +1110,14 @@ class DynamicDeliveryEnv:
             reward += self._charge_cost("energy_cost", energy)
             station_load_kw = self._station_load_kw(station, self.now_min)
             self.peak_station_load_kw = max(self.peak_station_load_kw, station_load_kw)
-        delay = duration_min + unloading
+        passenger_dwell = float(event.payload.get("passenger_dwell_min", 0.0))
+        delay = passenger_dwell + duration_min + unloading
         bus = self.physical_buses[self.trip_to_bus[trip_id]]
         bus.schedule_delay_min += delay
         self.bus_delay_min[trip_id] = bus.schedule_delay_min
-        reward += self._charge_cost("passenger_delay", duration_min)
+        extra_onboard = self.physical_buses[self.trip_to_bus[trip_id]].passenger_manifest.total_onboard_passengers * (duration_min + unloading)
+        self.passenger_onboard_delay_minutes += extra_onboard
+        reward += self._charge_cost("passenger_delay", extra_onboard)
         reward += self._charge_cost("bus_operating_delay", delay)
         rows = self.trip_stop_times[trip_id]
         next_index = next((i for i in range(stop_index + 1, len(rows)) if rows[i]["stop_id"] in self.stop_to_station), None)

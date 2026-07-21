@@ -169,3 +169,13 @@ The physical fleet size is computed as:
 The one-way line time is derived from generated timetable stop times. Relocation and layover assumptions are recorded with `project_extension` provenance in `bus_circulation.json` unless a concrete source is configured. Initial bus energy uses `initial_bus_energy_seed` and samples `Uniform(0.55 * 160, 0.85 * 160)`, so generated SoC values are reproducible and remain in `[88, 136]` kWh for 160 kWh buses.
 
 At each trip start the mapped physical bus is selected from `trip_to_bus.csv`; SoC is not reset. Segment energy uses `segment_distance_km * 1.6`. At terminal completion, SoC and delay persist, relocation energy is subtracted, layover is enforced, and `next_available_time_min` is updated. Complete depletion at or below zero raises severe infeasibility instead of continuing silently. Passenger dynamics remain limited to the existing manifest placeholder pending Phase 4.
+
+## Phase 4 passenger dynamics
+
+Passenger demand is generated before an episode with the configured `passenger_seed`; the simulator never resamples passengers inside a dwell loop.  Each stop receives a seeded truncated-normal baseline rate with mean 0.25 passenger/min, standard deviation 0.10, and bounds [0.05, 0.60].  The effective rate multiplies this baseline by `passenger_demand_intensity` (default 1.0; sensitivity values 0.75, 1.00, 1.25, 1.50, and 2.00 are supported by the generator).  Passenger arrival artifacts include event id, origin, downstream destination, arrival time, and count.
+
+Each stop maintains `waiting_by_destination`, `total_waiting`, `last_queue_update_time`, and `cumulative_waiting_passenger_minutes`.  Before any bus-stop event or dwell-boundary update, waiting passenger-minutes are integrated as current queue size times elapsed minutes.  Physical buses keep destination manifests with capacity 80, so boarding is capacity-capped and passengers alight exactly at their sampled destination; no second binomial alighting process is applied.
+
+Stop service is chronological: integrate arrivals through bus arrival, alight destination passengers, add alighting time (1.5 s/passenger), board up to capacity, add boarding time (3 s/passenger), apply freight unloading and charging, then include pre-generated arrivals during dwell and board them if capacity remains.  The dwell fixed point is bounded to prevent infinite loops.
+
+Passenger delay is waiting passenger-minutes plus onboard additional-delay passenger-minutes, not charging time alone.  Onboard additional delay uses `max(0, realized_dwell - baseline_dwell)` and counts passengers remaining onboard after alighting and after any boarding in that dwell component; normal line-haul travel is not counted as passenger delay.

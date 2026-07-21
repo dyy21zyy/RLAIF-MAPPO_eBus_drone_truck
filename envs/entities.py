@@ -120,6 +120,9 @@ class ScheduledTrip:
 @dataclass(frozen=True)
 class PassengerManifest:
     onboard_passengers: int = 0
+    onboard_passengers_by_destination: dict[str, int] = field(default_factory=dict)
+    total_onboard_passengers: int = 0
+    passenger_capacity: int = 80
     origin_destination_counts: dict[tuple[str, str], int] = field(default_factory=dict)
 
 
@@ -142,8 +145,12 @@ class PhysicalBusState:
 @dataclass(frozen=True)
 class PassengerStopState:
     stop_id: str
-    waiting_passengers: int
-    waiting_passenger_minutes: float
+    waiting_by_destination: dict[str, int] = field(default_factory=dict)
+    total_waiting: int = 0
+    last_queue_update_time: float = 0.0
+    cumulative_waiting_passenger_minutes: float = 0.0
+    waiting_passengers: int = 0
+    waiting_passenger_minutes: float = 0.0
     onboard_additional_delay_passenger_minutes: float = 0.0
 
 
