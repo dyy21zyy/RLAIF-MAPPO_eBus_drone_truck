@@ -1,0 +1,19 @@
+experiment:
+  name: paper_benchmark_smoke
+  base_config: configs/shanghai_small.yaml
+  seeds: [0]
+  output_dir: results/paper_benchmark
+  fallback: true
+  fail_fast: false
+methods:
+  - {name: truck_direct_heuristic, assignment_policy: truck_only, bus_policy: no_charge, rlaif_enabled: false}
+  - {name: integrated_rule_based_heuristic, assignment_policy: rule_based, bus_policy: battery_threshold, rlaif_enabled: false}
+  - {name: assignment_ppo, assignment_policy: assignment_ppo, checkpoint: results/checkpoints/assignment_ppo_seed_1.pt, bus_policy: uniform_30, rlaif_enabled: false}
+  - {name: four_agent_env_mappo, assignment_policy: mappo_async, checkpoint: results/checkpoints/mappo_env_seed_1.pt, bus_policy: mappo_async, rlaif_enabled: false}
+  - {name: assignment_only_rlaif_mappo, assignment_policy: mappo_async, checkpoint: results/checkpoints/mappo_rlaif_assignment_seed_1.pt, reward_model_checkpoint: results/reward_models/assignment_seed_1.pt, bus_policy: mappo_async, rlaif_enabled: true}
+  - {name: full_multi_agent_rlaif_mappo, assignment_policy: mappo_async, checkpoint: results/checkpoints/mappo_rlaif_all_seed_1.pt, reward_model_checkpoint: results/reward_models/all_seed_1.pt, bus_policy: mappo_async, rlaif_enabled: true}
+policy_matrix:
+  policies:
+    - {name: mappo_env, checkpoint: results/checkpoints/mappo_env_seed_1.pt, rlaif_enabled: false}
+    - {name: mappo_rlaif_assignment, checkpoint: results/checkpoints/mappo_rlaif_assignment_seed_1.pt, rlaif_enabled: true, reward_checkpoints: {assignment: results/reward_models/assignment_seed_1.pt}}
+    - {name: mappo_rlaif_all, checkpoint: results/checkpoints/mappo_rlaif_all_seed_1.pt, rlaif_enabled: true, reward_checkpoints: {assignment: results/reward_models/assignment_seed_1.pt, bus: results/reward_models/bus_seed_1.pt, truck: results/reward_models/truck_seed_1.pt, station: results/reward_models/station_seed_1.pt}}

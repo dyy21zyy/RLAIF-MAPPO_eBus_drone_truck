@@ -79,3 +79,9 @@ Before full environment-only MAPPO training, run `python -m experiments.estimate
 ### Phase 8 smoke pipeline
 
 Replay fixtures may be used only to validate the pipeline mechanics, not to claim final reward-model quality. A Phase 8 smoke run should: collect four-agent preference states, build prompts, validate replay labels, build grouped splits, train smoke reward models, evaluate them, load all four wrappers, and run one RLAIF-MAPPO rollout. Formal experiments must use real external or validated replay labels and formal sample/accuracy thresholds.
+
+## Phase 9 paper smoke workflow
+
+Run `python -m experiments.smoke_test_experiments` before launching formal experiments. This tiny workflow generates one scenario per bank, validates the policy matrix, validates ablation and sensitivity declarations, runs a paired benchmark smoke, and aggregates smoke records. These smoke artifacts are not final results.
+
+Formal studies should use frozen test-bank scenarios for all methods, train separate policy checkpoints for each reward setting or ablation, and record an artifact manifest beside each run.

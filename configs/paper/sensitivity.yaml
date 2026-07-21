@@ -1,0 +1,12 @@
+experiment: {name: paper_sensitivity_smoke, base_config: configs/shanghai_small.yaml, seeds: [0], output_dir: results/paper_sensitivity, fallback: true}
+experiments:
+  - mode: fixed_policy_robustness
+    output_table: fixed_policy_robustness.csv
+    dimensions:
+      - {name: parcel_count, values: [30, 60]}
+      - {name: rlaif_lambda, values: [0.0, 0.2]}
+  - mode: retrained_policy_sensitivity
+    output_table: retrained_policy_sensitivity.csv
+    dimensions:
+      - {name: preference_label_volume, values: [100, 500]}
+      - {name: truck_count, values: [1, 2]}

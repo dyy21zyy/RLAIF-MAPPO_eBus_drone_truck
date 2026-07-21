@@ -1,0 +1,780 @@
+{
+  "schema_version": 1,
+  "stage": 2,
+  "city_name": "shanghai_yangpu",
+  "mode": "fallback",
+  "seed": 2000,
+  "seeds": {
+    "network_seed": 2000,
+    "parcel_seed": 2001,
+    "passenger_seed": 2002,
+    "travel_time_seed": 2003,
+    "initial_bus_energy_seed": 2004,
+    "station_base_load_seed": 2005
+  },
+  "output_directory": "/tmp/scenario_bank_mh019cua/built/validation/0/shanghai_yangpu",
+  "artifacts": {
+    "road_graph": "road_graph.graphml",
+    "road_nodes": "road_nodes.csv",
+    "road_edges": "road_edges.csv",
+    "depot": "depot.csv",
+    "bus_stops": "bus_stops.csv",
+    "bus_trips": "bus_trips.csv",
+    "bus_stop_times": "bus_stop_times.csv",
+    "bus_timetable": "bus_timetable.json",
+    "physical_buses": "physical_buses.csv",
+    "trip_to_bus": "trip_to_bus.csv",
+    "bus_circulation": "bus_circulation.json",
+    "integrated_stations": "integrated_stations.csv",
+    "parcels": "parcels.csv",
+    "scenario_manifest": "scenario_manifest.json",
+    "passenger_stop_rates": "passenger_stop_rates.csv",
+    "passenger_arrivals": "passenger_arrivals.csv",
+    "passenger_demand_provenance": "passenger_demand_provenance.json",
+    "truck_distance_matrix": "truck_distance_matrix.npy",
+    "truck_travel_time_matrix": "truck_travel_time_matrix.npy",
+    "drone_distance_matrix": "drone_distance_matrix.npy"
+  },
+  "counts": {
+    "road_nodes": 25,
+    "road_edges": 80,
+    "bus_stops": 20,
+    "bus_trips": 24,
+    "bus_stop_times": 480,
+    "physical_buses": 22,
+    "trip_to_bus": 24,
+    "integrated_stations": 6,
+    "parcels": 30,
+    "passenger_arrivals": 451
+  },
+  "matrix_indices": {
+    "truck_locations": [
+      {
+        "id": "depot_01",
+        "type": "depot",
+        "lat": 31.25,
+        "lon": 121.45,
+        "road_node": "n00_00"
+      },
+      {
+        "id": "stop_01",
+        "type": "terminal",
+        "lat": 31.25,
+        "lon": 121.45,
+        "road_node": "n00_00"
+      },
+      {
+        "id": "station_01",
+        "type": "integrated_station",
+        "lat": 31.25,
+        "lon": 121.45,
+        "road_node": "n00_00"
+      },
+      {
+        "id": "station_02",
+        "type": "integrated_station",
+        "lat": 31.275,
+        "lon": 121.45,
+        "road_node": "n01_00"
+      },
+      {
+        "id": "station_03",
+        "type": "integrated_station",
+        "lat": 31.3,
+        "lon": 121.45,
+        "road_node": "n02_00"
+      },
+      {
+        "id": "station_04",
+        "type": "integrated_station",
+        "lat": 31.3,
+        "lon": 121.6,
+        "road_node": "n02_04"
+      },
+      {
+        "id": "station_05",
+        "type": "integrated_station",
+        "lat": 31.325000000000003,
+        "lon": 121.6,
+        "road_node": "n03_04"
+      },
+      {
+        "id": "station_06",
+        "type": "integrated_station",
+        "lat": 31.35,
+        "lon": 121.6,
+        "road_node": "n04_04"
+      },
+      {
+        "id": "parcel_0001",
+        "type": "customer",
+        "lat": 31.3101478,
+        "lon": 121.5703394,
+        "road_node": "n02_03"
+      },
+      {
+        "id": "parcel_0002",
+        "type": "customer",
+        "lat": 31.2563766,
+        "lon": 121.5148858,
+        "road_node": "n00_02"
+      },
+      {
+        "id": "parcel_0003",
+        "type": "customer",
+        "lat": 31.2971575,
+        "lon": 121.4881324,
+        "road_node": "n02_01"
+      },
+      {
+        "id": "parcel_0004",
+        "type": "customer",
+        "lat": 31.333431,
+        "lon": 121.4745117,
+        "road_node": "n03_01"
+      },
+      {
+        "id": "parcel_0005",
+        "type": "customer",
+        "lat": 31.2502185,
+        "lon": 121.5126877,
+        "road_node": "n00_02"
+      },
+      {
+        "id": "parcel_0006",
+        "type": "customer",
+        "lat": 31.3415602,
+        "lon": 121.5714387,
+        "road_node": "n04_03"
+      },
+      {
+        "id": "parcel_0007",
+        "type": "customer",
+        "lat": 31.3263454,
+        "lon": 121.4622622,
+        "road_node": "n03_00"
+      },
+      {
+        "id": "parcel_0008",
+        "type": "customer",
+        "lat": 31.2699797,
+        "lon": 121.5592161,
+        "road_node": "n01_03"
+      },
+      {
+        "id": "parcel_0009",
+        "type": "customer",
+        "lat": 31.3472171,
+        "lon": 121.5676725,
+        "road_node": "n04_03"
+      },
+      {
+        "id": "parcel_0010",
+        "type": "customer",
+        "lat": 31.309215,
+        "lon": 121.4523248,
+        "road_node": "n02_00"
+      },
+      {
+        "id": "parcel_0011",
+        "type": "customer",
+        "lat": 31.3474692,
+        "lon": 121.5348365,
+        "road_node": "n04_02"
+      },
+      {
+        "id": "parcel_0012",
+        "type": "customer",
+        "lat": 31.3260661,
+        "lon": 121.4812326,
+        "road_node": "n03_01"
+      },
+      {
+        "id": "parcel_0013",
+        "type": "customer",
+        "lat": 31.2916453,
+        "lon": 121.599563,
+        "road_node": "n02_04"
+      },
+      {
+        "id": "parcel_0014",
+        "type": "customer",
+        "lat": 31.2609115,
+        "lon": 121.5596009,
+        "road_node": "n00_03"
+      },
+      {
+        "id": "parcel_0015",
+        "type": "customer",
+        "lat": 31.3251285,
+        "lon": 121.4970226,
+        "road_node": "n03_01"
+      },
+      {
+        "id": "parcel_0016",
+        "type": "customer",
+        "lat": 31.2919915,
+        "lon": 121.5921087,
+        "road_node": "n02_04"
+      },
+      {
+        "id": "parcel_0017",
+        "type": "customer",
+        "lat": 31.3249303,
+        "lon": 121.4592325,
+        "road_node": "n03_00"
+      },
+      {
+        "id": "parcel_0018",
+        "type": "customer",
+        "lat": 31.3163222,
+        "lon": 121.5615488,
+        "road_node": "n03_03"
+      },
+      {
+        "id": "parcel_0019",
+        "type": "customer",
+        "lat": 31.3320878,
+        "lon": 121.4766131,
+        "road_node": "n03_01"
+      },
+      {
+        "id": "parcel_0020",
+        "type": "customer",
+        "lat": 31.3002247,
+        "lon": 121.4778508,
+        "road_node": "n02_01"
+      },
+      {
+        "id": "parcel_0021",
+        "type": "customer",
+        "lat": 31.3445481,
+        "lon": 121.5636429,
+        "road_node": "n04_03"
+      },
+      {
+        "id": "parcel_0022",
+        "type": "customer",
+        "lat": 31.32962,
+        "lon": 121.5925765,
+        "road_node": "n03_04"
+      },
+      {
+        "id": "parcel_0023",
+        "type": "customer",
+        "lat": 31.2628254,
+        "lon": 121.4603822,
+        "road_node": "n01_00"
+      },
+      {
+        "id": "parcel_0024",
+        "type": "customer",
+        "lat": 31.3002341,
+        "lon": 121.4890805,
+        "road_node": "n02_01"
+      },
+      {
+        "id": "parcel_0025",
+        "type": "customer",
+        "lat": 31.2858081,
+        "lon": 121.560412,
+        "road_node": "n01_03"
+      },
+      {
+        "id": "parcel_0026",
+        "type": "customer",
+        "lat": 31.258885,
+        "lon": 121.5270139,
+        "road_node": "n00_02"
+      },
+      {
+        "id": "parcel_0027",
+        "type": "customer",
+        "lat": 31.3361925,
+        "lon": 121.4631428,
+        "road_node": "n03_00"
+      },
+      {
+        "id": "parcel_0028",
+        "type": "customer",
+        "lat": 31.3209247,
+        "lon": 121.5530565,
+        "road_node": "n03_03"
+      },
+      {
+        "id": "parcel_0029",
+        "type": "customer",
+        "lat": 31.2548186,
+        "lon": 121.5694386,
+        "road_node": "n00_03"
+      },
+      {
+        "id": "parcel_0030",
+        "type": "customer",
+        "lat": 31.2890626,
+        "lon": 121.5020246,
+        "road_node": "n02_01"
+      }
+    ],
+    "drone_rows": [
+      {
+        "index": 0,
+        "station_id": "station_01"
+      },
+      {
+        "index": 1,
+        "station_id": "station_02"
+      },
+      {
+        "index": 2,
+        "station_id": "station_03"
+      },
+      {
+        "index": 3,
+        "station_id": "station_04"
+      },
+      {
+        "index": 4,
+        "station_id": "station_05"
+      },
+      {
+        "index": 5,
+        "station_id": "station_06"
+      }
+    ],
+    "drone_columns": [
+      {
+        "index": 0,
+        "parcel_id": "parcel_0001"
+      },
+      {
+        "index": 1,
+        "parcel_id": "parcel_0002"
+      },
+      {
+        "index": 2,
+        "parcel_id": "parcel_0003"
+      },
+      {
+        "index": 3,
+        "parcel_id": "parcel_0004"
+      },
+      {
+        "index": 4,
+        "parcel_id": "parcel_0005"
+      },
+      {
+        "index": 5,
+        "parcel_id": "parcel_0006"
+      },
+      {
+        "index": 6,
+        "parcel_id": "parcel_0007"
+      },
+      {
+        "index": 7,
+        "parcel_id": "parcel_0008"
+      },
+      {
+        "index": 8,
+        "parcel_id": "parcel_0009"
+      },
+      {
+        "index": 9,
+        "parcel_id": "parcel_0010"
+      },
+      {
+        "index": 10,
+        "parcel_id": "parcel_0011"
+      },
+      {
+        "index": 11,
+        "parcel_id": "parcel_0012"
+      },
+      {
+        "index": 12,
+        "parcel_id": "parcel_0013"
+      },
+      {
+        "index": 13,
+        "parcel_id": "parcel_0014"
+      },
+      {
+        "index": 14,
+        "parcel_id": "parcel_0015"
+      },
+      {
+        "index": 15,
+        "parcel_id": "parcel_0016"
+      },
+      {
+        "index": 16,
+        "parcel_id": "parcel_0017"
+      },
+      {
+        "index": 17,
+        "parcel_id": "parcel_0018"
+      },
+      {
+        "index": 18,
+        "parcel_id": "parcel_0019"
+      },
+      {
+        "index": 19,
+        "parcel_id": "parcel_0020"
+      },
+      {
+        "index": 20,
+        "parcel_id": "parcel_0021"
+      },
+      {
+        "index": 21,
+        "parcel_id": "parcel_0022"
+      },
+      {
+        "index": 22,
+        "parcel_id": "parcel_0023"
+      },
+      {
+        "index": 23,
+        "parcel_id": "parcel_0024"
+      },
+      {
+        "index": 24,
+        "parcel_id": "parcel_0025"
+      },
+      {
+        "index": 25,
+        "parcel_id": "parcel_0026"
+      },
+      {
+        "index": 26,
+        "parcel_id": "parcel_0027"
+      },
+      {
+        "index": 27,
+        "parcel_id": "parcel_0028"
+      },
+      {
+        "index": 28,
+        "parcel_id": "parcel_0029"
+      },
+      {
+        "index": 29,
+        "parcel_id": "parcel_0030"
+      }
+    ],
+    "units": {
+      "truck_distance": "metres",
+      "truck_travel_time": "minutes",
+      "drone_distance": "metres"
+    }
+  },
+  "warnings": [],
+  "config_snapshot": {
+    "project": {
+      "name": "rlaif_mappo_dynamic_delivery",
+      "seed": 2000,
+      "output_dir": "outputs",
+      "log_dir": "logs",
+      "checkpoint_dir": "checkpoints"
+    },
+    "city": {
+      "name": "shanghai_yangpu",
+      "bbox": {
+        "north": 31.35,
+        "south": 31.25,
+        "east": 121.6,
+        "west": 121.45
+      }
+    },
+    "network": {
+      "num_integrated_stations": 6,
+      "drone_radius_km": 8.0,
+      "drone_speed_kmph": 40.0,
+      "drone_payload_kg": 5.0,
+      "max_drone_round_trip_min": 120.0,
+      "customer_service_time_min": 1.0,
+      "drone_turnaround_time_min": 1.0
+    },
+    "bus": {
+      "horizon_min": 360,
+      "delivery_horizon_min": 480,
+      "headway_min": 15,
+      "bus_speed_kmph": 25.0,
+      "bus_capacity_passenger": 80,
+      "bus_battery_kwh": 160.0,
+      "bus_min_soc_kwh": 40.0,
+      "bus_energy_kwh_per_km": 1.6,
+      "freight_capacity_kg": 20.0,
+      "terminal_loading_time_min_per_kg": 0.1,
+      "station_unloading_time_min_per_kg": 0.1,
+      "charging_power_kw": 500.0,
+      "charging_efficiency": 0.95,
+      "charging_actions_sec": [
+        0,
+        15,
+        30,
+        45,
+        60,
+        75,
+        90,
+        105,
+        120
+      ],
+      "freight_trip_frequency": 3,
+      "scheduled_trips": 24,
+      "freight_trips": 8,
+      "non_service_relocation_time_min": 5.0,
+      "minimum_layover_time_min": 2.0
+    },
+    "truck": {
+      "num_trucks": 1,
+      "capacity_kg": 100.0,
+      "speed_kmph": 25.0,
+      "fixed_dispatch_cost": 20.0,
+      "cost_per_km": 2.0,
+      "cost_per_min": 0.1,
+      "loading_time_min_per_kg": 0.5,
+      "unloading_time_min_per_kg": 0.4,
+      "return_to_depot": true,
+      "one_parcel_per_trip_mvp": true
+    },
+    "station": {
+      "chargers_per_station": 2,
+      "locker_capacity_kg": 30.0,
+      "drones_per_station": 3,
+      "initial_full_batteries": 6,
+      "max_simultaneous_battery_charging": 6,
+      "battery_charging_power_kw": 2.0,
+      "battery_charging_duration_min": 45.0,
+      "power_capacity_kw": 1100.0,
+      "base_load_kw": 100.0
+    },
+    "parcel": {
+      "num_parcels": 30,
+      "heavy_ratio": 0.15,
+      "tight_deadline_ratio": 0.3,
+      "moderate_deadline_ratio": 0.5,
+      "loose_deadline_ratio": 0.2
+    },
+    "reward": {
+      "passenger_delay": 1.0,
+      "bus_operating_delay": 1.0,
+      "parcel_lateness": 1.0,
+      "energy_cost": 0.2,
+      "power_overload": 1.0,
+      "bus_battery_violation": 5.0,
+      "locker_overflow": 1.0,
+      "truck_cost": 0.5,
+      "undelivered": 10.0,
+      "battery_shortage": 1.0,
+      "infeasible_action": 5.0,
+      "rlaif_lambda": 0.2
+    },
+    "ppo": {
+      "episodes": 5000,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip_eps": 0.2,
+      "lr": 0.0003,
+      "batch_size": 2048,
+      "minibatch_size": 256,
+      "update_epochs": 5,
+      "entropy_coef": 0.01,
+      "value_coef": 0.5,
+      "max_grad_norm": 0.5
+    },
+    "seeds": {
+      "network_seed": 2000,
+      "parcel_seed": 2001,
+      "passenger_seed": 2002,
+      "travel_time_seed": 2003,
+      "initial_bus_energy_seed": 2004,
+      "station_base_load_seed": 2005
+    },
+    "passenger": {}
+  },
+  "scenario_manifest": {
+    "scenario_id": "shanghai_yangpu-legacy",
+    "scenario_schema_version": 1,
+    "resolved_configuration": {
+      "project": {
+        "name": "rlaif_mappo_dynamic_delivery",
+        "seed": 2000,
+        "output_dir": "outputs",
+        "log_dir": "logs",
+        "checkpoint_dir": "checkpoints"
+      },
+      "city": {
+        "name": "shanghai_yangpu",
+        "bbox": {
+          "north": 31.35,
+          "south": 31.25,
+          "east": 121.6,
+          "west": 121.45
+        }
+      },
+      "network": {
+        "num_integrated_stations": 6,
+        "drone_radius_km": 8.0,
+        "drone_speed_kmph": 40.0,
+        "drone_payload_kg": 5.0,
+        "max_drone_round_trip_min": 120.0,
+        "customer_service_time_min": 1.0,
+        "drone_turnaround_time_min": 1.0
+      },
+      "bus": {
+        "horizon_min": 360,
+        "delivery_horizon_min": 480,
+        "headway_min": 15,
+        "bus_speed_kmph": 25.0,
+        "bus_capacity_passenger": 80,
+        "bus_battery_kwh": 160.0,
+        "bus_min_soc_kwh": 40.0,
+        "bus_energy_kwh_per_km": 1.6,
+        "freight_capacity_kg": 20.0,
+        "terminal_loading_time_min_per_kg": 0.1,
+        "station_unloading_time_min_per_kg": 0.1,
+        "charging_power_kw": 500.0,
+        "charging_efficiency": 0.95,
+        "charging_actions_sec": [
+          0,
+          15,
+          30,
+          45,
+          60,
+          75,
+          90,
+          105,
+          120
+        ],
+        "freight_trip_frequency": 3,
+        "scheduled_trips": 24,
+        "freight_trips": 8,
+        "non_service_relocation_time_min": 5.0,
+        "minimum_layover_time_min": 2.0
+      },
+      "truck": {
+        "num_trucks": 1,
+        "capacity_kg": 100.0,
+        "speed_kmph": 25.0,
+        "fixed_dispatch_cost": 20.0,
+        "cost_per_km": 2.0,
+        "cost_per_min": 0.1,
+        "loading_time_min_per_kg": 0.5,
+        "unloading_time_min_per_kg": 0.4,
+        "return_to_depot": true,
+        "one_parcel_per_trip_mvp": true
+      },
+      "station": {
+        "chargers_per_station": 2,
+        "locker_capacity_kg": 30.0,
+        "drones_per_station": 3,
+        "initial_full_batteries": 6,
+        "max_simultaneous_battery_charging": 6,
+        "battery_charging_power_kw": 2.0,
+        "battery_charging_duration_min": 45.0,
+        "power_capacity_kw": 1100.0,
+        "base_load_kw": 100.0
+      },
+      "parcel": {
+        "num_parcels": 30,
+        "heavy_ratio": 0.15,
+        "tight_deadline_ratio": 0.3,
+        "moderate_deadline_ratio": 0.5,
+        "loose_deadline_ratio": 0.2
+      },
+      "reward": {
+        "passenger_delay": 1.0,
+        "bus_operating_delay": 1.0,
+        "parcel_lateness": 1.0,
+        "energy_cost": 0.2,
+        "power_overload": 1.0,
+        "bus_battery_violation": 5.0,
+        "locker_overflow": 1.0,
+        "truck_cost": 0.5,
+        "undelivered": 10.0,
+        "battery_shortage": 1.0,
+        "infeasible_action": 5.0,
+        "rlaif_lambda": 0.2
+      },
+      "ppo": {
+        "episodes": 5000,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+        "clip_eps": 0.2,
+        "lr": 0.0003,
+        "batch_size": 2048,
+        "minibatch_size": 256,
+        "update_epochs": 5,
+        "entropy_coef": 0.01,
+        "value_coef": 0.5,
+        "max_grad_norm": 0.5
+      },
+      "seeds": {
+        "network_seed": 2000,
+        "parcel_seed": 2001,
+        "passenger_seed": 2002,
+        "travel_time_seed": 2003,
+        "initial_bus_energy_seed": 2004,
+        "station_base_load_seed": 2005
+      },
+      "passenger": {}
+    },
+    "configuration_sha256": "6c2f6f58baaebb7348a779f16683c22210faad2a106e3db450c9791fc6ca485d",
+    "random_seeds": {
+      "network_seed": 2000,
+      "parcel_seed": 2001,
+      "passenger_seed": 2002,
+      "travel_time_seed": 2003,
+      "initial_bus_energy_seed": 2004,
+      "station_base_load_seed": 2005
+    },
+    "generated_artifact_paths": {
+      "road_graph": "road_graph.graphml",
+      "road_nodes": "road_nodes.csv",
+      "road_edges": "road_edges.csv",
+      "depot": "depot.csv",
+      "bus_stops": "bus_stops.csv",
+      "bus_trips": "bus_trips.csv",
+      "bus_stop_times": "bus_stop_times.csv",
+      "bus_timetable": "bus_timetable.json",
+      "physical_buses": "physical_buses.csv",
+      "trip_to_bus": "trip_to_bus.csv",
+      "bus_circulation": "bus_circulation.json",
+      "integrated_stations": "integrated_stations.csv",
+      "parcels": "parcels.csv",
+      "passenger_stop_rates": "passenger_stop_rates.csv",
+      "passenger_arrivals": "passenger_arrivals.csv",
+      "passenger_demand_provenance": "passenger_demand_provenance.json",
+      "truck_distance_matrix": "truck_distance_matrix.npy",
+      "truck_travel_time_matrix": "truck_travel_time_matrix.npy",
+      "drone_distance_matrix": "drone_distance_matrix.npy"
+    },
+    "artifact_sha256": {
+      "bus_circulation": "950951d60dd9c6887359fc21ed3913fed3c86caada47cfaf8f77513553508625",
+      "bus_stop_times": "97a05fdaec81ecb6aedd400820102fc1f1fd4520c5650b0d6d9181f153171d27",
+      "bus_stops": "2c378a88dcb32a6c64f8cb0d278c074582ad8f25041e898108b349d36872d79b",
+      "bus_timetable": "aaf21078dc9cefb4ae3f31718c5c1e0f69cbe020dd543ff86694acd635e6bf9e",
+      "bus_trips": "4cf029842f9775086958389ed536edb70d1aaca376c75c80c93b63dfc04c8657",
+      "depot": "43f6c6f489305e8ab4c1101db7c41fc9ed55af64e815e8a2e2497fe604b97883",
+      "drone_distance_matrix": "f7875e93f55b22f0ecf5abd78290b51bc84c147cc805ba4dff7ea49a6569349c",
+      "integrated_stations": "3618801e49ca2b493c7fb064c64663e41f4f40dc1993514e8f64ee5b3135ccdf",
+      "parcels": "5b529cbbd56dfd34bed1dadd16f9588304cc9164ed19ba5f7439f465589714ee",
+      "passenger_arrivals": "849b2bcd1ae37d9b3646a002e17b598a10af9a2b47a607722a48c9bab15f6cdb",
+      "passenger_demand_provenance": "f06aae6b38d9eff7a4b7ed7b9d965c3fde69c53f184833bcd4f87f8f32ebd7cc",
+      "passenger_stop_rates": "62e1ea98b5ad89874b65cb0ee08502667c5371a6b7dc7972f0b977094c6356f7",
+      "physical_buses": "e911028612102ae3bcb8933f4bc86c1544df7dbeb0666e6100fefec820a60179",
+      "road_edges": "7162e2c22978b89053997af17e70de07405833ba03ff85f32032ed80c6e4512d",
+      "road_graph": "dbc9d51ab899d10a4fd37f28db791ec8d39caabede7bb57eef63245fd8c68d8e",
+      "road_nodes": "860a457a1f8b2f815948e912ef03aaf548d23af921210e353e099897687d175e",
+      "trip_to_bus": "8588a5f8b397e51e26c5f8fa524c5ef4e838359b461eee442887a2f5f101a193",
+      "truck_distance_matrix": "841c43b1db9e3601c44f3f70363a499e2aad7fc64d7b8d9e6b6ab457262e5358",
+      "truck_travel_time_matrix": "a31f9b93d2c592c0feb8cabc7837190764a86d709156383ab179995040c7bae7"
+    },
+    "parameter_provenance": {},
+    "generation_timestamp": "2026-07-21T13:45:32.808875+00:00",
+    "git_commit": "b2eed68f76813ea63f64be5d5685467596ab3f1a"
+  }
+}

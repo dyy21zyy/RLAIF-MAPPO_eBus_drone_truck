@@ -1,0 +1,6 @@
+output_root: data/scenarios
+base_config: configs/shanghai_small.yaml
+banks:
+  train: {count: 1, seed_offset: 1000, size: small}
+  validation: {count: 1, seed_offset: 2000, size: small}
+  test: {count: 1, seed_offset: 3000, size: small}

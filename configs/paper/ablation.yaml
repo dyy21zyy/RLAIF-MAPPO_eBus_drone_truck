@@ -1,0 +1,18 @@
+experiment: {name: paper_ablation_smoke, base_config: configs/shanghai_small.yaml, seeds: [0], output_dir: results/paper_ablation, fallback: true}
+ablations:
+  - {name: assignment_only_rlaif, assignment_policy: mappo_async, config_switch: "assignment_only_rlaif=true", checkpoint: results/checkpoints/assignment_only_rlaif_seed_1.pt}
+  - {name: automatic_battery_charging, assignment_policy: mappo_async, config_switch: "automatic_battery_charging=true", checkpoint: results/checkpoints/automatic_battery_charging_seed_1.pt}
+  - {name: full_multi_agent_rlaif, assignment_policy: mappo_async, config_switch: "full_multi_agent_rlaif=true", checkpoint: results/checkpoints/full_multi_agent_rlaif_seed_1.pt}
+  - {name: greedy_bus_loading, assignment_policy: mappo_async, config_switch: "greedy_bus_loading=true", checkpoint: results/checkpoints/greedy_bus_loading_seed_1.pt}
+  - {name: learned_battery_charging, assignment_policy: mappo_async, config_switch: "learned_battery_charging=true", checkpoint: results/checkpoints/learned_battery_charging_seed_1.pt}
+  - {name: learned_bus_loading, assignment_policy: mappo_async, config_switch: "learned_bus_loading=true", checkpoint: results/checkpoints/learned_bus_loading_seed_1.pt}
+  - {name: no_centralized_critic, assignment_policy: mappo_async, config_switch: "no_centralized_critic=true", checkpoint: results/checkpoints/no_centralized_critic_seed_1.pt}
+  - {name: no_event_time_discount, assignment_policy: mappo_async, config_switch: "no_event_time_discount=true", checkpoint: results/checkpoints/no_event_time_discount_seed_1.pt}
+  - {name: no_explicit_event_embedding, assignment_policy: mappo_async, config_switch: "no_explicit_event_embedding=true", checkpoint: results/checkpoints/no_explicit_event_embedding_seed_1.pt}
+  - {name: no_learned_station, assignment_policy: mappo_async, config_switch: "no_learned_station=true", checkpoint: results/checkpoints/no_learned_station_seed_1.pt}
+  - {name: no_passenger_aware_charging, assignment_policy: mappo_async, config_switch: "no_passenger_aware_charging=true", checkpoint: results/checkpoints/no_passenger_aware_charging_seed_1.pt}
+  - {name: no_rlaif, assignment_policy: mappo_async, config_switch: "no_rlaif=true", checkpoint: results/checkpoints/no_rlaif_seed_1.pt}
+  - {name: per_agent_lambda, assignment_policy: mappo_async, config_switch: "per_agent_lambda=true", checkpoint: results/checkpoints/per_agent_lambda_seed_1.pt}
+  - {name: preference_label_volume, assignment_policy: mappo_async, config_switch: "preference_label_volume=true", checkpoint: results/checkpoints/preference_label_volume_seed_1.pt}
+  - {name: single_parcel_truck, assignment_policy: mappo_async, config_switch: "single_parcel_truck=true", checkpoint: results/checkpoints/single_parcel_truck_seed_1.pt}
+  - {name: truck_batching, assignment_policy: mappo_async, config_switch: "truck_batching=true", checkpoint: results/checkpoints/truck_batching_seed_1.pt}
