@@ -69,3 +69,16 @@ def test_four_agent_event_types_are_operational_not_dummy(tmp_path: Path) -> Non
     assert ("bus", "BUS_ARRIVAL") in pairs
     assert ("station", "STATION_OPERATION") in pairs
     assert all(agent != "inactive" for agent, _event in seen)
+
+
+def test_station_action_space_is_dispatch_drone_or_idle(tmp_path: Path) -> None:
+    env = make_env(tmp_path)
+    observation, _ = env.reset(seed=11)
+    for _ in range(500):
+        if observation["agent_id"] == "station":
+            action_types = {candidate["action_type"] for candidate in observation["candidate_actions"]}
+            assert action_types <= {"dispatch_drone", "idle"}
+            assert "charge" not in action_types
+            return
+        observation, *_ = env.step(four_agent_exercising_policy(env, observation))
+    raise AssertionError("station decision was not reached")

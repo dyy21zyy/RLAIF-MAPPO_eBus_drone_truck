@@ -58,7 +58,7 @@ class EvaluationRunner:
             assignment,_=load_assignment_checkpoint(self.method["checkpoint"]); bus=build_bus_policy(self.method.get("bus_policy","no_charge")); return assignment,bus
         if assignment_name=="mappo_async":
             from training.mappo_trainer import load_checkpoint
-            assignment,bus,_critic,_=load_checkpoint(self.method["checkpoint"]); return assignment,bus
+            actors, _critic, _checkpoint = load_checkpoint(self.method["checkpoint"]); return actors, actors
         return build_assignment_policy(assignment_name,self.seed),build_bus_policy(self.method.get("bus_policy","no_charge"))
 
     def run_episode(self):
@@ -71,7 +71,7 @@ class EvaluationRunner:
             reward_wrapper=None
             if self.method.get("rlaif_enabled"):
                 from training.reward_model_wrapper import RewardModelWrapper
-                reward_wrapper=RewardModelWrapper(self.method.get("reward_model_checkpoint"),enabled=True)
+                reward_wrapper=RewardModelWrapper(self.method.get("reward_model_checkpoint"),enabled=True,validation=self.method.get("rlaif_validation",{}),fallback_to_env_reward=bool(self.method.get("fallback_to_env_reward", True)),fail_on_invalid_reward_model=bool(self.method.get("fail_on_invalid_reward_model", False)),reward_clip=self.method.get("reward_clip"))
             observation,_=env.reset(seed=self.seed)
             while observation["agent"]!="terminal":
                 mask=[bool(v) for v in observation["action_mask"]]
@@ -79,7 +79,7 @@ class EvaluationRunner:
                     before=list(observation["features"])
                     if self.method.get("assignment_policy") in LEARNED_ASSIGNMENT:
                         policy_mask = mask if self.method.get("action_mask", True) else [True] * len(mask)
-                        selected=assignment.act(before,policy_mask,deterministic=True)[0]
+                        selected=assignment["assignment"].act((before + [0.0] * assignment["assignment"].obs_dim)[:assignment["assignment"].obs_dim], observation["candidate_features"], policy_mask, deterministic=True)[0] if self.method.get("assignment_policy")=="mappo_async" else assignment.act(before,policy_mask,deterministic=True)[0]
                     else: selected=assignment.select_action(observation,env)
                     if not mask or not any(mask) or selected>=len(mask) or not mask[selected]: fallback_events+=1
                     action_features=None
@@ -92,7 +92,7 @@ class EvaluationRunner:
                 else:
                     if self.method.get("assignment_policy")=="mappo_async":
                         policy_mask = mask if self.method.get("action_mask", True) else [True] * len(mask)
-                        selected=bus.act(observation["features"],policy_mask,deterministic=True)[0]
+                        selected=bus[str(observation["agent_id"])].act((observation["features"] + [0.0] * bus[str(observation["agent_id"])].obs_dim)[:bus[str(observation["agent_id"])].obs_dim], observation["candidate_features"], policy_mask, deterministic=True)[0]
                     elif observation["agent"]=="bus" and observation.get("event_type")=="BUS_ARRIVAL":
                         selected=bus.select_action(observation,env)
                     else:

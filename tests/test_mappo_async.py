@@ -46,3 +46,8 @@ def test_smoke_contract_collects_four_agent_transitions():
         and result['bus_transitions']>0
         and result['station_transitions']>0
     )
+
+def test_transition_reward_uses_clipped_learned_reward_in_total(tmp_path):
+    from tests.test_reward_model_wrapper import _constant_checkpoint
+    wrapper = RewardModelWrapper(_constant_checkpoint(tmp_path, 9.0), enabled=True, reward_clip=2.0)
+    assert transition_reward('assignment', 10.0, wrapper, lambda_rlaif=3.0, state_features=[0], action_features=[0], action_id=0) == (16.0, 2.0)
