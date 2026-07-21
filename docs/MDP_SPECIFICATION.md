@@ -129,3 +129,9 @@ event-time discounting over elapsed minutes.
 This is a code gate, not final experiment evidence. It does not fabricate
 preference labels, learned rewards, checkpoints, benchmark results, ablation
 results, or sensitivity results.
+
+## Phase 0 final dynamic contract status
+
+Target final architecture: dynamic `PARCEL_RELEASE` assignment chooses only delivery mode plus target station (`TD`, `TBD_<station_id>`, `TLD_<station_id>`); `TRUCK_AVAILABLE` later chooses multi-parcel batches and routes; `ScheduledTrip` is distinct from persistent `PhysicalBusState`; station operation jointly decides drone dispatch and depleted-battery charging starts; multi-agent RLAIF covers assignment, truck, bus, and station agents.
+
+Actual current status: these later-phase behaviors are **specified** by contract and schema only. They are not claimed as implemented, runtime-validated, or experiment-validated in Phase 0.

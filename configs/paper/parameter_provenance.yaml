@@ -1,0 +1,237 @@
+bus.battery_capacity_kwh:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.chargers_per_station:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.charging_actions_sec:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.charging_efficiency:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.charging_power_kw:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.energy_consumption_kwh_per_km:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.freight_capacity_kg:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.initial_energy_fraction_max:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.initial_energy_fraction_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.minimum_safe_energy_kwh:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.nominal_speed_kmph:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.passenger_capacity:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.single_station_unloading_capacity_kg:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.unloading_time_sec_per_kg:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus.wait_for_charger:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus_schedule.freight_trip_count:
+  category: derived
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus_schedule.minimum_layover_min:
+  category: project_extension
+  source: Phase 0 formal paper schema; project extension only, not real data.
+bus_schedule.planned_headway_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+bus_schedule.relocation_time_min:
+  category: project_extension
+  source: Phase 0 formal paper schema; project extension only, not real data.
+bus_schedule.scheduled_trip_count:
+  category: derived
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone.customer_service_time_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone.drones_per_station:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone.maximum_round_trip_duration_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone.payload_capacity_kg:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone.service_radius_one_way_km:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone.speed_kmph:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone.turnaround_time_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone_battery.charging_duration_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone_battery.charging_is_non_preemptive:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone_battery.charging_power_kw:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone_battery.charging_slots:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone_battery.charging_start_is_learned:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone_battery.initial_depleted_batteries:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+drone_battery.initial_full_batteries:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+network.adjacent_stop_distance_km:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+network.integrated_station_stop_indices:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+network.num_integrated_stations:
+  category: derived
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+network.num_stops:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+parcel.customer_service_area_length_km:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+parcel.customer_service_area_width_km:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+parcel.loose_ratio:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+parcel.loose_slack_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+parcel.moderate_ratio:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+parcel.moderate_slack_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+parcel.tight_ratio:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+parcel.tight_slack_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+parcel.volume_max_m3:
+  category: project_extension
+  source: Phase 0 formal paper schema; project extension only, not real data.
+parcel.volume_min_m3:
+  category: project_extension
+  source: Phase 0 formal paper schema; project extension only, not real data.
+parcel.weight_values_kg:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+passenger.alighting_probability_max:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+passenger.alighting_probability_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+passenger.alighting_time_sec_per_passenger:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+passenger.allow_arrivals_during_dwell:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+passenger.baseline_rate_max_per_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+passenger.baseline_rate_mean_per_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+passenger.baseline_rate_min_per_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+passenger.baseline_rate_std_per_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+passenger.boarding_time_sec_per_passenger:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+passenger.demand_intensity:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+passenger.process:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+scenario.num_parcels:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+scenario.size:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+station.base_load_max_kw:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+station.base_load_min_kw:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+station.locker_capacity_kg:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+station.power_capacity_is_hard:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+station.power_capacity_kw:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+time.bus_operation_horizon_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+time.delivery_evaluation_horizon_min:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+truck.cost_per_km:
+  category: project_extension
+  source: Phase 0 formal paper schema; project extension only, not real data.
+truck.loading_time_min:
+  category: project_extension
+  source: Phase 0 formal paper schema; project extension only, not real data.
+truck.max_batch_candidates:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+truck.max_batch_size:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+truck.num_trucks:
+  category: project_extension
+  source: Phase 0 formal paper schema; project extension only, not real data.
+truck.return_to_depot:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+truck.speed_kmph:
+  category: literature_adapted
+  source: Phase 0 formal paper schema aligned with existing paper-code assumptions.
+truck.unloading_time_min:
+  category: project_extension
+  source: Phase 0 formal paper schema; project extension only, not real data.
+truck.volume_capacity_m3:
+  category: project_extension
+  source: Phase 0 formal paper schema; project extension only, not real data.
+truck.weight_capacity_kg:
+  category: project_extension
+  source: Phase 0 formal paper schema; project extension only, not real data.
