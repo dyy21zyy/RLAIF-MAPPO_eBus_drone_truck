@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from envs.dynamics.passenger_dynamics import PassengerBusManifest
 import math, random
 
 EPS=1e-9
@@ -19,6 +20,7 @@ class RuntimePhysicalBus:
     current_trip_id: str | None = None
     onboard_parcel_ids: list[str] = field(default_factory=list)
     passenger_state: dict[str, Any] = field(default_factory=dict)
+    passenger_manifest: PassengerBusManifest = field(default_factory=PassengerBusManifest)
     depleted: bool = False
     minimum_safe_energy_violation: bool = False
     relocation_status: str = "idle"

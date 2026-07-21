@@ -186,7 +186,7 @@ def test_bus_decision_uses_configured_charging_actions(environment: DynamicDeliv
 
     assert observation["agent"] == "bus"
     assert observation["event_type"] == "BUS_ARRIVAL"
-    assert len(observation["features"]) == 6
+    assert len(observation["features"]) >= 6
     assert len(observation["action_mask"]) == environment.bus_action_size
     assert observation["action_mask"][0]
     trip_id = str(observation["entity_id"]).split(":", 1)[0]

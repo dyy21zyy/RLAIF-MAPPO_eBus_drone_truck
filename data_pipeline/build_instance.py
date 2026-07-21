@@ -12,6 +12,7 @@ from data_pipeline.download_osm import build_road_graph, save_road_graph
 from data_pipeline.generate_depot import generate_depot
 from data_pipeline.generate_integrated_stations import select_integrated_stations
 from data_pipeline.generate_parcels import generate_parcels
+from data_pipeline.generate_passenger_demand import generate_passenger_demand
 from data_pipeline.parse_bus_route import load_or_generate_bus_route
 from data_pipeline.synthesize_timetable import synthesize_timetable
 from data_pipeline.build_bus_circulation import build_bus_circulation
@@ -85,6 +86,7 @@ def build_instance(config_path: str | Path, fallback: bool = False, output_root:
     stations = select_integrated_stations(stops, config, output_dir)
     depot = generate_depot(config, graph, stops, output_dir)
     parcels = generate_parcels(config, graph, stations, output_dir, trips, stop_times)
+    passenger_paths = generate_passenger_demand(stops, config, output_dir)
     matrix_paths, matrix_metadata, matrix_warnings = build_distance_matrices(graph, depot, stops, stations, parcels, config, output_dir)
     warnings.extend(matrix_warnings)
 
@@ -93,6 +95,7 @@ def build_instance(config_path: str | Path, fallback: bool = False, output_root:
                       "bus_stop_times": "bus_stop_times.csv", "bus_timetable": "bus_timetable.json",
                       "physical_buses": "physical_buses.csv", "trip_to_bus": "trip_to_bus.csv", "bus_circulation": "bus_circulation.json",
                       "integrated_stations": "integrated_stations.csv", "parcels": "parcels.csv", "scenario_manifest": "scenario_manifest.json",
+                      **{key: path.name for key, path in passenger_paths.items()},
                       **{key: path.name for key, path in matrix_paths.items()}}
     instance = {"schema_version": 1, "stage": 2, "city_name": config["city"]["name"],
                 "mode": "fallback" if fallback else ("fallback_after_osm_failure" if warnings else "full_osm"),
@@ -100,7 +103,7 @@ def build_instance(config_path: str | Path, fallback: bool = False, output_root:
                 "artifacts": artifact_names, "counts": {"road_nodes": len(graph.nodes), "road_edges": len(graph.edges),
                 "bus_stops": len(stops), "bus_trips": len(trips), "bus_stop_times": len(stop_times),
                 "physical_buses": len(circulation["physical_buses"]), "trip_to_bus": len(circulation["trip_to_bus"]),
-                "integrated_stations": len(stations), "parcels": len(parcels)},
+                "integrated_stations": len(stations), "parcels": len(parcels), "passenger_arrivals": sum(1 for _ in __import__("csv").DictReader(open(passenger_paths["passenger_arrivals"], encoding="utf-8")))},
                 "matrix_indices": matrix_metadata, "warnings": warnings, "config_snapshot": config}
     scenario_id = f"{config['city']['name']}-{config.get('scenario', {}).get('size', 'legacy')}"
     scenario_manifest = write_scenario_manifest(output_dir, scenario_id, config, {k:v for k,v in artifact_names.items() if k != "scenario_manifest"})

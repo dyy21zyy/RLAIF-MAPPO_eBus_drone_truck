@@ -93,3 +93,7 @@ not define an offline assignment plan.
 The data pipeline emits `physical_buses.csv`, `trip_to_bus.csv`, and `bus_circulation.json`. The circulation builder derives nominal one-way line time from `bus_stop_times.csv`, uses configured headway from the bus schedule/bus section, and applies project-extension defaults for non-service relocation and minimum layover when source data are absent.
 
 Initial physical-bus locations follow the nominal circulation first origin for each assigned bus. This is deterministic and documented as `nominal_circulation_first_origin`; the all-terminal behavior is reserved for fallback-only manifests that lack circulation artifacts.
+
+## Phase 4 passenger-demand provenance
+
+Passenger stop rates are synthetic, seeded scenario data.  For each stop, the generator samples a baseline passenger arrival rate from a truncated normal distribution (mean 0.25 passenger/min, standard deviation 0.10, minimum 0.05, maximum 0.60) and stores both baseline and effective rates in `passenger_stop_rates.csv`.  Effective rates multiply by `passenger_demand_intensity` (default 1.0; designed sensitivity values: 0.75, 1.00, 1.25, 1.50, 2.00).  `passenger_arrivals.csv` stores pre-generated Poisson arrivals with downstream destinations, and `passenger_demand_provenance.json` records seed, process, bounds, intensity, and destination rule.
