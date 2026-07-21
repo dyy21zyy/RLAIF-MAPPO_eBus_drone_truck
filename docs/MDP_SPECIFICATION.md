@@ -197,3 +197,13 @@ capacity remains a soft reward penalty and is surfaced as projected overload.
 Passenger-aware dwell includes passenger exchange, parcel unloading at 6
 seconds/kg, charging duration, and passenger queues during dwell so equal charge
 durations can have different costs for different passenger states.
+
+### Phase 6 station energy operation
+
+Station decisions are now joint `STATION_OPERATION` actions.  A station action may dispatch zero or more available drones to waiting parcels and may start zero or more depleted batteries charging.  Drone resources are explicit (`drone_id`, `home_station_id`, `status`, `available_time_min`, `active_parcel_id`, `active_battery_id`) with statuses `AVAILABLE`, `IN_MISSION`, `RETURNING`, and `TURNAROUND`.  Battery resources are explicit (`battery_id`, `home_station_id`, `status`, `charge_start_time_min`, `charge_completion_time_min`, `assigned_drone_id`) with statuses `FULL`, `IN_USE`, `DEPLETED`, and `CHARGING`.
+
+Battery transitions are controlled by dynamics: dispatch changes `FULL -> IN_USE`, return changes `IN_USE -> DEPLETED`, a selected station action changes `DEPLETED -> CHARGING`, and charge completion changes `CHARGING -> FULL`.  Charging jobs are non-preemptive, last 45 minutes by default, consume 2 kW, and are capped at six simultaneous drone-battery charging jobs per station.  Automatic charging at dispatch or return is removed.
+
+Candidate generation is bounded rather than exhaustive.  The generator always includes idle/no-op and combines heuristic dispatch patterns (earliest-deadline, highest-priority, shortest-mission, minimum-lateness, maximum-cardinality, battery-conservative, and future-capacity-preserving) with a small charging menu (zero, one, fill slots, or reserve-target starts).  Candidates expose dispatch triples, charging battery IDs, estimated delivery/return/lateness, remaining full/depleted batteries, remaining drones, charging-slot use, projected load, projected overload, power margin, expected overload duration, feasibility reasons, heuristic source, and idle flag.
+
+Station power is a soft constraint.  Projected and actual load include station base load, active pantograph bus charging load, and active drone-battery charging load.  Capacity defaults to 1100 kW and overload is exposed and penalized in kW-min rather than hard-masked.

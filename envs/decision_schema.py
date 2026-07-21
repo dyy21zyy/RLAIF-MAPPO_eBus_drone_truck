@@ -29,7 +29,7 @@ class ActionCandidate:
     action_type: str
     entity_id: str
     description: str
-    features: dict[str, float]
+    features: dict[str, Any]
     feasible: bool
     reasons: tuple[str, ...] = ()
 
@@ -38,6 +38,9 @@ class ActionCandidate:
             raise ValueError("action_id must be non-negative")
         normalized: dict[str, float] = {}
         for key, value in self.features.items():
+            if isinstance(value, (list, tuple)):
+                normalized[str(key)] = value
+                continue
             numeric = float(value)
             if not isfinite(numeric):
                 raise ValueError(f"Candidate feature {key!r} must be finite")
@@ -107,7 +110,7 @@ class DecisionSurface:
     def candidate_feature_matrix(self) -> list[list[float]]:
         names = self.candidate_feature_names()
         return [
-            [float(candidate.features.get(name, 0.0)) for name in names]
+            [float(candidate.features.get(name, 0.0)) if not isinstance(candidate.features.get(name, 0.0), (list, tuple)) else 0.0 for name in names]
             for candidate in self.candidates
         ]
 

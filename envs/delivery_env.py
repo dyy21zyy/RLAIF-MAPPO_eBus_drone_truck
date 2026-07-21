@@ -29,6 +29,8 @@ from envs.dynamics.bus_circulation import RuntimePhysicalBus, assert_no_overlaps
 from envs.dynamics.passenger_dynamics import PassengerArrivalEvent, PassengerArrivalIndex, PassengerStopRuntimeState, process_bus_stop
 from envs.action_generators.bus_loading_actions import generate_bus_loading_candidates
 from envs.action_generators.bus_charging_actions import generate_bus_charging_candidates, energy_added_kwh
+from envs.action_generators.station_actions import generate_station_operation_candidates
+from envs.dynamics.station_dynamics import dispatch_drone as station_dispatch_drone, start_battery_charging, complete_battery_charging
 
 EPSILON = 1e-9
 EVENT_PRIORITY = {
@@ -85,6 +87,24 @@ class ParcelState:
 
 
 @dataclass
+class RuntimeDroneState:
+    drone_id: str
+    home_station_id: str
+    status: str = "AVAILABLE"
+    available_time_min: float = 0.0
+    active_parcel_id: str | None = None
+    active_battery_id: str | None = None
+
+@dataclass
+class RuntimeBatteryState:
+    battery_id: str
+    home_station_id: str
+    status: str = "FULL"
+    charge_start_time_min: float | None = None
+    charge_completion_time_min: float | None = None
+    assigned_drone_id: str | None = None
+
+@dataclass
 class StationState:
     station_id: str
     stop_id: str
@@ -99,6 +119,10 @@ class StationState:
     active_battery_charges: list[tuple[float, float]] = field(default_factory=list)
     drone_available_min: list[float] = field(default_factory=list)
     battery_ready_min: list[float] = field(default_factory=list)
+    drone_states: list[RuntimeDroneState] = field(default_factory=list)
+    battery_states: list[RuntimeBatteryState] = field(default_factory=list)
+    depleted_batteries: int = 0
+    charging_slots: int = 6
 
 
 @dataclass
@@ -349,9 +373,13 @@ class DynamicDeliveryEnv:
             self.stations[row["station_id"]] = StationState(
                 station_id=row["station_id"], stop_id=row["stop_id"], locker_capacity_kg=float(row["locker_capacity_kg"]),
                 drones=drones, full_batteries=int(row["initial_full_batteries"]), power_capacity_kw=float(row["power_capacity_kw"]),
-                battery_power_kw=float(row["battery_charging_power_kw"]), battery_charge_duration_min=float(row["battery_charging_duration_min"]),
+                battery_power_kw=float(row.get("battery_charging_power_kw", 2.0)), battery_charge_duration_min=float(row.get("battery_charging_duration_min", 45.0)),
+                charging_slots=int(row.get("charging_slots", 6)),
                 drone_available_min=[0.0] * drones,
             )
+            st = self.stations[row["station_id"]]
+            st.drone_states = [RuntimeDroneState(f"{row['station_id']}_drone_{i:03d}", row["station_id"]) for i in range(drones)]
+            st.battery_states = [RuntimeBatteryState(f"{row['station_id']}_battery_{i:03d}", row["station_id"], "FULL") for i in range(int(row["initial_full_batteries"]))]
         for parcel in self.parcels.values():
             self._push(parcel.release_time_min, "parcel_release", {"parcel_id": parcel.parcel_id})
         for trip_id, rows in self.trip_stop_times.items():
@@ -510,20 +538,24 @@ class DynamicDeliveryEnv:
                 )
             elif event.kind == "drone_return":
                 station = self.stations[event.payload["station_id"]]
-                station.drone_available_min[event.payload["drone_index"]] = self.now_min
-                if self.waiting_station_parcels.get(station.station_id):
-                    self._push(self.now_min, "station_operation", {"station_id": station.station_id})
+                drone = next((d for d in station.drone_states if d.drone_id == event.payload.get("drone_id")), None)
+                battery = next((b for b in station.battery_states if b.battery_id == event.payload.get("battery_id")), None)
+                if drone is not None:
+                    drone.status = "AVAILABLE"; drone.active_parcel_id = None; drone.active_battery_id = None; drone.available_time_min = self.now_min
+                if battery is not None:
+                    battery.status = "DEPLETED"; battery.assigned_drone_id = None
+                station.full_batteries = sum(b.status == "FULL" for b in station.battery_states)
+                station.depleted_batteries = sum(b.status == "DEPLETED" for b in station.battery_states)
+                self._push_station_operation(station.station_id, self.now_min)
             elif event.kind == "battery_ready":
                 station = self.stations[event.payload["station_id"]]
-                station.full_batteries += 1
-                if station.battery_ready_min:
-                    heapq.heappop(station.battery_ready_min)
-                station.active_battery_charges = [
-                    session for session in station.active_battery_charges
-                    if session[1] > self.now_min + EPSILON
-                ]
-                if self.waiting_station_parcels.get(station.station_id):
-                    self._push(self.now_min, "station_operation", {"station_id": station.station_id})
+                battery = next((b for b in station.battery_states if b.battery_id == event.payload.get("battery_id")), None)
+                if battery is not None:
+                    complete_battery_charging(station, battery)
+                station.active_battery_charges = [session for session in station.active_battery_charges if session[1] > self.now_min + EPSILON]
+                station.full_batteries = sum(b.status == "FULL" for b in station.battery_states)
+                station.depleted_batteries = sum(b.status == "DEPLETED" for b in station.battery_states)
+                self._push_station_operation(station.station_id, self.now_min)
         if self.current_decision is None and (not self.events or self.now_min >= self.horizon_min - EPSILON):
             if self.now_min < self.horizon_min:
                 reward += self._integrate_station_penalties(self.now_min, self.horizon_min)
@@ -1140,32 +1172,42 @@ class DynamicDeliveryEnv:
             self.bus_soc_kwh[trip_id] = bus.soc_kwh
         return reward
 
+    def _push_station_operation(self, station_id: str, time_min: float) -> None:
+        for event in self.events:
+            kind = getattr(event, "kind", event[1] if isinstance(event, tuple) and len(event) > 1 else None)
+            payload = getattr(event, "payload", event[2] if isinstance(event, tuple) and len(event) > 2 else {})
+            etime = getattr(event, "time_min", event[0] if isinstance(event, tuple) and len(event) > 0 else None)
+            if kind == "station_operation" and payload.get("station_id") == station_id and abs(etime - time_min) <= EPSILON:
+                return
+        self._push(time_min, "station_operation", {"station_id": station_id})
+
     def _handle_station_arrival(self, parcel_id: str, station_id: str) -> float:
         parcel, station = self.parcels[parcel_id], self.stations[station_id]
-        parcel.status = "AT_STATION"
+        parcel.status = "WAITING_DRONE"
         station.locker_load_kg += parcel.weight_kg
         self.waiting_station_parcels.setdefault(station_id, []).append(parcel_id)
-        self._push(self.now_min, "station_operation", {"station_id": station_id})
+        self._push_station_operation(station_id, self.now_min)
         return 0.0
 
     def _apply_station_action(self, event: Event, action: int) -> float:
         station_id = event.payload["station_id"]
         surface = build_station_decision_surface(self, station_id)
         candidate = surface.candidates[action]
-        if candidate.action_type != "dispatch_drone":
-            return 0.0
-        waiting = self.waiting_station_parcels.get(station_id, [])
-        if candidate.entity_id not in waiting:
-            return self._charge_cost("infeasible_action", 1.0)
         station = self.stations[station_id]
-        drone_index = min(range(station.drones), key=station.drone_available_min.__getitem__)
-        if station.full_batteries <= 0:
-            return self._charge_cost("battery_shortage", 1.0)
-        if station.drone_available_min[drone_index] > self.now_min + EPSILON:
-            return 0.0
-        waiting.remove(candidate.entity_id)
-        station.full_batteries -= 1
-        return self._dispatch_drone(candidate.entity_id, station_id, drone_index, True)
+        if not candidate.feasible:
+            return self._charge_cost("infeasible_action", 1.0)
+        by_drone = {d.drone_id: d for d in station.drone_states}
+        by_battery = {b.battery_id: b for b in station.battery_states}
+        reward = 0.0
+        for drone_id, parcel_id, battery_id in candidate.features.get("dispatch_payload", []):
+            if parcel_id in self.waiting_station_parcels.get(station_id, []):
+                self.waiting_station_parcels[station_id].remove(parcel_id)
+            station_dispatch_drone(self, station, by_drone[drone_id], self.parcels[parcel_id], by_battery[battery_id], self.now_min)
+        for battery_id in candidate.features.get("charge_payload", []):
+            start_battery_charging(self, station, by_battery[battery_id], self.now_min)
+        station.full_batteries = sum(b.status == "FULL" for b in station.battery_states)
+        station.depleted_batteries = sum(b.status == "DEPLETED" for b in station.battery_states)
+        return reward
 
     def _drone_delivery_times(
         self, parcel_id: str, station_id: str, dispatch: float
@@ -1187,10 +1229,6 @@ class DynamicDeliveryEnv:
         station.locker_load_kg = max(0.0, station.locker_load_kg - parcel.weight_kg)
         if self.now_min <= self.horizon_min:
             self._push(drone_return, "drone_return", {"station_id": station_id, "drone_index": drone_index})
-            battery_ready = drone_return + station.battery_charge_duration_min
-            heapq.heappush(station.battery_ready_min, battery_ready)
-            station.active_battery_charges.append((drone_return, battery_ready))
-            self._push(battery_ready, "battery_ready", {"station_id": station_id})
         parcel.status = "ONBOARD_DRONE"
         self._push(delivery, "parcel_delivery", {"parcel_id": parcel_id})
         return 0.0
