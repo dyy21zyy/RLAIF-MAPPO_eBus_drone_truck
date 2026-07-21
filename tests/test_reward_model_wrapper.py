@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.torch_optional import import_optional_torch
 from training.reward_model_wrapper import RewardModelCheckpointError, RewardModelWrapper
 
 
@@ -20,7 +21,7 @@ def test_enabled_rlaif_requires_checkpoint(tmp_path: Path) -> None:
 
 
 def test_invalid_checkpoint_does_not_fabricate_reward(tmp_path: Path) -> None:
-    torch = pytest.importorskip("torch")
+    torch = import_optional_torch()
     path = tmp_path / "invalid.pt"
     torch.save({"not": "a reward model"}, path)
     with pytest.raises(RewardModelCheckpointError, match="Invalid Stage 5"):

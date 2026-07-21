@@ -10,7 +10,7 @@ from pathlib import Path
 
 from rlaif.preference_dataset import (ACTION_FEATURE_KEYS, NO_USABLE_LABELS_MESSAGE,
                                       NoUsablePreferencesError, write_jsonl)
-from rlaif.torch_runtime import PYTORCH_REQUIRED_MESSAGE, is_missing_torch_error
+from rlaif.torch_runtime import PYTORCH_REQUIRED_MESSAGE, is_missing_torch_error, is_torch_runtime_available
 
 
 def _action(action_id: int, name: str, offset: float) -> dict[str, object]:
@@ -58,6 +58,9 @@ def _config(directory: Path, states: Path, preferences: Path) -> dict[str, objec
 
 
 def main() -> int:
+    if not is_torch_runtime_available():
+        print(PYTORCH_REQUIRED_MESSAGE, file=sys.stderr)
+        return 3
     try:
         import torch
 

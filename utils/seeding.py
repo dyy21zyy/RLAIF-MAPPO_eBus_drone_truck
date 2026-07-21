@@ -8,6 +8,8 @@ import os
 import random
 from typing import Any
 
+from rlaif.torch_runtime import is_torch_runtime_available
+
 
 def seed_everything(seed: int) -> dict[str, Any]:
     """Seed available random-number generators without requiring ML packages.
@@ -28,11 +30,15 @@ def seed_everything(seed: int) -> dict[str, Any]:
         np.random.seed(seed)
         seeded["numpy"] = True
 
-    if importlib.util.find_spec("torch") is not None:
-        torch = importlib.import_module("torch")
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-        seeded["torch"] = True
+    if importlib.util.find_spec("torch") is not None and is_torch_runtime_available():
+        try:
+            torch = importlib.import_module("torch")
+        except (ImportError, OSError):
+            torch = None
+        if torch is not None:
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+            seeded["torch"] = True
 
     return seeded

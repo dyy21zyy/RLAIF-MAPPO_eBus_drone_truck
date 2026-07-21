@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 from pathlib import Path
 from typing import Sequence
 
 from utils.config import load_config
+from rlaif.torch_runtime import is_torch_runtime_available
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -21,7 +21,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    if importlib.util.find_spec("torch") is None:
+    if not is_torch_runtime_available():
         print("SKIP: Stage 6 assignment PPO evaluation requires PyTorch.")
         return 0
     from training.ppo_trainer import evaluate_assignment_ppo

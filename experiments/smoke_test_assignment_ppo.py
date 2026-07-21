@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import math
 import tempfile
 from copy import deepcopy
@@ -10,10 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from utils.config import PROJECT_ROOT, load_config
+from rlaif.torch_runtime import is_torch_runtime_available
 
 
 def run_smoke_test() -> dict[str, Any]:
-    if importlib.util.find_spec("torch") is None:
+    if not is_torch_runtime_available():
         return {"skipped": True, "reason": "PyTorch is unavailable"}
 
     from training.ppo_trainer import load_assignment_checkpoint, train_assignment_ppo

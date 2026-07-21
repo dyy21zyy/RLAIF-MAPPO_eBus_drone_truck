@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from rlaif.torch_runtime import PYTORCH_REQUIRED_MESSAGE
+from rlaif.torch_runtime import PYTORCH_REQUIRED_MESSAGE, is_torch_runtime_available
 
 
 def test_stage5_cli_modules_import_without_torch_runtime() -> None:
@@ -17,7 +17,7 @@ def test_stage5_cli_modules_import_without_torch_runtime() -> None:
     __import__("experiments.smoke_test_reward_model")
 
 
-@pytest.mark.skipif(importlib.util.find_spec("torch") is not None, reason="torch is installed")
+@pytest.mark.skipif(is_torch_runtime_available(), reason="torch runtime is available")
 @pytest.mark.parametrize(
     "arguments",
     [

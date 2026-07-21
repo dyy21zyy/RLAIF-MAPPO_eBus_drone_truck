@@ -7,7 +7,7 @@ import json
 import sys
 
 from rlaif.preference_dataset import NoUsablePreferencesError
-from rlaif.torch_runtime import PYTORCH_REQUIRED_MESSAGE, is_missing_torch_error
+from rlaif.torch_runtime import PYTORCH_REQUIRED_MESSAGE, is_missing_torch_error, is_torch_runtime_available
 
 
 def main() -> int:
@@ -16,6 +16,9 @@ def main() -> int:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--data", help="override preference JSONL path")
     args = parser.parse_args()
+    if not is_torch_runtime_available():
+        print(PYTORCH_REQUIRED_MESSAGE, file=sys.stderr)
+        return 3
     try:
         # Keep the PyTorch-dependent implementation lazy so importing this CLI remains safe.
         from rlaif.evaluate_reward_model import evaluate_from_config

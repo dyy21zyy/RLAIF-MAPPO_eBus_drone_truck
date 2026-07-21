@@ -1,14 +1,14 @@
 """Dependency-light Stage 7 asynchronous MAPPO smoke test."""
 from __future__ import annotations
-import importlib.util
 import tempfile
 from pathlib import Path
 from utils.config import load_config
+from rlaif.torch_runtime import is_torch_runtime_available
 
 ROOT=Path(__file__).parents[1]
 
 def run_smoke_test():
-    if importlib.util.find_spec('torch') is None:
+    if not is_torch_runtime_available():
         return {'skipped': True, 'reason': 'PyTorch is unavailable'}
     from training.mappo_trainer import load_checkpoint, train_mappo_async
     with tempfile.TemporaryDirectory(prefix='stage7_mappo_') as directory:

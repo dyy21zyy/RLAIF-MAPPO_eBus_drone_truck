@@ -8,3 +8,9 @@ def test_experiment_configs_have_required_sections():
 
 def test_result_schema_required_fields():
     required={"experiment_id","method_name","seed","total_env_reward","total_rlaif_reward","fallback_feasibility_events","status","error_message"}; assert required<=set(RESULT_FIELDS)
+
+def test_stage8_smoke_reports_runtime_torch_availability(monkeypatch, capsys):
+    import experiments.smoke_test_experiments as smoke
+    monkeypatch.setattr(smoke, "is_torch_runtime_available", lambda: False)
+    assert smoke.main() == 0
+    assert "torch_available=False" in capsys.readouterr().out

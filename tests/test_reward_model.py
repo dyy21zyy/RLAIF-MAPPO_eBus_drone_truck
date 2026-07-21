@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-torch = pytest.importorskip("torch")
+from tests.torch_optional import import_optional_torch
+
+torch = import_optional_torch(allow_module_level=True)
 
 from experiments.smoke_test_reward_model import _config, build_fixture
 from rlaif.preference_dataset import load_preference_examples, split_preference_examples

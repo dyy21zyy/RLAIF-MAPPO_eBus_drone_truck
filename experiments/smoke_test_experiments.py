@@ -1,8 +1,9 @@
 """Dependency-light Stage 8 experiment-framework smoke test."""
 from __future__ import annotations
-import importlib.util, subprocess, tempfile
+import subprocess, tempfile
 from pathlib import Path
 from experiments.run_benchmark import run_config
+from rlaif.torch_runtime import is_torch_runtime_available
 
 METHODS=[
  {"name":"truck_only","assignment_policy":"truck_only","bus_policy":"no_charge","rlaif_enabled":False},
@@ -24,6 +25,6 @@ def main():
         assert (output/"summary"/"summary_metrics.csv").is_file(); assert (output/"summary"/"summary_metrics.json").is_file(); assert (output/"summary"/"method_status.csv").is_file()
         ignored=subprocess.run(["git","check-ignore","-q","results/stage8_probe.json"],check=False).returncode==0
         assert ignored,"results/ must be ignored by Git"
-        print(f"Stage 8 smoke test passed: {len(successful)} baselines; torch_available={importlib.util.find_spec('torch') is not None}; learned_status={learned['status']}")
+        print(f"Stage 8 smoke test passed: {len(successful)} baselines; torch_available={is_torch_runtime_available()}; learned_status={learned['status']}")
     return 0
 if __name__=="__main__": raise SystemExit(main())
