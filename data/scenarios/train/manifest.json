@@ -1,0 +1,29 @@
+{
+  "bank": "train",
+  "configuration_hash": "da7bb8960d5574edc262aff88741913a0234d21725f6a29056ec5040eee669b0",
+  "scenarios": [
+    {
+      "artifact_hashes": {
+        "instance.json": "2472d10f4afc777da8c67455fa69b84c4d1a63ce95239fadd8361a19ac6eaa3c"
+      },
+      "artifacts": {
+        "instance.json": "2472d10f4afc777da8c67455fa69b84c4d1a63ce95239fadd8361a19ac6eaa3c"
+      },
+      "configuration_hash": "776157ff42112b97fa93efa4e4655300680825d6f2395b3441602e253b6e8dd4",
+      "path": "data/scenarios/train/train_0000_270b3884bc/instance.json",
+      "scenario_id": "train_0000_270b3884bc",
+      "schema_version": 1,
+      "seed_tuple": {
+        "initial_bus_energy_seed": 1004,
+        "network_seed": 1000,
+        "parcel_seed": 1001,
+        "passenger_seed": 1002,
+        "station_base_load_seed": 1005,
+        "travel_time_seed": 1003
+      },
+      "size": 20492
+    }
+  ],
+  "schema_version": 1,
+  "size": 1
+}

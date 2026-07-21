@@ -7,7 +7,7 @@ from typing import Any
 from baselines import build_assignment_policy, build_bus_policy
 from envs.delivery_env import DynamicDeliveryEnv
 from envs.state_builder import build_candidate_action_features
-from evaluation.metrics import collect_environment_metrics
+from evaluation.metrics import collect_environment_metrics, collect_formal_metrics
 from evaluation.reporting import write_episode, write_records_csv
 from evaluation.result_schema import normalize_result
 from rlaif.preference_dataset import ACTION_FEATURE_KEYS
@@ -32,7 +32,7 @@ class EvaluationRunner:
 
     def _base(self, status="success", error_message=""):
         payload=json.dumps({"experiment":self.config,"method":self.method},sort_keys=True,default=str).encode()
-        return normalize_result({"experiment_id":self.experiment_id,"method_name":self.method.get("name",self.method.get("assignment_policy","unknown")),"seed":self.seed,"instance_name":self.config.get("instance_name",self.instance.parent.name),"config_hash":hashlib.sha256(payload).hexdigest()[:16],"rlaif_enabled":bool(self.method.get("rlaif_enabled",False)),"assignment_policy_name":self.method.get("assignment_policy",""),"bus_policy_name":self.method.get("bus_policy",""),"status":status,"error_message":error_message})
+        return normalize_result({"experiment_id":self.experiment_id,"method_name":self.method.get("name",self.method.get("assignment_policy","unknown")),"seed":self.seed,"instance_name":self.config.get("instance_name",self.instance.parent.name),"config_hash":hashlib.sha256(payload).hexdigest()[:16],"rlaif_enabled":bool(self.method.get("rlaif_enabled",False)),"scenario_id":self.config.get("scenario_id", self.config.get("instance_name", self.instance.parent.name)),"assignment_policy_name":self.method.get("assignment_policy",""),"bus_policy_name":self.method.get("bus_policy",""),"status":status,"error_message":error_message})
 
     def _record_path(self):
         safe=str(self.method.get("name","method")).replace("/","_")
@@ -102,7 +102,7 @@ class EvaluationRunner:
                         charge_count+=1; charge_energy+=float(env.config["bus"]["charging_power_kw"])*(seconds/3600.0)
                     observation,reward,*_=env.step(selected); env_reward+=float(reward)
             env.get_metrics()  # Stable Stage 3 metric hook; detailed Stage 8 metrics are derived below.
-            row=self._base(); row.update(collect_environment_metrics(env,bus_charging_count=charge_count,bus_charging_energy=charge_energy,fallback_events=fallback_events))
+            row=self._base(); row.update(collect_environment_metrics(env,bus_charging_count=charge_count,bus_charging_energy=charge_energy,fallback_events=fallback_events)); row.update(collect_formal_metrics(env, env_reward=env_reward, rlaif_rewards_by_agent={"assignment": rlaif_reward}, runtime=time.perf_counter()-started))
             weight=float(self.method.get("lambda_rlaif",1.0)); row.update({"total_env_reward":env_reward,"total_rlaif_reward":rlaif_reward,"episode_reward":env_reward+weight*rlaif_reward,"runtime_seconds":time.perf_counter()-started})
             row=normalize_result(row)
         except Exception as exc:

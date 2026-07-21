@@ -336,3 +336,7 @@ The Phase 7 trainer is a four-agent asynchronous MAPPO implementation trained on
 ### Phase 8: multi-agent RLAIF
 
 The RLAIF stack now has v2 schemas for four agent types (`assignment`, `truck`, `bus`, `station`), agent-specific prompt builders, informative pair selection, grouped scenario/episode/state splits, independent reward models, and a reward registry that loads the correct checkpoint for each active agent. Formal RLAIF configuration is fail-closed and uses per-agent `lambda` and clipping after reward normalization.
+
+### Phase 9 paper experiment framework
+
+The repository includes a formal experiment scaffold for frozen scenario banks, separate policy checkpoint validation, paired benchmark evaluation, supported ablations, separated sensitivity modes, formal metrics, statistical aggregation, and provenance manifests. Start with `python -m experiments.smoke_test_experiments`; do not treat smoke outputs as paper results.

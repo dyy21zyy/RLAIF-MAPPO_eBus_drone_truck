@@ -1,4 +1,4 @@
-"""Run config-driven Stage 8 sensitivity variants; smoke mode selects a tiny subset."""
+"""Run config-driven Stage 8/Phase 9 sensitivity variants; smoke mode selects a tiny subset."""
 from __future__ import annotations
 import argparse, copy, json, tempfile
 from pathlib import Path
@@ -29,3 +29,5 @@ def run_sensitivity(config):
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__); parser.add_argument("--config",type=Path,required=True); args=parser.parse_args(argv); rows=run_sensitivity(load_config(args.config)); print(f"Processed {len(rows)} sensitivity episodes."); return 1 if any(r["status"]=="failed" for r in rows) else 0
 if __name__=="__main__": raise SystemExit(main())
+
+# Phase 9 paper wrappers in experiments/run_paper_* add strict validation.

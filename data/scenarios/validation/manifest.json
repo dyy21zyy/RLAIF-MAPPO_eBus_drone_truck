@@ -1,0 +1,29 @@
+{
+  "bank": "validation",
+  "configuration_hash": "da7bb8960d5574edc262aff88741913a0234d21725f6a29056ec5040eee669b0",
+  "scenarios": [
+    {
+      "artifact_hashes": {
+        "instance.json": "f44049491ade555bb6a1f690f71815816d3509ae0ddca5625ecfb5680b145fc7"
+      },
+      "artifacts": {
+        "instance.json": "f44049491ade555bb6a1f690f71815816d3509ae0ddca5625ecfb5680b145fc7"
+      },
+      "configuration_hash": "e06c8acfd89a3351d0ffe2e52f9694c9c41c8bd04288c74f8872eb4a1593dce9",
+      "path": "data/scenarios/validation/validation_0000_ac05589834/instance.json",
+      "scenario_id": "validation_0000_ac05589834",
+      "schema_version": 1,
+      "seed_tuple": {
+        "initial_bus_energy_seed": 2004,
+        "network_seed": 2000,
+        "parcel_seed": 2001,
+        "passenger_seed": 2002,
+        "station_base_load_seed": 2005,
+        "travel_time_seed": 2003
+      },
+      "size": 20497
+    }
+  ],
+  "schema_version": 1,
+  "size": 1
+}

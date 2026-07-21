@@ -1,4 +1,4 @@
-"""Aggregate Stage 8 raw episode records."""
+"""Aggregate Stage 8/Phase 9 raw episode records."""
 import argparse
 from evaluation.aggregator import aggregate_directory
 
@@ -6,3 +6,5 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__); parser.add_argument("--input",required=True); parser.add_argument("--output",required=True); args=parser.parse_args(argv)
     metrics,statuses=aggregate_directory(args.input,args.output); print(f"Aggregated {len(statuses)} methods and {len(metrics)} metric rows into {args.output}"); return 0
 if __name__=="__main__": raise SystemExit(main())
+
+# Phase 9 paper wrappers in experiments/run_paper_* add strict validation.
