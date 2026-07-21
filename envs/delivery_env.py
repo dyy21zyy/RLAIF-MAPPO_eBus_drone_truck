@@ -25,6 +25,7 @@ from envs.state_builder import (
     build_truck_decision_surface,
 )
 from utils.config import load_config
+from envs.dynamics.bus_circulation import RuntimePhysicalBus, assert_no_overlaps
 
 EPSILON = 1e-9
 EVENT_PRIORITY = {
@@ -169,6 +170,8 @@ class DynamicDeliveryEnv:
         station_rows = self._read_csv(self._artifact("integrated_stations"))
         trip_rows = self._read_csv(self._artifact("bus_trips"))
         stop_time_rows = self._read_csv(self._artifact("bus_stop_times"))
+        physical_rows = self._read_csv(self._artifact("physical_buses")) if self.manifest.get("artifacts", {}).get("physical_buses") else []
+        trip_to_bus_rows = self._read_csv(self._artifact("trip_to_bus")) if self.manifest.get("artifacts", {}).get("trip_to_bus") else []
         if not parcel_rows or not station_rows or not trip_rows or not stop_time_rows:
             raise InstanceValidationError("Parcels, stations, trips, and stop times must be non-empty")
 
@@ -203,6 +206,16 @@ class DynamicDeliveryEnv:
             raise InstanceValidationError("Distance and time matrices must contain finite non-negative values")
 
         self.trip_rows = {row["trip_id"]: row for row in trip_rows}
+        self.physical_bus_rows = physical_rows
+        self.trip_to_bus_rows = trip_to_bus_rows
+        self.trip_to_bus = {row["trip_id"]: row["bus_id"] for row in trip_to_bus_rows}
+        if trip_to_bus_rows:
+            if set(self.trip_to_bus) != set(self.trip_rows):
+                raise InstanceValidationError("Every scheduled trip must map to exactly one physical bus")
+            try:
+                assert_no_overlaps(trip_to_bus_rows)
+            except ValueError as exc:
+                raise InstanceValidationError(str(exc)) from exc
         self.data_sources = self._load_data_sources()
         self.trip_stop_times: dict[str, list[dict[str, str]]] = {}
         for row in stop_time_rows:
@@ -277,8 +290,14 @@ class DynamicDeliveryEnv:
             )
             for index in range(int(self.config["truck"]["num_trucks"]))
         ]
-        self.bus_soc_kwh: dict[str, float] = {trip_id: float(self.config["bus"]["bus_battery_kwh"]) for trip_id in self.trip_rows}
-        self.bus_delay_min: dict[str, float] = {trip_id: 0.0 for trip_id in self.trip_rows}
+        self.physical_buses: dict[str, RuntimePhysicalBus] = {}
+        for row in (self.physical_bus_rows or []):
+            self.physical_buses[row["bus_id"]] = RuntimePhysicalBus(row["bus_id"], row.get("initial_location_id", "terminal"), float(row.get("initial_soc_kwh", self.config["bus"]["bus_battery_kwh"])), float(row.get("battery_capacity_kwh", self.config["bus"]["bus_battery_kwh"])), float(row.get("minimum_safe_energy_kwh", self.config["bus"]["bus_min_soc_kwh"])))
+        if not self.physical_buses:
+            self.physical_buses = {f"bus_{i:03d}": RuntimePhysicalBus(f"bus_{i:03d}", "terminal", float(self.config["bus"]["bus_battery_kwh"])) for i, _ in enumerate(self.trip_rows)}
+            self.trip_to_bus = {tid: f"bus_{i:03d}" for i, tid in enumerate(self.trip_rows)}
+        self.bus_soc_kwh = {trip_id: self.physical_buses[self.trip_to_bus[trip_id]].soc_kwh for trip_id in self.trip_rows}
+        self.bus_delay_min = {trip_id: self.physical_buses[self.trip_to_bus[trip_id]].schedule_delay_min for trip_id in self.trip_rows}
         self.bus_freight_kg: dict[str, float] = {trip_id: 0.0 for trip_id in self.trip_rows}
         self.bus_segment_index: dict[str, int] = {trip_id: 0 for trip_id in self.trip_rows}
         self.pending_bus_parcels: dict[tuple[str, str], list[str]] = {}
@@ -439,7 +458,16 @@ class DynamicDeliveryEnv:
                 truck.remaining_capacity_kg=float(self.config["truck"].get("weight_capacity_kg", self.config["truck"].get("capacity_kg",100.0)))
                 truck.remaining_volume_m3=float(self.config["truck"].get("volume_capacity_m3",1.0))
             elif event.kind == "bus_departure":
-                surface = build_bus_loading_decision_surface(self, event.payload["trip_id"])
+                trip_id = event.payload["trip_id"]
+                bus = self.physical_buses[self.trip_to_bus[trip_id]]
+                if bus.next_available_time_min > self.now_min + EPSILON:
+                    self._push(bus.next_available_time_min, "bus_departure", event.payload)
+                    continue
+                scheduled = float(self.trip_stop_times[trip_id][0]["departure_time"])
+                bus.current_trip_id = trip_id
+                bus.schedule_delay_min += max(0.0, self.now_min - scheduled)
+                self.bus_delay_min[trip_id] = bus.schedule_delay_min
+                surface = build_bus_loading_decision_surface(self, trip_id)
                 self.current_decision = Decision("bus", event, surface.action_mask())
             elif event.kind == "bus_arrival":
                 reward += self._handle_bus_arrival(event)
@@ -989,8 +1017,16 @@ class DynamicDeliveryEnv:
             previous, current = rows[int(previous_stop_index)], rows[stop_index]
             scheduled_segment_min = max(float(current["arrival_time"]) - float(previous["departure_time"]), 0.0)
             segment_km = scheduled_segment_min / 60 * float(self.config["bus"]["bus_speed_kmph"])
-            self.bus_soc_kwh[trip_id] -= segment_km * float(self.config["bus"]["bus_energy_kwh_per_km"])
-            shortage = max(0.0, float(self.config["bus"]["bus_min_soc_kwh"]) - self.bus_soc_kwh[trip_id])
+            bus = self.physical_buses[self.trip_to_bus[trip_id]]
+            bus.current_trip_id = trip_id
+            bus.soc_kwh -= segment_km * float(self.config["bus"]["bus_energy_kwh_per_km"])
+            bus.current_location = current["stop_id"]
+            bus.minimum_safe_energy_violation = bus.minimum_safe_energy_violation or bus.soc_kwh < bus.minimum_safe_energy_kwh
+            if bus.soc_kwh <= 0:
+                bus.depleted = True
+                raise RuntimeError(f"Complete depletion for {bus.physical_bus_id} on {trip_id}")
+            self.bus_soc_kwh[trip_id] = bus.soc_kwh
+            shortage = max(0.0, float(self.config["bus"]["bus_min_soc_kwh"]) - bus.soc_kwh)
             if shortage:
                 reward += self._charge_cost("bus_battery_violation", shortage)
         unloading = 0.0
@@ -1047,12 +1083,16 @@ class DynamicDeliveryEnv:
         if duration_min > 0:
             station.active_bus_charges.append(self.now_min + duration_min)
             energy = float(self.config["bus"]["charging_power_kw"]) * duration_min / 60
-            self.bus_soc_kwh[trip_id] = min(float(self.config["bus"]["bus_battery_kwh"]), self.bus_soc_kwh[trip_id] + energy * float(self.config["bus"]["charging_efficiency"]))
+            bus = self.physical_buses[self.trip_to_bus[trip_id]]
+            bus.soc_kwh = min(float(self.config["bus"]["bus_battery_kwh"]), bus.soc_kwh + energy * float(self.config["bus"]["charging_efficiency"]))
+            self.bus_soc_kwh[trip_id] = bus.soc_kwh
             reward += self._charge_cost("energy_cost", energy)
             station_load_kw = self._station_load_kw(station, self.now_min)
             self.peak_station_load_kw = max(self.peak_station_load_kw, station_load_kw)
         delay = duration_min + unloading
-        self.bus_delay_min[trip_id] += delay
+        bus = self.physical_buses[self.trip_to_bus[trip_id]]
+        bus.schedule_delay_min += delay
+        self.bus_delay_min[trip_id] = bus.schedule_delay_min
         reward += self._charge_cost("passenger_delay", duration_min)
         reward += self._charge_cost("bus_operating_delay", delay)
         rows = self.trip_stop_times[trip_id]
@@ -1060,6 +1100,17 @@ class DynamicDeliveryEnv:
         if next_index is not None:
             scheduled_delta = float(rows[next_index]["arrival_time"]) - float(rows[stop_index]["arrival_time"])
             self._push(self.now_min + delay + max(0.0, scheduled_delta), "bus_arrival", {"trip_id": trip_id, "stop_index": next_index, "previous_stop_index": stop_index})
+        else:
+            bus = self.physical_buses[self.trip_to_bus[trip_id]]
+            relocation_t = float(next((r.get("relocation_time_min", 0.0) for r in self.trip_to_bus_rows if r.get("trip_id") == trip_id), 0.0))
+            layover_t = float(next((r.get("minimum_layover_min", 0.0) for r in self.trip_to_bus_rows if r.get("trip_id") == trip_id), 0.0))
+            relocation_km = relocation_t / 60.0 * float(self.config["bus"].get("bus_speed_kmph", 25.0))
+            bus.last_relocation_energy_kwh = relocation_km * float(self.config["bus"].get("bus_energy_kwh_per_km", 1.6))
+            bus.soc_kwh -= bus.last_relocation_energy_kwh
+            bus.next_available_time_min = self.now_min + delay + relocation_t + layover_t
+            bus.current_trip_id = None
+            bus.relocation_status = "layover_complete_scheduled"
+            self.bus_soc_kwh[trip_id] = bus.soc_kwh
         return reward
 
     def _handle_station_arrival(self, parcel_id: str, station_id: str) -> float:

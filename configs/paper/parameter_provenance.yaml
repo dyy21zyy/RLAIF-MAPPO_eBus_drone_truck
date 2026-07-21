@@ -235,3 +235,6 @@ truck.volume_capacity_m3:
 truck.weight_capacity_kg:
   category: project_extension
   source: Phase 0 formal paper schema; project extension only, not real data.
+truck.capacity_kg:
+  category: project_extension
+  source: Compatibility alias for truck.weight_capacity_kg used by legacy fallback configuration.

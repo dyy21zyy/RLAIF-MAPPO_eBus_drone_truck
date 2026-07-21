@@ -157,3 +157,15 @@ Action-mask construction may estimate feasibility, but must remain side-effect f
 Formal truck decisions at `TRUCK_AVAILABLE` now dispatch bounded multi-parcel batches from the `WAITING_TRUCK` pool instead of a one-parcel task list. Eligible parcels must be released, assigned to TD/TBD/TLD, and not already reserved on an active truck route. Candidate generation is side-effect free and includes idle plus deterministic greedy heuristics for earliest deadline, highest priority, nearest-neighbor geography, bus-terminal consolidation, station consolidation, weight utilization, volume utilization, estimated lateness, and mixed destinations.
 
 Batched routes support `CUSTOMER`, `BUS_TERMINAL`, `INTEGRATED_STATION`, and optional `DEPOT` stops. Applying a batch reserves parcels by moving them to `ONBOARD_TRUCK`; each parcel is unloaded only at its own stop (`DELIVERED`, `AT_BUS_TERMINAL`, or `AT_STATION`). Truck cost is charged once per route from fixed dispatch cost, total distance, and operating time; metrics expose total distance, dispatch count, utilization averages, and parcels per route.
+
+## Phase 3 physical electric-bus circulation
+
+Scheduled trips are timetable service tasks, while `PhysicalBusState` is the persistent vehicle state. Runtime bus operation now keys SoC, current location, schedule delay, next availability, passenger manifest placeholder, and onboard parcels by `physical_bus_id`; trip-indexed structures remain only for stop times, scheduled times, and trip freight manifests.
+
+The physical fleet size is computed as:
+
+`ceil((nominal_one_way_line_time + non_service_relocation_time + minimum_layover_time) / planned_headway)`.
+
+The one-way line time is derived from generated timetable stop times. Relocation and layover assumptions are recorded with `project_extension` provenance in `bus_circulation.json` unless a concrete source is configured. Initial bus energy uses `initial_bus_energy_seed` and samples `Uniform(0.55 * 160, 0.85 * 160)`, so generated SoC values are reproducible and remain in `[88, 136]` kWh for 160 kWh buses.
+
+At each trip start the mapped physical bus is selected from `trip_to_bus.csv`; SoC is not reset. Segment energy uses `segment_distance_km * 1.6`. At terminal completion, SoC and delay persist, relocation energy is subtracted, layover is enforced, and `next_available_time_min` is updated. Complete depletion at or below zero raises severe infeasibility instead of continuing silently. Passenger dynamics remain limited to the existing manifest placeholder pending Phase 4.

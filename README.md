@@ -312,3 +312,7 @@ or vehicle during assignment.
 ### Phase 2 truck batching
 
 The formal environment supports bounded multi-parcel truck batch actions. Truck candidates are generated from released `WAITING_TRUCK` parcels using deterministic greedy heuristics, hard weight/volume/batch-size masks, and multi-stop routes for direct customers, the bus terminal, and integrated stations. The legacy one-parcel MVP flag remains only in legacy smoke configurations and is not used by `configs/paper/base_*.yaml`.
+
+### Phase 3 physical bus circulation
+
+Instances now include physical electric buses that persist across scheduled trips. Run the standard pipeline to generate `physical_buses.csv`, `trip_to_bus.csv`, and `bus_circulation.json`; the environment then uses `physical_buses[bus_id].soc_kwh`, `schedule_delay_min`, `current_location`, and `next_available_time_min` rather than resetting operating state per trip.

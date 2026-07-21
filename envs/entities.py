@@ -130,6 +130,10 @@ class PhysicalBusState:
     location_id: str
     available_at_min: float
     energy_kwh: float
+    current_location: str | None = None
+    next_available_time_min: float | None = None
+    soc_kwh: float | None = None
+    schedule_delay_min: float = 0.0
     delay_min: float = 0.0
     manifest: PassengerManifest = field(default_factory=PassengerManifest)
     onboard_parcel_ids: tuple[str, ...] = ()

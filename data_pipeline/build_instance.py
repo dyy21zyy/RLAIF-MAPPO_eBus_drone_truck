@@ -14,6 +14,7 @@ from data_pipeline.generate_integrated_stations import select_integrated_station
 from data_pipeline.generate_parcels import generate_parcels
 from data_pipeline.parse_bus_route import load_or_generate_bus_route
 from data_pipeline.synthesize_timetable import synthesize_timetable
+from data_pipeline.build_bus_circulation import build_bus_circulation
 from data_pipeline.scenario_manifest import resolve_seeds, write_scenario_manifest
 from utils.config import PROJECT_ROOT, load_config
 
@@ -32,6 +33,9 @@ def normalize_dynamic_config(config: dict[str, Any]) -> dict[str, Any]:
     bus.setdefault("bus_battery_kwh", bus.get("battery_capacity_kwh", 160.0))
     bus.setdefault("bus_min_soc_kwh", bus.get("minimum_safe_energy_kwh", 40.0))
     bus.setdefault("bus_energy_kwh_per_km", bus.get("energy_consumption_kwh_per_km", 1.6))
+    bus.setdefault("non_service_relocation_time_min", 5.0)
+    bus.setdefault("minimum_layover_time_min", 2.0)
+    config.setdefault("seeds", {}).setdefault("initial_bus_energy_seed", int(config.get("project", {}).get("seed", 0)) + 303)
     bus.setdefault("terminal_loading_time_min_per_kg", 0.0)
     bus.setdefault("station_unloading_time_min_per_kg", float(bus.get("unloading_time_sec_per_kg", 6.0)) / 60.0)
     net = config.setdefault("network", {})
@@ -56,7 +60,7 @@ def normalize_dynamic_config(config: dict[str, Any]) -> dict[str, Any]:
     config.setdefault("reward", {k: 0.0 for k in ["passenger_delay","bus_operating_delay","parcel_lateness","energy_cost","power_overload","bus_battery_violation","locker_overflow","truck_cost","undelivered","battery_shortage","infeasible_action"]})
     return config
 
-REQUIRED_FILENAMES = ["road_graph.graphml", "road_nodes.csv", "road_edges.csv", "depot.csv", "bus_stops.csv", "bus_trips.csv", "bus_stop_times.csv", "bus_timetable.json", "integrated_stations.csv", "parcels.csv", "truck_distance_matrix.npy", "truck_travel_time_matrix.npy", "drone_distance_matrix.npy", "instance.yaml", "instance.json"]
+REQUIRED_FILENAMES = ["road_graph.graphml", "road_nodes.csv", "road_edges.csv", "depot.csv", "bus_stops.csv", "bus_trips.csv", "bus_stop_times.csv", "bus_timetable.json", "physical_buses.csv", "trip_to_bus.csv", "bus_circulation.json", "integrated_stations.csv", "parcels.csv", "truck_distance_matrix.npy", "truck_travel_time_matrix.npy", "drone_distance_matrix.npy", "instance.yaml", "instance.json"]
 
 
 def build_instance(config_path: str | Path, fallback: bool = False, output_root: str | Path | None = None, custom_bus_route: str | Path | None = None) -> dict[str, Any]:
@@ -77,6 +81,7 @@ def build_instance(config_path: str | Path, fallback: bool = False, output_root:
     road_paths = save_road_graph(graph, output_dir)
     stops = load_or_generate_bus_route(config, graph, output_dir, custom_bus_route)
     trips, stop_times, _timetable = synthesize_timetable(stops, config, output_dir)
+    circulation = build_bus_circulation(trips, stop_times, config, output_dir)
     stations = select_integrated_stations(stops, config, output_dir)
     depot = generate_depot(config, graph, stops, output_dir)
     parcels = generate_parcels(config, graph, stations, output_dir, trips, stop_times)
@@ -86,6 +91,7 @@ def build_instance(config_path: str | Path, fallback: bool = False, output_root:
     artifact_names = {**{key: path.name for key, path in road_paths.items()},
                       "depot": "depot.csv", "bus_stops": "bus_stops.csv", "bus_trips": "bus_trips.csv",
                       "bus_stop_times": "bus_stop_times.csv", "bus_timetable": "bus_timetable.json",
+                      "physical_buses": "physical_buses.csv", "trip_to_bus": "trip_to_bus.csv", "bus_circulation": "bus_circulation.json",
                       "integrated_stations": "integrated_stations.csv", "parcels": "parcels.csv", "scenario_manifest": "scenario_manifest.json",
                       **{key: path.name for key, path in matrix_paths.items()}}
     instance = {"schema_version": 1, "stage": 2, "city_name": config["city"]["name"],
@@ -93,6 +99,7 @@ def build_instance(config_path: str | Path, fallback: bool = False, output_root:
                 "seed": config.get("project", {}).get("seed", 0), "seeds": config["seeds"], "output_directory": str(output_dir),
                 "artifacts": artifact_names, "counts": {"road_nodes": len(graph.nodes), "road_edges": len(graph.edges),
                 "bus_stops": len(stops), "bus_trips": len(trips), "bus_stop_times": len(stop_times),
+                "physical_buses": len(circulation["physical_buses"]), "trip_to_bus": len(circulation["trip_to_bus"]),
                 "integrated_stations": len(stations), "parcels": len(parcels)},
                 "matrix_indices": matrix_metadata, "warnings": warnings, "config_snapshot": config}
     scenario_id = f"{config['city']['name']}-{config.get('scenario', {}).get('size', 'legacy')}"
