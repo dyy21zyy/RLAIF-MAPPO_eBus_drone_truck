@@ -25,9 +25,18 @@ networks:
   station_hidden_dims: [256, 256]
   critic_hidden_dims: [256, 256]
 rlaif:
+  # Assignment-agent-only learned reward shaping. Truck, bus, and station use environment reward.
   enabled: false
   lambda_rlaif: 1.0
   reward_model_checkpoint: results/checkpoints/reward_model.pt
+  reward_clip: null
+  fallback_to_env_reward: true
+  fail_on_invalid_reward_model: false
+  validation:
+    enabled: false
+    preference_data: data/preference/preferences.jsonl
+    min_pairwise_accuracy: 0.55
+    min_samples: 20
 output:
   checkpoint_path: results/checkpoints/mappo_async.pt
   training_log_path: results/metrics/mappo_async_training.csv

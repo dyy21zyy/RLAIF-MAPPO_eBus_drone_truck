@@ -551,7 +551,11 @@ def build_bus_charging_decision_surface(env: Any, event: Any) -> DecisionSurface
 
 
 def build_station_decision_surface(env: Any, station_id: str) -> DecisionSurface:
-    """Build candidates for station drone dispatch and battery operation."""
+    """Build station candidates: dispatch_drone for the first waiting parcel or idle.
+
+    Drone-battery recharge is scheduled by environment dynamics after dispatch;
+    it is not a learned station-agent action in this codebase.
+    """
 
     station = env.stations[station_id]
     waiting = list(getattr(env, "waiting_station_parcels", {}).get(station_id, []))

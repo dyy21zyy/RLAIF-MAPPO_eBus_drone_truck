@@ -282,3 +282,9 @@ python -m experiments.aggregate_results --input results/raw --output results/sum
 ```
 
 Outputs live under the configured `results/` directory and are ignored by Git. Missing learned checkpoints and PyTorch dependencies are explicit skips; no heuristic substitution occurs. `rlaif_enabled=false` does not require `reward_model.pt`, while enabled RLAIF requires a valid trained Stage 5 checkpoint. Baseline heuristics are comparisons only and must never become RLAIF labels. Current smoke outputs are code-validation artifacts, not final experimental results; final experiments remain deferred pending the Stage 5 Runtime Gate and trained Stage 6/7 policies. See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
+
+## Experiment-ready paper alignment
+
+For the paper “Preference-Aligned Multi-Agent Reinforcement Learning for Dynamic Truck--Electric-Bus--Drone Parcel Delivery”, use `configs/train_mappo_async.yaml` as the official MAPPO config and follow `docs/EXPERIMENT_GUIDE.md`. The old `configs/train_mappo.yaml` is deprecated.
+
+Current RLAIF support is assignment-agent-only: AI preferences train a reward model for assignment choices, while truck, bus, and station rewards remain pure environment rewards. API calls are used only offline to generate preference data via `RLAIF_API_KEY`, `RLAIF_API_BASE_URL`, and `RLAIF_MODEL_NAME`; MAPPO training does not call an API in real time. The station agent action space is `dispatch_drone` or `idle`; battery recharging is an environment dynamic after drone dispatch/return, not a learned station action.

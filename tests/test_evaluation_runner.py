@@ -24,3 +24,16 @@ def test_missing_checkpoints_are_skipped(tmp_path):
     assert EvaluationRunner(config,instance,rlaif,0).run_episode()["status"]=="skipped_missing_checkpoint"
 
 def test_results_are_git_ignored(): assert subprocess.run(["git","check-ignore","-q","results/probe.json"]).returncode==0
+
+
+def test_runner_evaluates_valid_async_mappo_checkpoint(tmp_path):
+    from training.mappo_trainer import train_mappo_async
+    from utils.config import load_config
+    config = load_config("configs/train_mappo_async.yaml")
+    config["training"].update({"total_episodes": 1, "rollout_episodes": 1, "ppo_epochs": 1, "batch_size": 32})
+    config["output"] = {"checkpoint_path": str(tmp_path/"mappo.pt"), "training_log_path": str(tmp_path/"train.csv"), "eval_path": str(tmp_path/"eval.json")}
+    train_mappo_async(config, output_root=tmp_path/"train_instance")
+    instance = make_instance(tmp_path)
+    method={"name":"mappo_async","assignment_policy":"mappo_async","checkpoint":str(tmp_path/"mappo.pt"),"rlaif_enabled":False}
+    row=EvaluationRunner({"name":"test","instance_name":"fallback","output_dir":str(tmp_path/"out")},instance,method,0).run_episode()
+    assert row["status"]=="success"

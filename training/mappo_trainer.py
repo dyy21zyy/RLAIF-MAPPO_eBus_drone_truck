@@ -477,6 +477,10 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
     wrapper = RewardModelWrapper(
         config["rlaif"].get("reward_model_checkpoint"),
         enabled=bool(config["rlaif"].get("enabled", False)),
+        validation=config["rlaif"].get("validation", {}),
+        fallback_to_env_reward=bool(config["rlaif"].get("fallback_to_env_reward", True)),
+        fail_on_invalid_reward_model=bool(config["rlaif"].get("fail_on_invalid_reward_model", False)),
+        reward_clip=config["rlaif"].get("reward_clip"),
     )
     buffer, rng, rows = AsyncMAPPOBuffer(), np.random.default_rng(seed), []
     rollout_episodes = int(training["rollout_episodes"])
@@ -528,6 +532,10 @@ def evaluate_mappo_async(config: dict[str, Any], checkpoint_path, *, output_root
     wrapper = RewardModelWrapper(
         config["rlaif"].get("reward_model_checkpoint"),
         enabled=bool(config["rlaif"].get("enabled", False)),
+        validation=config["rlaif"].get("validation", {}),
+        fallback_to_env_reward=bool(config["rlaif"].get("fallback_to_env_reward", True)),
+        fail_on_invalid_reward_model=bool(config["rlaif"].get("fail_on_invalid_reward_model", False)),
+        reward_clip=config["rlaif"].get("reward_clip"),
     )
     results = [
         collect_episode(
