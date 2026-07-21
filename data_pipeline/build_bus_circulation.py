@@ -10,8 +10,14 @@ def build_bus_circulation(trips:list[dict[str,Any]], stop_times:list[dict[str,An
     bus=config.setdefault("bus", {})
     schedule=config.get("bus_schedule", {})
     headway=float(schedule.get("planned_headway_min", bus.get("headway_min", 10.0)))
-    relocation=float(bus.get("non_service_relocation_time_min", bus.get("relocation_time_min", 5.0)))
-    layover=float(bus.get("minimum_layover_time_min", bus.get("minimum_layover_min", 2.0)))
+    if "non_service_relocation_time_min" in bus and "relocation_time_min" in bus and float(bus["non_service_relocation_time_min"]) != float(bus["relocation_time_min"]):
+        raise ValueError("conflicting bus relocation aliases")
+    if "minimum_layover_time_min" in bus and "minimum_layover_min" in bus and float(bus["minimum_layover_time_min"]) != float(bus["minimum_layover_min"]):
+        raise ValueError("conflicting bus layover aliases")
+    relocation=float(bus.get("non_service_relocation_time_min", config.get("bus_schedule", {}).get("relocation_time_min", bus.get("relocation_time_min", 5.0))))
+    layover=float(bus.get("minimum_layover_time_min", config.get("bus_schedule", {}).get("minimum_layover_min", bus.get("minimum_layover_min", 2.0))))
+    bus["non_service_relocation_time_min"] = relocation
+    bus["minimum_layover_time_min"] = layover
     fleet=calculate_physical_fleet_size(trips, stop_times, headway, relocation, layover)
     mapping=build_trip_to_bus_mapping(trips, stop_times, fleet["physical_bus_count"], relocation, layover)
     ids=[f"bus_{i:03d}" for i in range(fleet["physical_bus_count"])]
@@ -21,7 +27,7 @@ def build_bus_circulation(trips:list[dict[str,Any]], stop_times:list[dict[str,An
     physical=[{"bus_id":bid,"initial_location_id":first_origin.get(bid,"terminal"),"battery_capacity_kwh":float(bus.get("bus_battery_kwh",160.0)),"minimum_safe_energy_kwh":float(bus.get("bus_min_soc_kwh",40.0)),"initial_energy_seed_reference":"seeds.initial_bus_energy_seed","initial_soc_kwh":round(energies[bid],6)} for bid in ids]
     write_csv(output_dir/"physical_buses.csv", physical, list(physical[0].keys()))
     write_csv(output_dir/"trip_to_bus.csv", mapping, ["trip_id","bus_id","sequence_index","scheduled_start_min","scheduled_end_min","previous_trip_id","next_trip_id","relocation_time_min","minimum_layover_min"])
-    doc={"schema_version":1,"physical_fleet_size":fleet["physical_bus_count"],"nominal_cycle_time_components":fleet,"mapping":mapping,"provenance":{"non_service_relocation_time_min":"project_extension","minimum_layover_time_min":"project_extension","initial_locations":"nominal_circulation_first_origin"}}
+    doc={"schema_version":1,"physical_fleet_size":fleet["physical_bus_count"],"nominal_cycle_time_components":fleet,"mapping":mapping,"non_service_relocation_time_min": relocation,"minimum_layover_time_min": layover,"provenance":{"non_service_relocation_time_min":"project_extension","minimum_layover_time_min":"project_extension","initial_locations":"nominal_circulation_first_origin"}}
     write_json(output_dir/"bus_circulation.json", doc)
     return {"physical_buses":physical,"trip_to_bus":mapping,"bus_circulation":doc}
 

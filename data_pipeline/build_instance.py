@@ -29,13 +29,22 @@ def normalize_dynamic_config(config: dict[str, Any]) -> dict[str, Any]:
         config["bus"].setdefault("headway_min", config["bus_schedule"].get("planned_headway_min", 10))
         config["bus"].setdefault("freight_trip_frequency", 3)
     bus = config.setdefault("bus", {})
+    schedule = config.get("bus_schedule", {})
+    def _map_alias(canonical, legacy, default):
+        has_c = canonical in bus; has_l = legacy in bus; has_s = legacy in schedule
+        source = bus[canonical] if has_c else (bus[legacy] if has_l else (schedule[legacy] if has_s else default))
+        if has_c and has_l and float(bus[canonical]) != float(bus[legacy]):
+            raise ValueError(f"conflicting bus {canonical} and {legacy}")
+        if has_c and has_s and float(bus[canonical]) != float(schedule[legacy]):
+            raise ValueError(f"conflicting bus {canonical} and bus_schedule.{legacy}")
+        bus[canonical] = source
+    _map_alias("non_service_relocation_time_min", "relocation_time_min", 5.0)
+    _map_alias("minimum_layover_time_min", "minimum_layover_min", 2.0)
     bus.setdefault("delivery_horizon_min", config.get("time", {}).get("delivery_evaluation_horizon_min", 480))
     bus.setdefault("bus_speed_kmph", bus.get("nominal_speed_kmph", 30.0))
     bus.setdefault("bus_battery_kwh", bus.get("battery_capacity_kwh", 160.0))
     bus.setdefault("bus_min_soc_kwh", bus.get("minimum_safe_energy_kwh", 40.0))
     bus.setdefault("bus_energy_kwh_per_km", bus.get("energy_consumption_kwh_per_km", 1.6))
-    bus.setdefault("non_service_relocation_time_min", 5.0)
-    bus.setdefault("minimum_layover_time_min", 2.0)
     config.setdefault("seeds", {}).setdefault("initial_bus_energy_seed", int(config.get("project", {}).get("seed", 0)) + 303)
     bus.setdefault("terminal_loading_time_min_per_kg", 0.0)
     bus.setdefault("station_unloading_time_min_per_kg", float(bus.get("unloading_time_sec_per_kg", 6.0)) / 60.0)

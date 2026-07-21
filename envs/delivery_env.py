@@ -18,6 +18,8 @@ import numpy as np
 
 from envs.decision_schema import DecisionSurface
 from envs.reward_ledger import RewardLedger
+from envs.reward_scales import load_reward_scale_artifact
+from envs.status import is_delivered_status
 from envs.state_builder import (
     build_assignment_decision_surface,
     build_bus_charging_decision_surface,
@@ -85,6 +87,8 @@ class ParcelState:
     truck_id: str | None = None
     delivered_time_min: float | None = None
     cost: float = 0.0
+    deadline_class: str = "moderate"
+    is_urgent: bool = False
 
 
 @dataclass
@@ -356,13 +360,29 @@ class DynamicDeliveryEnv:
         self.accumulated_locker_overflow = 0.0
         self.accumulated_locker_overflow_duration = 0.0
         self.peak_station_load_kw = max((float(row["base_load_kw"]) if "base_load_kw" in row else float(self.config["station"]["base_load_kw"]) for row in self.station_rows), default=0.0)
+        self.bus_propulsion_energy_kwh = 0.0
+        self.bus_charging_energy_kwh = 0.0
+        self.battery_safety_violation_count = 0
+        self.drone_mission_count = 0
+        self.charging_slot_busy_minutes = 0.0
+        self.charging_slot_available_minutes = 0.0
+        self.locker_occupancy_kg_minutes = 0.0
+        self.bus_freight_utilization = 0.0
         self.truck_dispatch_count = 0
         self.truck_parcels_routed = 0
         self.truck_weight_utilization_sum = 0.0
         self.truck_volume_utilization_sum = 0.0
-        self.cost_components = {name: 0.0 for name in (
-            "passenger_delay", "bus_operating_delay", "parcel_lateness", "energy_cost", "power_overload",
-            "bus_battery_violation", "locker_overflow", "truck_cost", "undelivered", "battery_shortage", "infeasible_action")}
+        reward_components = ("passenger_delay", "bus_operating_delay", "parcel_lateness", "energy_cost", "power_overload",
+            "bus_battery_violation", "locker_overflow", "truck_cost", "undelivered", "battery_shortage", "infeasible_action")
+        self.raw_cost_components = {name: 0.0 for name in reward_components}
+        self.normalized_cost_components = {name: 0.0 for name in reward_components}
+        self.weighted_cost_components = {name: 0.0 for name in reward_components}
+        self.cost_components = self.weighted_cost_components
+        self.reward_reference_scales = {name: 1.0 for name in reward_components}
+        reward_cfg = self.config.get("reward", {})
+        if reward_cfg.get("apply_reference_scales", False):
+            artifact = load_reward_scale_artifact(reward_cfg.get("scale_artifact"), expected_hash=reward_cfg.get("scale_artifact_hash"), required_components=set(reward_components))
+            self.reward_reference_scales.update(artifact.scales)
         self.parcels = {
             row["parcel_id"]: ParcelState(
                 parcel_id=row["parcel_id"], release_time_min=float(row.get("release_time_min", row.get("release_time"))),
@@ -370,6 +390,8 @@ class DynamicDeliveryEnv:
                 volume=float(row.get("volume_m3", row.get("volume"))),
                 priority=int(row["priority"]), nearest_station_id=row["nearest_station_id"],
                 drone_feasible=self._as_bool(row["drone_feasible"]),
+                deadline_class=str(row.get("deadline_class", row.get("deadline_type", "moderate"))).strip().lower(),
+                is_urgent=(str(row.get("deadline_class", row.get("deadline_type", "moderate"))).strip().lower() == "tight"),
             ) for row in self.parcel_rows
         }
         self.stations = {}
@@ -1235,6 +1257,7 @@ class DynamicDeliveryEnv:
             station.full_batteries -= 1
         delivery, drone_return = self._drone_delivery_times(parcel_id, station_id, self.now_min)
         station.drone_available_min[drone_index] = drone_return
+        self.drone_mission_count += 1
         station.locker_load_kg = max(0.0, station.locker_load_kg - parcel.weight_kg)
         if self.now_min <= self.horizon_min:
             self._push(drone_return, "drone_return", {"station_id": station_id, "drone_index": drone_index})
@@ -1244,11 +1267,16 @@ class DynamicDeliveryEnv:
 
     def _charge_cost(self, component: str, amount: float) -> float:
         weight = float(self.config["reward"][component])
-        weighted = max(0.0, amount) * weight
-        self.cost_components[component] += weighted
+        raw = max(0.0, amount)
+        scale = float(self.reward_reference_scales.get(component, 1.0))
+        normalized = raw / max(abs(scale), EPSILON)
+        weighted = normalized * weight
+        self.raw_cost_components[component] += raw
+        self.normalized_cost_components[component] += normalized
+        self.weighted_cost_components[component] += weighted
         parcel_ids = []
         if component == "undelivered":
-            parcel_ids = [p.parcel_id for p in self.parcels.values() if p.status != "DELIVERED"]
+            parcel_ids = [p.parcel_id for p in self.parcels.values() if not is_delivered_status(p.status)]
         chains = [ref for pid in parcel_ids for ref in self.parcel_decision_chains.get(pid, [])]
         return self.reward_ledger.add_cost(event_time=self.now_min, component=component, raw_amount=amount, weight=weight, parcel_ids=parcel_ids, source_transition_ids=([self.current_transition_id] if self.current_transition_id else []), decision_chain_refs=chains, provenance=("terminal_team_distribution" if component == "undelivered" else "environment"))
 
@@ -1256,7 +1284,7 @@ class DynamicDeliveryEnv:
         if self.terminated:
             return 0.0
         self.now_min = min(max(self.now_min, self.horizon_min), self.horizon_min)
-        undelivered = sum(parcel.priority for parcel in self.parcels.values() if parcel.status != "DELIVERED")
+        undelivered = sum(parcel.priority for parcel in self.parcels.values() if not is_delivered_status(parcel.status))
         self.terminated = True
         self.current_decision = None
         return self._charge_cost("undelivered", float(undelivered))
@@ -1317,7 +1345,7 @@ class DynamicDeliveryEnv:
         parcel_count = max(len(self.parcels), 1)
         station_count = max(len(self.stations), 1)
         trip_count = max(len(self.bus_soc_kwh), 1)
-        delivered = sum(parcel.status == "DELIVERED" for parcel in self.parcels.values())
+        delivered = sum(is_delivered_status(parcel.status) for parcel in self.parcels.values())
         awaiting = sum(parcel.status == "PENDING_ASSIGNMENT" for parcel in self.parcels.values())
         in_transit = sum(parcel.status == "ONBOARD_TRUCK" for parcel in self.parcels.values())
         battery_capacity = max(float(self.config["bus"]["bus_battery_kwh"]), 1.0)
@@ -1343,9 +1371,9 @@ class DynamicDeliveryEnv:
         return encode_entity_critic_state(self)
 
     def _info(self, step_reward: float) -> dict[str, Any]:
-        delivered = sum(parcel.status == "DELIVERED" for parcel in self.parcels.values())
+        delivered = sum(is_delivered_status(parcel.status) for parcel in self.parcels.values())
         drone_deliveries = sum(
-            parcel.status == "DELIVERED" and parcel.mode in {"TBD", "TLD"}
+            is_delivered_status(parcel.status) and parcel.mode in {"TBD", "TLD"}
             for parcel in self.parcels.values()
         )
         metrics = {
@@ -1378,7 +1406,10 @@ class DynamicDeliveryEnv:
             "step_reward": step_reward,
             "episode_reward": self.reward_total,
             "reward_components": {name: -value for name, value in self.cost_components.items()},
-            "cost_components": dict(self.cost_components),
+            "raw_cost_components": dict(self.raw_cost_components),
+            "normalized_cost_components": dict(self.normalized_cost_components),
+            "weighted_cost_components": dict(self.weighted_cost_components),
+            "cost_components": dict(self.weighted_cost_components),
             "reward_ledger": self.reward_ledger.to_dict(),
             "metrics": metrics,
             "delivered_parcels": delivered,

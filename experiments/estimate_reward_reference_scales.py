@@ -38,7 +38,7 @@ def estimate(config_path: str, episodes: int = 3, output: str | None = None):
     for name, values in raw.items():
         nz = np.asarray([v for v in values if v > 0], dtype=float)
         scales[name] = float(np.percentile(nz, 90)) if len(nz) else 1.0
-    payload = {"artifact_version": ARTIFACT_VERSION, "config": str(config_path), "episodes": episodes, "reference_weights": REFERENCE_WEIGHTS, "raw_component_reference_scales": scales, "frozen": True}
+    payload = {"artifact_version": ARTIFACT_VERSION, "config": str(config_path), "episodes": episodes, "reference_weights": REFERENCE_WEIGHTS, "scales": scales, "raw_component_reference_scales": scales, "frozen": True}
     encoded = json.dumps(payload, sort_keys=True).encode()
     payload["artifact_hash"] = hashlib.sha256(encoded).hexdigest()
     path = Path(output or "outputs/reward_reference_scales_v1.json")

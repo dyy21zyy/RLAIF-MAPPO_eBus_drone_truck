@@ -28,6 +28,7 @@ from training.entity_encoders import ENTITY_ENCODER_SCHEMA_VERSION
 from training.mappo_networks import EVENT_EMBEDDING_SCHEMA_VERSION, CandidateScoringActor, CentralizedCritic, build_actor_registry
 from training.ppo_trainer import create_environment
 from training.reward_model_wrapper import RewardModelWrapper
+from envs.status import is_delivered_status
 from rlaif.reward_registry import RewardRegistry
 
 AGENT_IDS = ("assignment", "truck", "bus", "station")
@@ -98,7 +99,7 @@ def _episode_summary(
     rlaif_reward: float,
     bus_charging_count: int,
 ) -> dict[str, float | int]:
-    delivered = [parcel for parcel in env.parcels.values() if parcel.status == "delivered"]
+    delivered = [parcel for parcel in env.parcels.values() if is_delivered_status(parcel.status)]
     lateness = [max(0.0, float(parcel.delivered_time_min) - parcel.deadline_min) for parcel in delivered]
     costs = env.cost_components
     return {
@@ -281,7 +282,7 @@ def update_mappo(
                     ratio, 1.0 - float(training["clip_eps"]), 1.0 + float(training["clip_eps"])
                 )
                 policy_loss = -torch.minimum(ratio * advantages, clipped * advantages).mean()
-                loss = policy_loss - float(training["ent_coef"]) * entropy.mean()
+                loss = policy_loss - float(training.get("entropy_coef", training.get("ent_coef"))) * entropy.mean()
                 optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(actor.parameters(), float(training["max_grad_norm"]))
@@ -301,7 +302,7 @@ def update_mappo(
             returns = torch.tensor(buffer.returns[batch], dtype=torch.float32)
             value_loss = nn.functional.mse_loss(critic(states), returns)
             critic_optimizer.zero_grad()
-            (float(training["vf_coef"]) * value_loss).backward()
+            (float(training.get("value_coef", training.get("vf_coef"))) * value_loss).backward()
             nn.utils.clip_grad_norm_(critic.parameters(), float(training["max_grad_norm"]))
             critic_optimizer.step()
             aggregates["value_loss"].append(float(value_loss.detach()))

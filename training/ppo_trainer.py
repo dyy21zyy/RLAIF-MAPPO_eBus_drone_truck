@@ -21,6 +21,7 @@ from training.assignment_ppo import AssignmentActorCritic
 from training.bus_baseline_policy import BusBaselinePolicy, build_bus_baseline_policy
 from training.ppo_buffer import AssignmentTransition, PPOBuffer
 from training.reward_model_wrapper import RewardModelWrapper
+from envs.status import is_delivered_status
 
 METRIC_FIELDS = (
     "episode_reward", "episode_env_reward", "episode_rlaif_reward", "assignment_decision_count",
@@ -57,7 +58,7 @@ def _action_feature_vector(env: DynamicDeliveryEnv, action_id: int, feasible: bo
 
 
 def _episode_metrics(env: DynamicDeliveryEnv, counts: dict[str, int]) -> dict[str, float | int]:
-    delivered = [parcel for parcel in env.parcels.values() if parcel.status == "delivered"]
+    delivered = [parcel for parcel in env.parcels.values() if is_delivered_status(parcel.status)]
     lateness = [max(0.0, float(parcel.delivered_time_min) - parcel.deadline_min) for parcel in delivered]
     return {
         "delivered_parcels": len(delivered),

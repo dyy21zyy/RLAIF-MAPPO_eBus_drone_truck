@@ -84,8 +84,9 @@ class RewardLedger:
         canonical = LEGACY_COMPONENT_MAP.get(component, component)
         raw = max(0.0, float(raw_amount))
         scale = max(abs(float(reference_scale)), 1e-9)
-        weighted = raw * float(weight)
-        self.add(RewardEntry(event_time, canonical, raw, raw / scale, weighted,
+        normalized = raw / scale
+        weighted = normalized * float(weight)
+        self.add(RewardEntry(event_time, canonical, raw, normalized, weighted,
                              tuple(entity_ids), tuple(parcel_ids), tuple(source_transition_ids),
                              tuple(decision_chain_refs), provenance))
         return -weighted
