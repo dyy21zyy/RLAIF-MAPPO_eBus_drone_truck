@@ -1,0 +1,122 @@
+scenario:
+  size: medium
+  num_parcels: 60
+network:
+  num_stops: 30
+  adjacent_stop_distance_km: 1.0
+  integrated_station_stop_indices:
+  - 1
+  - 5
+  - 9
+  - 13
+  - 17
+  - 21
+  - 25
+  - 29
+  num_integrated_stations: 8
+time:
+  bus_operation_horizon_min: 360
+  delivery_evaluation_horizon_min: 480
+bus_schedule:
+  planned_headway_min: 10
+  scheduled_trip_count: 36
+  freight_trip_count: 12
+  minimum_layover_min: 10
+  relocation_time_min: 30
+bus:
+  passenger_capacity: 80
+  battery_capacity_kwh: 160.0
+  minimum_safe_energy_kwh: 40.0
+  initial_energy_fraction_min: 0.55
+  initial_energy_fraction_max: 0.85
+  energy_consumption_kwh_per_km: 1.6
+  nominal_speed_kmph: 30.0
+  freight_capacity_kg: 20.0
+  single_station_unloading_capacity_kg: 10.0
+  unloading_time_sec_per_kg: 6.0
+  charging_actions_sec:
+  - 0
+  - 15
+  - 30
+  - 45
+  - 60
+  - 75
+  - 90
+  - 105
+  - 120
+  charging_power_kw: 500.0
+  charging_efficiency: 0.95
+  chargers_per_station: 2
+  wait_for_charger: false
+passenger:
+  process: time_dependent_poisson
+  baseline_rate_mean_per_min: 0.25
+  baseline_rate_std_per_min: 0.1
+  baseline_rate_min_per_min: 0.05
+  baseline_rate_max_per_min: 0.6
+  demand_intensity: 1.0
+  alighting_probability_min: 0.05
+  alighting_probability_max: 0.25
+  boarding_time_sec_per_passenger: 3.0
+  alighting_time_sec_per_passenger: 1.5
+  allow_arrivals_during_dwell: true
+parcel:
+  customer_service_area_length_km: 30.0
+  customer_service_area_width_km: 12.0
+  weight_values_kg:
+  - 0.5
+  - 1.0
+  - 1.5
+  - 2.0
+  - 2.5
+  - 3.0
+  - 3.5
+  - 4.0
+  - 4.5
+  volume_min_m3: 0.001
+  volume_max_m3: 0.05
+  tight_ratio: 0.3
+  moderate_ratio: 0.5
+  loose_ratio: 0.2
+  tight_slack_min:
+  - 20
+  - 40
+  moderate_slack_min:
+  - 40
+  - 80
+  loose_slack_min:
+  - 80
+  - 140
+truck:
+  num_trucks: 1
+  weight_capacity_kg: 100.0
+  volume_capacity_m3: 1.0
+  speed_kmph: 25.0
+  max_batch_size: 10
+  max_batch_candidates: 12
+  return_to_depot: true
+  loading_time_min: 0.0
+  unloading_time_min: 0.0
+  cost_per_km: 0.0
+drone:
+  drones_per_station: 3
+  payload_capacity_kg: 5.0
+  service_radius_one_way_km: 8.0
+  speed_kmph: 40.0
+  maximum_round_trip_duration_min: 120.0
+  customer_service_time_min: 1.0
+  turnaround_time_min: 1.0
+drone_battery:
+  initial_full_batteries: 6
+  initial_depleted_batteries: 0
+  charging_power_kw: 2.0
+  charging_duration_min: 45.0
+  charging_slots: 6
+  charging_is_non_preemptive: true
+  charging_start_is_learned: true
+station:
+  locker_capacity_kg: 30.0
+  power_capacity_kw: 1100.0
+  base_load_min_kw: 80.0
+  base_load_max_kw: 180.0
+  power_capacity_is_hard: false

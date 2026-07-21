@@ -288,3 +288,9 @@ Outputs live under the configured `results/` directory and are ignored by Git. M
 For the paper “Preference-Aligned Multi-Agent Reinforcement Learning for Dynamic Truck--Electric-Bus--Drone Parcel Delivery”, use `configs/train_mappo_async.yaml` as the official MAPPO config and follow `docs/EXPERIMENT_GUIDE.md`. The old `configs/train_mappo.yaml` is deprecated.
 
 Current RLAIF support is assignment-agent-only: AI preferences train a reward model for assignment choices, while truck, bus, and station rewards remain pure environment rewards. API calls are used only offline to generate preference data via `RLAIF_API_KEY`, `RLAIF_API_BASE_URL`, and `RLAIF_MODEL_NAME`; MAPPO training does not call an API in real time. The station agent action space is `dispatch_drone` or `idle`; battery recharging is an environment dynamic after drone dispatch/return, not a learned station action.
+
+## Phase 0 paper contract and parameter schema
+
+The formal Phase 0 paper-code contract is documented in `docs/paper_code_alignment/final_dynamic_contract.md`. The repository now includes schema-level entities, event types, and validators for the target dynamic multi-agent architecture, but later-phase capabilities remain **specified** rather than implemented: truck batching, physical-bus circulation, passenger dynamics, station battery decisions, and multi-agent RLAIF.
+
+Formal paper configurations live in `configs/paper/`: `base_small.yaml`, `base_medium.yaml`, `base_large.yaml`, `train_mappo_env.yaml`, and `train_mappo_rlaif.yaml`. The legacy 20-episode MAPPO config is smoke-only and should not be used as the formal paper training configuration.

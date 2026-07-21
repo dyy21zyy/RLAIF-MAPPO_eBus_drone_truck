@@ -61,3 +61,9 @@ Source labels:
 | Truck costs/times | documented defaults | explicit_new_truck_extension | n/a | Configurable; not claimed as previous-paper values. |
 | OSM network | optional | real_osm_or_geo_data | n/a | Formal research data do not depend on OSM; haversine/fallback remains available for tests. |
 | Smoke transit fixtures | tiny committed CSVs under `tests/fixtures/transit` | fallback_test_only | n/a | Used only by tests and smoke commands; not research data. |
+
+## Phase 0 formal parameter provenance
+
+Formal paper parameters are defined in `configs/paper/base_small.yaml`, `configs/paper/base_medium.yaml`, and `configs/paper/base_large.yaml`. Each medium-instance parameter has provenance in `configs/paper/parameter_provenance.yaml` and is classified as `literature_adapted`, `project_extension`, `real_input`, `fallback_only`, or `derived`.
+
+Project-extension and fallback-only parameters must not be described as real data. Truck count, truck capacities, parcel volume distribution, minimum layover, non-service relocation time, truck costs, truck loading time, and truck unloading time are currently project extensions.

@@ -1,3 +1,4 @@
+# Smoke-only legacy MAPPO placeholder; formal configs live in configs/paper/train_mappo_env.yaml and train_mappo_rlaif.yaml.
 # Deprecated: use configs/train_mappo_async.yaml and experiments/train_mappo_async.py for official four-agent event-driven MAPPO training.
 # This file is retained only for backward compatibility with old Stage 1 notes.
 deprecated: true
