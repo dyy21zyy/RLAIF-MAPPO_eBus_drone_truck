@@ -59,6 +59,7 @@ def synthesize_timetable(stops: list[dict[str, Any]], config: dict[str, Any], ou
                                "stop_sequence": int(stop["stop_sequence"]), "arrival_time": round(clock, 6),
                                "departure_time": round(clock, 6), "freight_allowed": trip["freight_allowed"]})
             previous = stop
+    # Phase 3 circulation derives nominal one-way line time from these stop times.
     timetable = {"route_id": stops[0]["route_id"], "time_unit": "minutes_after_midnight", "trips": trips, "stop_times": stop_times}
     write_csv(output_dir / "bus_trips.csv", trips, ["trip_id", "route_id", "start_time", "freight_allowed"])
     write_csv(output_dir / "bus_stop_times.csv", stop_times, ["trip_id", "stop_id", "stop_sequence", "arrival_time", "departure_time", "freight_allowed"])

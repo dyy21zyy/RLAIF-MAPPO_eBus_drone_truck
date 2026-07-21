@@ -87,3 +87,9 @@ plus independent round-trip mission duration and payload checks.  Deadline
 creation uses nominal earliest feasible TD/TLD/TBD completion estimates before
 sampling tight/moderate/loose slack; these estimates are generation-only and do
 not define an offline assignment plan.
+
+## Phase 3 circulation artifacts
+
+The data pipeline emits `physical_buses.csv`, `trip_to_bus.csv`, and `bus_circulation.json`. The circulation builder derives nominal one-way line time from `bus_stop_times.csv`, uses configured headway from the bus schedule/bus section, and applies project-extension defaults for non-service relocation and minimum layover when source data are absent.
+
+Initial physical-bus locations follow the nominal circulation first origin for each assigned bus. This is deterministic and documented as `nominal_circulation_first_origin`; the all-terminal behavior is reserved for fallback-only manifests that lack circulation artifacts.
