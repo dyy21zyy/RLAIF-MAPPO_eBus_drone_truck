@@ -1,4 +1,4 @@
-"""Evaluate deterministic Stage 7 asynchronous MAPPO policies."""
+"""Evaluate deterministic Phase 7 environment-reward-only asynchronous MAPPO policies."""
 from __future__ import annotations
 import argparse
 from pathlib import Path

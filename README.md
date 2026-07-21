@@ -328,3 +328,7 @@ overcharge masking, and passenger-aware delay propagation on physical buses.
 ### Phase 6: learned station dispatch and energy control
 
 Station agents now choose bounded joint actions that can dispatch multiple explicit drones and start selected depleted batteries charging.  Drone batteries are no longer automatically recharged when a drone returns; a depleted battery begins its non-preemptive 45-minute, 2 kW charging job only when selected by a station action, subject to six simultaneous charging slots.  Station observations include parcel queue/deadline information, drone and battery inventory, charging-slot availability, locker load/capacity, active bus chargers, base load, power margin, and projected drone/charge completions.  Power overload remains a soft cost signal rather than an action mask.
+
+### Phase 7 asynchronous MAPPO
+
+The Phase 7 trainer is a four-agent asynchronous MAPPO implementation trained only on environment reward. It registers independent candidate-scoring actor heads for assignment, truck, bus, and station decisions, uses a fixed-dimensional pooled entity critic, stores schema versions in checkpoints, and defers all RLAIF reward integration to Phase 8.

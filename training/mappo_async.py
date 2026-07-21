@@ -6,6 +6,10 @@ from typing import Any, Sequence
 
 from training.reward_model_wrapper import RewardModelWrapper
 
+EVENT_SCHEMA_VERSION = 1
+OBSERVATION_SCHEMA_VERSION = 3
+CANDIDATE_SCHEMA_VERSION = 2
+
 ASSIGNMENT_AGENT = "assignment"
 TRUCK_AGENT = "truck"
 BUS_AGENT = "bus"
@@ -13,10 +17,11 @@ STATION_AGENT = "station"
 VALID_AGENT_EVENTS = {
     ASSIGNMENT_AGENT: {"PARCEL_RELEASE"},
     TRUCK_AGENT: {"TRUCK_AVAILABLE"},
-    BUS_AGENT: {"BUS_DEPARTURE", "BUS_ARRIVAL"},
+    BUS_AGENT: {"BUS_TERMINAL_DEPARTURE", "BUS_STATION_ARRIVAL", "BUS_DEPARTURE", "BUS_ARRIVAL"},
     STATION_AGENT: {"STATION_OPERATION"},
 }
-RLAIF_AGENT_TYPES = {ASSIGNMENT_AGENT}
+CANONICAL_EVENT_MAP = {"BUS_DEPARTURE": "BUS_TERMINAL_DEPARTURE", "BUS_ARRIVAL": "BUS_STATION_ARRIVAL"}
+RLAIF_AGENT_TYPES = {ASSIGNMENT_AGENT}  # Trainer disables lambda in Phase 7; helper remains backward compatible.
 
 
 def validate_decision(agent_id: str, event_type: str) -> None:

@@ -207,3 +207,11 @@ Battery transitions are controlled by dynamics: dispatch changes `FULL -> IN_USE
 Candidate generation is bounded rather than exhaustive.  The generator always includes idle/no-op and combines heuristic dispatch patterns (earliest-deadline, highest-priority, shortest-mission, minimum-lateness, maximum-cardinality, battery-conservative, and future-capacity-preserving) with a small charging menu (zero, one, fill slots, or reserve-target starts).  Candidates expose dispatch triples, charging battery IDs, estimated delivery/return/lateness, remaining full/depleted batteries, remaining drones, charging-slot use, projected load, projected overload, power margin, expected overload duration, feasibility reasons, heuristic source, and idle flag.
 
 Station power is a soft constraint.  Projected and actual load include station base load, active pantograph bus charging load, and active drone-battery charging load.  Capacity defaults to 1100 kW and overload is exposed and penalized in kW-min rather than hard-masked.
+
+## Phase 7 four-agent asynchronous MAPPO
+
+Phase 7 uses environment reward only. Exactly one active actor creates a transition at each decision epoch: `PARCEL_RELEASE -> assignment`, `TRUCK_AVAILABLE -> truck`, `BUS_TERMINAL_DEPARTURE -> bus`, `BUS_STATION_ARRIVAL -> bus`, and `STATION_OPERATION -> station`. Automatic events create no dummy inactive-agent transitions. Bus loading and bus charging are represented by distinct explicit event embeddings rather than zero padding.
+
+Rewards are recorded in `envs.reward_ledger.RewardLedger` with typed component entries, raw/normalized/weighted amounts, entity/parcel identifiers, source transition IDs, decision-chain references, and provenance. Residual terminal undelivered cost uses documented `terminal_team_distribution` provenance and parcel decision-chain references rather than assigning the whole cost only to the last acting agent.
+
+Event-time GAE uses `gamma_event = gamma ** (elapsed_time / reference_time)` with `gamma=0.997`, `reference_time=1 minute`, and `gae_lambda=0.95`. Advantages are normalized separately within each agent type before PPO updates.

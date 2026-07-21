@@ -64,9 +64,10 @@ class AsyncMAPPOBuffer:
 
     def compute_returns_and_advantages(
         self,
-        gamma: float,
-        gae_lambda: float,
+        gamma: float = 0.997,
+        gae_lambda: float = 0.95,
         reference_time_unit: float = 1.0,
+        per_agent_normalize: bool = True,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Compute GAE along the real event stream, resetting at episode boundaries."""
         count = len(self.transitions)
@@ -91,7 +92,15 @@ class AsyncMAPPOBuffer:
             gae = delta + discount * float(gae_lambda) * nonterminal * gae
             advantages[index] = gae
         self.returns = advantages + np.asarray([item.value for item in self.transitions], dtype=np.float32)
-        if count:
+        if count and per_agent_normalize:
+            normalized = advantages.copy()
+            for agent in VALID_AGENTS:
+                idx = np.asarray([i for i,t in enumerate(self.transitions) if t.agent_id == agent], dtype=int)
+                if len(idx):
+                    vals = advantages[idx]
+                    normalized[idx] = (vals - float(vals.mean())) / (float(vals.std()) + 1e-8)
+            self.advantages = normalized
+        elif count:
             mean, std = float(advantages.mean()), float(advantages.std())
             self.advantages = (advantages - mean) / (std + 1e-8)
         else:

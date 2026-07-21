@@ -17,6 +17,7 @@ from typing import Any
 import numpy as np
 
 from envs.decision_schema import DecisionSurface
+from envs.reward_ledger import RewardLedger
 from envs.state_builder import (
     build_assignment_decision_surface,
     build_bus_charging_decision_surface,
@@ -343,6 +344,10 @@ class DynamicDeliveryEnv:
         self.last_passenger_stop_result = None
         self.waiting_station_parcels: dict[str, list[str]] = {}
         self.reward_total = 0.0
+        self.reward_ledger = RewardLedger()
+        self.current_transition_id = None
+        self.transition_sequence = 0
+        self.parcel_decision_chains = {row["parcel_id"]: [] for row in self.parcel_rows}
         self.decision_counts = {"assignment": 0, "truck": 0, "bus": 0, "station": 0}
         self.infeasible_action_corrections = 0
         self.fallback_feasibility_events = 0
@@ -408,6 +413,10 @@ class DynamicDeliveryEnv:
             raise RuntimeError("No decision is pending")
         decision = self.current_decision
         self.current_decision = None
+        self.transition_sequence += 1
+        self.current_transition_id = f"{decision.agent}:{decision.event.kind}:{self.transition_sequence}"
+        if "parcel_id" in decision.event.payload:
+            self.parcel_decision_chains.setdefault(str(decision.event.payload["parcel_id"]), []).append(self.current_transition_id)
         self.decision_counts[decision.agent] += 1
         reward = 0.0
         if not isinstance(action, (int, np.integer)) or action < 0 or action >= len(decision.action_mask):
@@ -1234,9 +1243,14 @@ class DynamicDeliveryEnv:
         return 0.0
 
     def _charge_cost(self, component: str, amount: float) -> float:
-        weighted = max(0.0, amount) * float(self.config["reward"][component])
+        weight = float(self.config["reward"][component])
+        weighted = max(0.0, amount) * weight
         self.cost_components[component] += weighted
-        return -weighted
+        parcel_ids = []
+        if component == "undelivered":
+            parcel_ids = [p.parcel_id for p in self.parcels.values() if p.status != "DELIVERED"]
+        chains = [ref for pid in parcel_ids for ref in self.parcel_decision_chains.get(pid, [])]
+        return self.reward_ledger.add_cost(event_time=self.now_min, component=component, raw_amount=amount, weight=weight, parcel_ids=parcel_ids, source_transition_ids=([self.current_transition_id] if self.current_transition_id else []), decision_chain_refs=chains, provenance=("terminal_team_distribution" if component == "undelivered" else "environment"))
 
     def _finish_episode(self) -> float:
         if self.terminated:
@@ -1324,6 +1338,10 @@ class DynamicDeliveryEnv:
             float(self.terminated), float(self.truncated),
         ]
 
+    def get_entity_critic_state(self) -> list[float]:
+        from training.entity_encoders import encode_entity_critic_state
+        return encode_entity_critic_state(self)
+
     def _info(self, step_reward: float) -> dict[str, Any]:
         delivered = sum(parcel.status == "DELIVERED" for parcel in self.parcels.values())
         drone_deliveries = sum(
@@ -1361,6 +1379,7 @@ class DynamicDeliveryEnv:
             "episode_reward": self.reward_total,
             "reward_components": {name: -value for name, value in self.cost_components.items()},
             "cost_components": dict(self.cost_components),
+            "reward_ledger": self.reward_ledger.to_dict(),
             "metrics": metrics,
             "delivered_parcels": delivered,
             "total_parcels": len(self.parcels),

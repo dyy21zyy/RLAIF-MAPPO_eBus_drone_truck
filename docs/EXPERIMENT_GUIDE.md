@@ -71,3 +71,7 @@ python -m experiments.evaluate_mappo_async --config configs/train_mappo_async.ya
 python -m experiments.run_ablation --config configs/ablation.yaml
 python -m experiments.run_sensitivity --config configs/sensitivity.yaml
 ```
+
+## Phase 7 MAPPO reward-scale artifact
+
+Before full environment-only MAPPO training, run `python -m experiments.estimate_reward_reference_scales --config configs/shanghai_small.yaml`. The command collects seeded preliminary policy rollouts, estimates robust nonzero component scales, stores project-specific component names, and writes a frozen versioned JSON artifact for training/checkpoint provenance.
