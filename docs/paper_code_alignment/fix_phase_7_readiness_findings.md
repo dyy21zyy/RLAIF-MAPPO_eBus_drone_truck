@@ -1,0 +1,15 @@
+# Fix Phase 7 Readiness Findings
+
+Starting main SHA: `5b05de8`.
+
+| file | function | current behavior | required behavior | test or pilot assertion |
+|---|---|---|---|---|
+| `envs/tracing/bus_trace.py` | bus stop trace writers | Runtime traces existed but no final cross-file readiness gate consumed ordinary/integrated stop evidence. | Validate causal stop-by-stop rows, ordinary stops, integrated stations, SoC continuity, trip delay propagation, and layover. | `tests/test_readiness_pilot_bus_trace.py` and `event_chain_validation.json`. |
+| `envs/dynamics/passenger_dynamics.py` | passenger delay accounting | Passenger counters needed an independent final readiness reconciliation artifact. | Reconcile waiting increments and onboard additional-delay components exactly. | `tests/test_readiness_pilot_passenger_reconciliation.py` and `passenger_reconciliation.json`. |
+| `envs/dynamics/station_power.py` | station power integration | Power metrics needed exact trace-based integration verification. | Recompute component load totals, peak, overload kW-min/duration, and kWh conversion from trace rows. | `tests/test_readiness_pilot_power_reconciliation.py` and `station_power_reconciliation.json`. |
+| `envs/reward_ledger.py` | reward ledger totals | Formal gate did not emit a per-component normalized ledger reconciliation report for a pilot run. | Compare raw totals, reference scales, normalized costs, weights, weighted costs, and episode reward. | `tests/test_readiness_pilot_reward_reconciliation.py` and `reward_reconciliation.json`. |
+| `evaluation/formal_metric_validation.py` | formal metrics | Required paper metrics needed explicit source availability and cross-check evidence in the pilot output. | Emit `metric_source_report.json` with finite/source/formula/evidence fields and cross-checks. | `tests/test_readiness_pilot_metric_sources.py`. |
+| `training/mappo_trainer.py` | MAPPO update diagnostics | Existing smoke tests did not produce one concise per-agent update-evidence artifact for the final gate. | Record transition counts, event counts, gradients, changed parameters, finite losses, finite advantages/returns, and clipping. | `tests/test_readiness_pilot_mappo_update.py`. |
+| `training/mappo_networks.py` | bus event embeddings | Both bus decision-event rows needed final evidence in one report. | Record bus terminal/station embedding gradients and deltas. | `tests/test_readiness_pilot_bus_event_embeddings.py`. |
+| `training/mappo_checkpoint.py` | checkpoint metadata | Final gate needed deterministic action/value round-trip evidence from diagnostic observations. | Save and load diagnostic policy metadata and compare selected action, logits, and value. | `tests/test_readiness_pilot_checkpoint_roundtrip.py`. |
+| `rlaif/reward_registry.py` | formal reward loading | Readiness must fail closed when formal reward checkpoints are missing/invalid and must not use smoke artifacts. | Report RLAIF as blocked while allowing environment-MAPPO pilot execution. | `tests/test_readiness_pilot_rlaif_gate.py` and `formal_readiness_report.json`. |
