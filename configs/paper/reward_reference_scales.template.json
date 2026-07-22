@@ -1,0 +1,17 @@
+{
+  "artifact_version": 1,
+  "artifact_hash": "REPLACE_AFTER_ESTIMATION",
+  "scales": {
+    "passenger_delay": null,
+    "bus_operating_delay": null,
+    "parcel_lateness": null,
+    "energy_cost": null,
+    "power_overload": null,
+    "bus_battery_violation": null,
+    "locker_overflow": null,
+    "truck_cost": null,
+    "undelivered": null,
+    "battery_shortage": null,
+    "infeasible_action": null
+  }
+}

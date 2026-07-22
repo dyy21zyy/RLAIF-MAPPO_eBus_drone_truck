@@ -101,3 +101,9 @@ This infrastructure does not claim that the final 100-scenario, three-seed paper
 ## Fix Phase 7 readiness note
 
 Status: pilot-validated for the diagnostic readiness pilot; blocked for formal RLAIF until all four final formal reward checkpoints and manifests validate. Diagnostic and smoke artifacts are not experiment-validated formal artifacts.
+
+## Step 8a Validation Status
+
+This step corrects environment semantics and formal configuration gates only. It
+must not be interpreted as final formal-training readiness: final reward-scale
+estimation and a real end-to-end readiness pilot remain later-step work.

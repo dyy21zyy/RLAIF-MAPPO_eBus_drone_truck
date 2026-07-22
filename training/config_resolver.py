@@ -1,11 +1,117 @@
 from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
+import hashlib, json
 from typing import Any
 import math
 
 class TrainingConfigError(ValueError):
     """Raised when a MAPPO training configuration is incomplete or inconsistent."""
+
+
+PLACEHOLDER_HASHES = {"", "tbd", "unknown", "placeholder", "freeze-after-estimation", "replace_after_estimation", "replace-after-estimation", "null", "none"}
+
+
+def _invalid(classification: str, field: str, actual: Any, required: Any) -> TrainingConfigError:
+    return TrainingConfigError(
+        f"run classification={classification} invalid field={field} actual value={actual!r} required value={required!r}"
+    )
+
+
+def _is_placeholder(value: Any) -> bool:
+    return value is None or str(value).strip().lower() in PLACEHOLDER_HASHES or "placeholder" in str(value).strip().lower()
+
+
+def _canonical_json_hash(path: Path) -> str:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    clean = dict(payload); clean.pop("artifact_hash", None)
+    return hashlib.sha256(json.dumps(clean, sort_keys=True).encode()).hexdigest()
+
+
+def _load_env_config(config: dict[str, Any]) -> dict[str, Any]:
+    env_path = config.get("env", {}).get("config_path")
+    if not env_path:
+        return {}
+    try:
+        import yaml
+        return yaml.safe_load(Path(env_path).read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        return {}
+
+
+def validate_run_classification(config: dict[str, Any], *, config_only: bool = False) -> None:
+    classification = str(config.get("run_classification", "formal" if "paper" in str(config.get("env", {}).get("config_path", "")) else "smoke")).lower()
+    if classification not in {"formal", "smoke", "diagnostic"}:
+        raise _invalid(classification, "run_classification", classification, "formal|smoke|diagnostic")
+    env = config.get("env", {})
+    fallback_present = "fallback" in env
+    fallback = bool(env.get("fallback", False))
+    if classification == "formal" and fallback:
+        raise _invalid(classification, "env.fallback", fallback, False)
+    if classification in {"smoke", "diagnostic"} and fallback and not fallback_present:
+        raise _invalid(classification, "env.fallback", "implicit", "explicit true/false")
+    rlaif = config.get("rlaif", {})
+    if classification == "formal" and bool(rlaif.get("fallback_to_env_reward", False)):
+        raise _invalid(classification, "rlaif.fallback_to_env_reward", True, False)
+    reward = config.get("reward", {})
+    if reward.get("apply_reference_scales", False):
+        path = reward.get("scale_artifact")
+        expected = reward.get("scale_artifact_hash")
+        if _is_placeholder(path):
+            raise _invalid(classification, "reward.scale_artifact", path, "nonempty artifact path")
+        if _is_placeholder(expected):
+            raise _invalid(classification, "reward.scale_artifact_hash", expected, "non-placeholder hash")
+        if not config_only:
+            p = Path(str(path))
+            if not p.exists():
+                raise _invalid(classification, "reward.scale_artifact", str(p), "existing artifact file")
+            actual = _canonical_json_hash(p)
+            if str(expected) != actual:
+                raise _invalid(classification, "reward.scale_artifact_hash", expected, f"matching artifact hash {actual}")
+    env_cfg = _load_env_config(config)
+    truck = dict(env_cfg.get("truck", {})); truck.update(config.get("truck", {}))
+    reward_truck_weight = float(reward.get("truck_cost", 0.0) or 0.0)
+    coeffs = [float(truck.get(k, 0.0) or 0.0) for k in ("fixed_dispatch_cost", "cost_per_km", "cost_per_min")]
+    if classification == "formal" and reward_truck_weight > 0 and not any(c > 0 for c in coeffs):
+        raise TrainingConfigError("Formal configuration assigns positive weight to truck_cost, but every truck cost coefficient is zero. Provide cost coefficients or set truck_cost weight to zero.")
+
+
+def resolved_environment_parameter_report(config: dict[str, Any]) -> dict[str, Any]:
+    env_cfg = _load_env_config(config)
+    reward = config.get("reward", {})
+    truck = env_cfg.get("truck", {})
+    bus = env_cfg.get("bus", {})
+    drone = env_cfg.get("drone", env_cfg.get("network", {}))
+    battery = env_cfg.get("drone_battery", env_cfg.get("station", {}))
+    station = env_cfg.get("station", {})
+    return {
+        "run_classification": config.get("run_classification"),
+        "fallback": config.get("env", {}).get("fallback"),
+        "bus_horizons": {"operation_horizon_min": env_cfg.get("time", {}).get("bus_operation_horizon_min") or bus.get("operation_horizon_min")},
+        "bus_charging_power_kw": bus.get("charging_power_kw"),
+        "drone_payload": drone.get("payload_capacity_kg") or env_cfg.get("network", {}).get("drone_payload_kg"),
+        "drone_radius": drone.get("service_radius_one_way_km") or env_cfg.get("network", {}).get("drone_radius_km"),
+        "drone_speed": drone.get("speed_kmph") or env_cfg.get("network", {}).get("drone_speed_kmph"),
+        "maximum_drone_round_trip": drone.get("maximum_round_trip_duration_min") or env_cfg.get("network", {}).get("max_drone_round_trip_min"),
+        "battery_charging_power": battery.get("charging_power_kw") or station.get("battery_charging_power_kw"),
+        "battery_charging_duration": battery.get("charging_duration_min") or station.get("battery_charging_duration_min"),
+        "station_capacity": station.get("power_capacity_kw"),
+        "station_charging_slots": battery.get("charging_slots") or station.get("charging_slots"),
+        "truck_cost_coefficients": {k: truck.get(k, 0.0) for k in ("fixed_dispatch_cost", "cost_per_km", "cost_per_min")},
+        "reward_weights": reward,
+        "reward_scale_artifact": reward.get("scale_artifact"),
+        "reward_scale_artifact_hash": reward.get("scale_artifact_hash"),
+        "parameter_sources": "runtime entity > resolved scenario config > explicit smoke/diagnostic fallback",
+        "station_load_source": "station_base_load_profile",
+        "drone_parameter_source": "resolved scenario config",
+    }
+
+
+def write_resolved_environment_parameter_report(config: dict[str, Any]) -> Path:
+    out = Path(config.get("output", {}).get("output_root", ".")) / "resolved_environment_parameters.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(resolved_environment_parameter_report(config), indent=2, sort_keys=True), encoding="utf-8")
+    return out
 
 REWARD_COMPONENTS = ["passenger_delay","bus_operating_delay","parcel_lateness","energy_cost","power_overload","bus_battery_violation","locker_overflow","truck_cost","undelivered","battery_shortage","infeasible_action"]
 
@@ -80,9 +186,13 @@ def resolve_mappo_training_config(config: dict[str, Any], *, seed_override: int 
     out["eval_path"] = path_for("eval_name_template","eval_path")
     out["resolved_config_path"] = path_for("resolved_config_name_template","resolved_config_path")
     if "reward" in cfg: validate_nonzero_formal_reward(cfg)
-    return {"mode": mode, "env": {"config_path": str(_need(env,"config_path")), "fallback": bool(env.get("fallback", False))}, "training": tr, "networks": net, "rlaif": rlaif, "output": out, "reward": cfg.get("reward", {})}
+    resolved={"run_classification": cfg.get("run_classification", "formal" if "paper" in str(env.get("config_path", "")) else "smoke"), "mode": mode, "env": {"config_path": str(_need(env,"config_path")), "fallback": bool(env.get("fallback", False))}, "training": tr, "networks": net, "rlaif": rlaif, "output": out, "reward": cfg.get("reward", {})}
+    validate_run_classification(resolved, config_only=True)
+    return resolved
 
 def validate_reward_artifacts(config: dict[str, Any], *, config_only: bool) -> None:
+    validate_run_classification(config, config_only=config_only)
+    write_resolved_environment_parameter_report(config)
     if config_only: return
     r=config.get("rlaif", {})
     if r.get("enabled"):

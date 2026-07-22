@@ -31,6 +31,8 @@ from utils.config import load_config
 from envs.dynamics.bus_circulation import RuntimePhysicalBus, assert_no_overlaps
 from envs.dynamics.passenger_dynamics import PassengerArrivalEvent, PassengerArrivalIndex, PassengerStopRuntimeState, PassengerSystemRuntime, add_onboard_extra_delay, process_bus_stop
 from envs.dynamics.station_power import StationBaseLoadInterval, StationBaseLoadProfile
+from envs.runtime_parameters import current_station_base_load_kw
+from envs.event_types import EVENT_PRIORITY
 from envs.action_generators.bus_loading_actions import generate_bus_loading_candidates
 from envs.action_generators.bus_charging_actions import generate_bus_charging_candidates, energy_added_kwh
 from envs.action_generators.station_actions import generate_station_operation_candidates
@@ -39,30 +41,6 @@ from envs.dynamics.bus_event_chain import BUS_TRIP_START, BUS_ARRIVE_STOP, BUS_D
 from envs.tracing.bus_trace import BusStopTraceRow, BusTraceCollector
 
 EPSILON = 1e-9
-EVENT_PRIORITY = {
-    "battery_ready": 0,
-    "drone_return": 1,
-    "station_operation": 2,
-    "drone_dispatch": 3,
-    "parcel_delivery": 4,
-    "parcel_bus_terminal_arrival": 5,
-    "parcel_station_arrival": 6,
-    BUS_ARRIVE_STOP: 7,
-    "bus_arrival": 7,
-    BUS_TRIP_START: 11,
-    BUS_DEPART_STOP: 8,
-    BUS_TRIP_COMPLETE: 8,
-    BUS_RELOCATION_COMPLETE: 8,
-    "bus_departure": 8,
-    "truck_departure": 6,
-    "truck_arrive_stop": 6,
-    "truck_unload": 6,
-    "truck_route_complete": 6,
-    "truck_available": 9,
-    "parcel_release": 10,
-}
-
-
 class InstanceValidationError(ValueError):
     """Raised when a Stage 2 instance cannot safely initialize Stage 3."""
 
@@ -440,14 +418,10 @@ class DynamicDeliveryEnv:
         for parcel in self.parcels.values():
             self._push(parcel.release_time_min, "parcel_release", {"parcel_id": parcel.parcel_id})
         operation_horizon = float(self.config["bus"].get("operation_horizon_min", 360.0))
-        first_parcel_release = min((p.release_time_min for p in self.parcels.values()), default=float("inf"))
         for trip_id, rows in self.trip_stop_times.items():
             scheduled_departure = float(rows[0]["departure_time"])
             if scheduled_departure < operation_horizon - EPSILON:
-                start_event_time = scheduled_departure
-                if first_parcel_release < operation_horizon - EPSILON and scheduled_departure <= first_parcel_release + EPSILON:
-                    start_event_time = first_parcel_release + EPSILON
-                self._push_bus_event(start_event_time, BUS_TRIP_START, {"trip_id": trip_id, "physical_bus_id": self.trip_to_bus.get(trip_id)})
+                self._push_bus_event(scheduled_departure, BUS_TRIP_START, {"trip_id": trip_id, "physical_bus_id": self.trip_to_bus.get(trip_id)})
         self._initialised = True
         reward = self._advance()
         self.reward_total += reward
@@ -942,12 +916,7 @@ class DynamicDeliveryEnv:
             start <= time_min + EPSILON and end > time_min + EPSILON
             for start, end in station.active_battery_charges
         )
-        base_profile = self.station_base_load_profile.load_at(station.station_id, time_min)
-        config_base = float(self.config["station"].get("base_load_kw", base_profile))
-        # Preserve legacy unit tests that deliberately set capacity relative to
-        # the configured constant base load while runtime artifacts may carry a
-        # time-varying profile. Normal operation uses the profile.
-        base = config_base if abs(station.power_capacity_kw - (config_base + 20.0)) <= EPSILON else base_profile
+        base = current_station_base_load_kw(self, station.station_id, time_min)
         return (
             base
             + bus_charges * float(self.config["bus"]["charging_power_kw"])

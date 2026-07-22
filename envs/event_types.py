@@ -28,3 +28,30 @@ class EventType(str, Enum):
     STATION_OPERATION = "STATION_OPERATION"
     DRONE_AVAILABLE = "DRONE_AVAILABLE"
     BATTERY_CHARGING_COMPLETE = "BATTERY_CHARGING_COMPLETE"
+
+
+# Canonical same-time event ordering. Lower numbers process first; the event
+# heap then uses the stable sequence ID to make ties deterministic without
+# mutating physical timestamps.
+EVENT_PRIORITY = {
+    "battery_ready": 0,
+    "drone_return": 1,
+    "station_operation": 2,
+    "drone_dispatch": 3,
+    "parcel_delivery": 4,
+    "parcel_bus_terminal_arrival": 5,
+    "parcel_station_arrival": 6,
+    "truck_departure": 6,
+    "truck_arrive_stop": 6,
+    "truck_unload": 6,
+    "truck_route_complete": 6,
+    "bus_arrive_stop": 7,
+    "bus_depart_stop": 8,
+    "bus_trip_complete": 8,
+    "BUS_RELOCATION_COMPLETE": 8,
+    "bus_relocation_complete": 8,
+    "bus_departure": 8,
+    "truck_available": 9,
+    "parcel_release": 10,
+    "bus_trip_start": 11,
+}

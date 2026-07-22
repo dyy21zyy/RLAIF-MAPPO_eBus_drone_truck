@@ -223,3 +223,14 @@ Bus service now uses automatic `bus_trip_start`, `bus_arrive_stop`, `bus_depart_
 Every scheduled passenger trip with scheduled departure strictly before the 360-minute bus-operation horizon is introduced. Trips scheduled at minute 360 or later are not introduced, but already-running buses and delivery processes continue to the 480-minute delivery horizon. Freight eligibility controls only terminal parcel-loading decisions; non-freight trips still operate stop by stop and may expose integrated-station charging decisions. Physical buses own SoC, location, passengers, onboard parcels, delay, relocation, layover and next availability. Trip-keyed bus dictionaries remain compatibility/reporting views derived during runtime updates.
 
 Ordinary stops process passenger alighting and boarding without bus-agent decisions. Integrated stations process passengers, unload only freight for that target station, expose charging, apply charging energy, then schedule downstream travel. Final route stops clear remaining passengers before trip completion. Complete bus depletion is recorded as a severe bus-depletion invariant warning and prevents silent negative-SoC continuation by clamping the runtime SoC at epsilon for diagnostics.
+
+## Canonical Same-Time Event Ordering
+
+Events are ordered by physical event time, then by the canonical priority table in
+`envs.event_types.EVENT_PRIORITY`, then by the stable event insertion sequence ID.
+Timestamps must not be shifted merely to order simultaneous events. The current
+same-time order is: battery-ready completions, drone returns, station-operation
+decisions, drone dispatches, parcel deliveries, parcel station/bus arrivals and
+truck automatic events, bus stop arrivals, bus stop departures/trip completions,
+truck availability, parcel releases, and bus trip starts. Sequence ID is used only
+to break ties within the same event kind and priority.

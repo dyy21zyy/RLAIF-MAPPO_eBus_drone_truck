@@ -1,3 +1,4 @@
+run_classification: formal
 bus:
   battery_capacity_kwh: 160.0
   chargers_per_station: 2
@@ -145,10 +146,10 @@ reward:
   power_overload: 1.0
   bus_battery_violation: 5.0
   locker_overflow: 1.0
-  truck_cost: 1.0
+  truck_cost: 0.0
   undelivered: 10.0
   battery_shortage: 1.0
   infeasible_action: 5.0
   apply_reference_scales: true
   scale_artifact: outputs/reward_reference_scales_v1.json
-  scale_artifact_hash: null
+  scale_artifact_hash: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

@@ -1,17 +1,18 @@
 """Station operation dynamics for explicit drones and batteries."""
 from __future__ import annotations
 
-from envs.action_generators.station_actions import CHARGING_DURATION_MIN, CHARGING_POWER_KW, MAX_CHARGING_SLOTS, drone_mission_times
+from envs.action_generators.station_actions import drone_mission_times
+from envs.runtime_parameters import battery_charging_duration_min, station_charging_slot_count
 
 def start_battery_charging(env, station, battery, now):
     if battery.status != "DEPLETED":
         raise ValueError("battery_not_depleted")
     active = sum(b.status == "CHARGING" for b in station.battery_states)
-    if active >= min(MAX_CHARGING_SLOTS, station.charging_slots):
+    if active >= station_charging_slot_count(env, station):
         raise ValueError("charging_slots_unavailable")
     battery.status = "CHARGING"
     battery.charge_start_time_min = now
-    battery.charge_completion_time_min = now + getattr(station, "battery_charge_duration_min", CHARGING_DURATION_MIN)
+    battery.charge_completion_time_min = now + battery_charging_duration_min(env, station)
     station.active_battery_charges.append((now, battery.charge_completion_time_min))
     env._push(battery.charge_completion_time_min, "battery_ready", {"station_id": station.station_id, "battery_id": battery.battery_id})
 

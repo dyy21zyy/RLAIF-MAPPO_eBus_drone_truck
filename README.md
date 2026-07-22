@@ -366,3 +366,10 @@ This infrastructure does not claim that the final 100-scenario, three-seed paper
 ## Fix Phase 7 readiness note
 
 Status: pilot-validated for the diagnostic readiness pilot; blocked for formal RLAIF until all four final formal reward checkpoints and manifests validate. Diagnostic and smoke artifacts are not experiment-validated formal artifacts.
+
+## Formal configuration gates
+
+Formal MAPPO configurations declare `run_classification: formal` and fail closed
+on fallback data, placeholder reward-scale hashes, and inconsistent positive
+truck-cost reward weights with zero truck cost coefficients. Smoke and diagnostic
+runs may use explicit deterministic fallback data for engineering checks.
