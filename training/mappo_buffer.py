@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 import numpy as np
+from training.event_schema import validate_agent_event, decision_event_id, normalize_decision_event_type
 
 VALID_AGENTS = {"assignment", "truck", "bus", "station"}
 
@@ -26,6 +27,14 @@ class AsyncTransition:
     next_global_state: list[float]
     event_type: str
     event_time: float
+    event_type_id: int | None = None
+    environment_reward: float = 0.0
+    learned_reward_raw: float = 0.0
+    learned_reward_normalized: float = 0.0
+    learned_reward_clipped: float = 0.0
+    learned_reward_weighted: float = 0.0
+    total_reward: float | None = None
+    used_rlaif_fallback: bool = False
     info: dict[str, Any] = field(default_factory=dict)
     episode_id: int = 0
 
@@ -44,6 +53,14 @@ class AsyncMAPPOBuffer:
     def append(self, transition: AsyncTransition) -> None:
         if transition.agent_id not in VALID_AGENTS:
             raise ValueError(f"agent_id must be one of {sorted(VALID_AGENTS)}")
+        if transition.event_type_id is None:
+            canonical = normalize_decision_event_type(transition.event_type)
+        else:
+            canonical = validate_agent_event(transition.agent_id, transition.event_type, transition.event_type_id)
+        transition.event_type = canonical
+        transition.event_type_id = decision_event_id(canonical)
+        if transition.total_reward is None:
+            transition.total_reward = float(transition.reward)
         if not transition.local_obs or not transition.global_state or not transition.next_global_state:
             raise ValueError("Transition observations and global states must be non-empty")
         if not transition.action_mask or not 0 <= transition.action < len(transition.action_mask):
@@ -55,6 +72,9 @@ class AsyncMAPPOBuffer:
         for row in transition.candidate_features:
             if len(row) != len(transition.candidate_feature_names):
                 raise ValueError("Candidate feature rows must match candidate_feature_names")
+        nums = [transition.log_prob, transition.value, transition.reward, transition.event_time, transition.environment_reward, transition.learned_reward_raw, transition.learned_reward_normalized, transition.learned_reward_clipped, transition.learned_reward_weighted, transition.total_reward]
+        if any(not np.isfinite(float(v)) for v in nums): raise ValueError("Transition numerical fields must be finite")
+        if abs(float(transition.total_reward) - (float(transition.environment_reward) + float(transition.learned_reward_weighted))) > 1e-5 and (transition.environment_reward or transition.learned_reward_weighted): raise ValueError("Transition total_reward must equal environment_reward + learned_reward_weighted")
         self.transitions.append(transition)
 
     def by_agent(self, agent_id: str) -> list[AsyncTransition]:
@@ -80,11 +100,7 @@ class AsyncMAPPOBuffer:
             same_episode = next_item is not None and next_item.episode_id == item.episode_id
             nonterminal = 0.0 if item.done else 1.0
             next_value = next_item.value if same_episode and not item.done else 0.0
-            elapsed = (
-                max(0.0, float(next_item.event_time) - float(item.event_time))
-                if same_episode
-                else time_unit
-            )
+            elapsed = float(item.info.get("delta_time_min", max(0.0, float(next_item.event_time) - float(item.event_time)) if same_episode else time_unit))
             discount = float(gamma) ** (elapsed / time_unit)
             delta = item.reward + discount * nonterminal * next_value - item.value
             if not same_episode:

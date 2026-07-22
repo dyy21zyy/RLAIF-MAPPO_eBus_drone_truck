@@ -26,6 +26,7 @@ training:
   max_grad_norm: 0.5
   event_time_reference_min: 1.0
 networks:
+  event_embedding_dim: 16
   assignment_hidden_dims:
   - 256
   - 256

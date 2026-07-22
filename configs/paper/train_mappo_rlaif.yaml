@@ -4,6 +4,7 @@ env:
   fallback: true
 mode: rlaif_reward
 networks:
+  event_embedding_dim: 16
   assignment_hidden_dims:
   - 256
   - 256
