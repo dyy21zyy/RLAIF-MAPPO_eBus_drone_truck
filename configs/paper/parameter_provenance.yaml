@@ -335,3 +335,6 @@ passenger.alighting_probability_status:
 run_classification:
   category: project_extension
   source: Formal/smoke/diagnostic gate added for Step 8a configuration validation.
+reward.expected_training_scenario_bank_hash:
+  category: formal_artifact_lineage
+  source: Step 6A reward-reference-scale training-bank lineage placeholder; replace after formal estimation.

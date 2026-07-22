@@ -1,0 +1,14 @@
+run_classification: formal
+scenario_bank:
+  split: train
+  manifest: data/scenarios/train/scenario_bank_manifest.json
+  expected_bank_hash: REPLACE_WITH_REAL_TRAIN_BANK_HASH
+reference_policies:
+  - truck_direct_reference
+  - integrated_rule_reference
+  - coverage_reference
+estimator:
+  method: percentile
+  percentile: 95
+minimum_valid_episodes: 1
+maximum_failure_fraction: 0.0

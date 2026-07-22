@@ -373,3 +373,7 @@ Formal MAPPO configurations declare `run_classification: formal` and fail closed
 on fallback data, placeholder reward-scale hashes, and inconsistent positive
 truck-cost reward weights with zero truck cost coefficients. Smoke and diagnostic
 runs may use explicit deterministic fallback data for engineering checks.
+
+### Reward reference-scale estimation
+
+Reward reference scales are estimated from frozen training scenario banks with `python -m experiments.estimate_reward_reference_scales --scenario-bank <train-bank-manifest> --config <estimation-config> --output <runtime-output-path>`. Diagnostic runs should first prepare an ignored runtime fixture with `python -m experiments.prepare_diagnostic_reward_scale_estimation --output-root results/diagnostic/reward_scales --force`. Formal training intentionally keeps `REPLACE_WITH_REAL_SCALE_HASH` and `REPLACE_WITH_REAL_TRAIN_BANK_HASH` placeholders until the user runs the final formal estimation on the final frozen training bank.

@@ -52,3 +52,7 @@ checkpoints/
 *.pkl
 *.pickle
 *.onnx
+
+# Generated reward-scale estimation artifacts
+/results/diagnostic/reward_scales/
+/outputs/reward_reference_scales*.json
