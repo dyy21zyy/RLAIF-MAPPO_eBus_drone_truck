@@ -15,3 +15,7 @@ Validation scope:
 - Artifact provenance checks.
 
 No final trained checkpoint, validated reward model, AI label-quality measurement, real-transit dataset, or large-scale experiment output is claimed here.
+
+## Fix Phase 7 readiness note
+
+Status: pilot-validated for the diagnostic readiness pilot; blocked for formal RLAIF until all four final formal reward checkpoints and manifests validate. Diagnostic and smoke artifacts are not experiment-validated formal artifacts.
