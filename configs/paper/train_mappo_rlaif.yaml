@@ -1,7 +1,8 @@
+run_classification: formal
 address: {}
 env:
   config_path: configs/paper/base_medium.yaml
-  fallback: true
+  fallback: false
 mode: rlaif_reward
 networks:
   event_embedding_dim: 16
@@ -45,8 +46,8 @@ reward:
   passenger_delay: 1.0
   power_overload: 1.0
   scale_artifact: outputs/reward_reference_scales_v1.json
-  scale_artifact_hash: null
-  truck_cost: 1.0
+  scale_artifact_hash: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  truck_cost: 0.0
   undelivered: 10.0
 rlaif:
   enabled: true

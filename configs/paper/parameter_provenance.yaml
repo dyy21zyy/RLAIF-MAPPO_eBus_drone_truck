@@ -332,3 +332,6 @@ passenger.destination_model:
 passenger.alighting_probability_status:
   category: project_extension
   source: Fix Phase 3 documents that independent alighting probabilities are superseded by explicit destinations.
+run_classification:
+  category: project_extension
+  source: Formal/smoke/diagnostic gate added for Step 8a configuration validation.

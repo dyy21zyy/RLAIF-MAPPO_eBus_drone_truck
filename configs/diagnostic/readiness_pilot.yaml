@@ -1,8 +1,8 @@
-run_classification: formal
+run_classification: diagnostic
 mode: environment_reward
 env:
   config_path: configs/paper/base_medium.yaml
-  fallback: false
+  fallback: true
 project:
   seed: 1
 address: {}
