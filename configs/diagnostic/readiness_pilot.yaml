@@ -3,6 +3,9 @@ mode: environment_reward
 env:
   config_path: configs/shanghai_small.yaml
   fallback: true
+  scenario_bank_manifest: results/diagnostic/scenarios/train/scenario_bank_manifest.json
+  expected_split: train
+  scenario_sampling_mode: shuffled_cycle
 project:
   seed: 1
 address: {}
@@ -12,8 +15,8 @@ training:
   - 1
   - 2
   - 3
-  total_episodes: 20
-  rollout_episodes: 5
+  total_episodes: 6
+  rollout_episodes: 3
   optimizer: Adam
   lr_actor: 5.0e-05
   lr_critic: 5.0e-05

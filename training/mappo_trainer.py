@@ -28,6 +28,8 @@ from training.entity_encoders import ENTITY_ENCODER_SCHEMA_VERSION
 from training.mappo_networks import EVENT_EMBEDDING_SCHEMA_VERSION, EVENT_NAME_TO_ID, CandidateScoringActor, CentralizedCritic, build_actor_registry
 from training.event_schema import decision_event_id, normalize_decision_event_type, REQUIRED_EVENT_COVERAGE
 from training.ppo_trainer import create_environment
+from training.scenario_bank_environment import ScenarioBankEnvironmentFactory
+from training.scenario_sampler import ScenarioSampler
 from training.reward_model_wrapper import RewardModelWrapper
 from envs.status import is_delivered_status
 from rlaif.reward_registry import RewardRegistry
@@ -385,6 +387,7 @@ def save_checkpoint(
             "formal_or_smoke": config.get("formal_or_smoke", "formal"),
             "reward_scale_artifact_hash": config.get("reward", {}).get("scale_artifact_hash", "unavailable"),
             "training_seed": config.get("training", {}).get("seed"),
+            **_scenario_lineage(config),
             "code_commit": _code_commit(),
             "training_metrics": metrics,
             "actor_specs": _actor_specs(actors),
@@ -396,6 +399,24 @@ def save_checkpoint(
         path,
     )
 
+
+def _scenario_lineage(config: dict[str, Any]) -> dict[str, Any]:
+    env = config.get("env", {})
+    bank = config.get("scenario_bank", {})
+    ids = bank.get("scenario_ids", [])
+    hashes = bank.get("scenario_content_hashes", {})
+    return {
+        "training_scenario_bank_path": env.get("scenario_bank_manifest"),
+        "training_scenario_bank_hash": bank.get("bank_hash") or env.get("expected_bank_hash"),
+        "training_scenario_bank_split": env.get("expected_split", bank.get("split")),
+        "training_scenario_count": bank.get("scenario_count", len(ids)),
+        "scenario_sampling_mode": env.get("scenario_sampling_mode", "shuffled_cycle"),
+        "scenario_sampling_seed": env.get("scenario_sampling_seed", config.get("training", {}).get("seed")),
+        "training_scenario_ids": ids,
+        "training_scenario_id_hash": __import__("hashlib").sha256(__import__("json").dumps(ids, sort_keys=True).encode()).hexdigest() if ids else None,
+        "training_scenario_content_hashes": hashes,
+        "scenario_bank_schema_version": bank.get("schema_version"),
+    }
 
 def _rlaif_scope(config: dict[str, Any]) -> str:
     r=config.get("rlaif", {})
@@ -567,7 +588,19 @@ def _models(env, config):
 def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, Any]:
     training, seed = config["training"], int(config["training"]["seed"])
     set_seed(seed)
-    env = create_environment(config, output_root=output_root)
+    factory = None
+    sampler = None
+    env_cfg = config.get("env", {})
+    if env_cfg.get("scenario_bank_manifest"):
+        factory = ScenarioBankEnvironmentFactory(env_cfg["scenario_bank_manifest"], expected_split=env_cfg.get("expected_split", "train"), expected_bank_hash=env_cfg.get("expected_bank_hash"))
+        sampler = ScenarioSampler(factory.scenario_ids, mode=env_cfg.get("scenario_sampling_mode", "shuffled_cycle"), seed=int(env_cfg.get("scenario_sampling_seed", seed)))
+        probe_id = factory.scenario_ids[0]
+        env = factory.create(probe_id)
+        config["scenario_bank"] = {"bank_hash": factory.bank_hash, "split": factory.bank.split, "schema_version": __import__('evaluation.scenario_bank').scenario_bank.SCHEMA_VERSION, "scenario_count": len(factory.scenario_ids), "scenario_ids": list(factory.scenario_ids), "scenario_content_hashes": {sid: factory.metadata(sid).get("scenario_content_hash") for sid in factory.scenario_ids}}
+    else:
+        if config.get("run_classification", config.get("formal_or_smoke", "smoke")) == "formal":
+            raise ValueError("formal MAPPO training requires env.scenario_bank_manifest")
+        env = create_environment(config, output_root=output_root)
     actors, critic = _models(env, config)
     actor_optimizers = {
         agent: torch.optim.Adam(actor.parameters(), lr=float(training["lr_actor"]))
@@ -589,18 +622,20 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
     buffer, rng, rows = AsyncMAPPOBuffer(), np.random.default_rng(seed), []
     rollout_episodes = int(training["rollout_episodes"])
     for start in range(0, int(training["total_episodes"]), rollout_episodes):
-        summaries = [
-            collect_episode(
-                env,
-                actors,
-                critic,
-                buffer,
-                wrapper,
-                episode_id=seed + episode,
+        summaries = []
+        for episode in range(start, min(start + rollout_episodes, int(training["total_episodes"]))):
+            meta = {}
+            if factory is not None and sampler is not None:
+                sid = sampler.next_scenario_id()
+                env = factory.create(sid)
+                meta = factory.metadata(sid)
+                meta["scenario_sampling_position"] = sampler.position
+                meta["scenario_cycle"] = sampler.cycle
+            summary = collect_episode(
+                env, actors, critic, buffer, wrapper, episode_id=seed + episode,
                 lambda_rlaif=float(config.get("rlaif", {}).get("lambda", 0.0)),
             )
-            for episode in range(start, min(start + rollout_episodes, int(training["total_episodes"])))
-        ]
+            summaries.append({**meta, **summary})
         update = update_mappo(
             actors,
             critic,
@@ -615,9 +650,22 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
     path = Path(config["output"]["training_log_path"])
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["episode", *METRIC_FIELDS])
+        extra_fields=["scenario_id","scenario_split","scenario_content_hash","instance_hash","scenario_bank_hash","scenario_sampling_position","scenario_cycle"]
+        writer = csv.DictWriter(handle, fieldnames=["episode", *extra_fields, *METRIC_FIELDS], extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+    # per-scenario summary for diagnostics
+    summary_path = path.parent / "scenario_training_summary.csv"
+    if rows and any(r.get("scenario_id") for r in rows):
+        import statistics
+        groups={}
+        for r in rows: groups.setdefault(r.get("scenario_id","single"), []).append(r)
+        with summary_path.open("w", encoding="utf-8", newline="") as h:
+            w=csv.DictWriter(h, fieldnames=["scenario_id","episode_count","mean_reward","std_reward","mean_fulfillment","mean_passenger_delay","mean_overload"]); w.writeheader()
+            for sid,rs in groups.items():
+                rewards=[float(r["episode_reward"]) for r in rs]; delivered=[float(r.get("delivered_parcels",0)) for r in rs]; undel=[float(r.get("undelivered_parcels",0)) for r in rs]
+                denom=[d+u for d,u in zip(delivered,undel)]
+                w.writerow({"scenario_id":sid,"episode_count":len(rs),"mean_reward":float(np.mean(rewards)),"std_reward":float(statistics.pstdev(rewards)) if len(rewards)>1 else 0.0,"mean_fulfillment":float(np.mean([d/x if x else 0.0 for d,x in zip(delivered,denom)])),"mean_passenger_delay":float(np.mean([float(r.get("passenger_delay",0)) for r in rs])),"mean_overload":float(np.mean([float(r.get("power_overload_amount",0)) for r in rs]))})
     save_checkpoint(
         config["output"]["checkpoint_path"],
         actors,
