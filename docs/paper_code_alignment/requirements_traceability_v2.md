@@ -9,3 +9,5 @@
 | station battery decisions | specified | Charging starts are learned station decisions, not automatic. |
 | multi-agent RLAIF | specified | Agent-aware preference data and reward models are deferred. |
 | formal parameter schema | specified | `configs/paper/base_*.yaml` and validators define Phase 0 schema. |
+
+| Fix Phase 2 stop-by-stop physical bus event chain | unit-tested | Physical buses operate scheduled passenger trips stop by stop; ordinary passenger service, integrated-station charging, causal downstream arrivals, segment energy, relocation and layover are covered by focused tests. |

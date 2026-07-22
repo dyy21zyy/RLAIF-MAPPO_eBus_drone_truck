@@ -29,7 +29,11 @@ def run_smoke_test(config_path: str | Path, output_root: str | Path | None = Non
             decisions[observation["agent"]] += 1
             event_type = str(observation["event_type"])
             decision_event_types[event_type] = decision_event_types.get(event_type, 0) + 1
-            observation, _reward, terminated, truncated, _info = env.step(first_feasible_policy(observation))
+            if observation.get("agent") == "bus" and observation.get("event_type_detail") == "BUS_STATION_ARRIVAL":
+                action = max((i for i, ok in enumerate(observation["action_mask"]) if ok), default=first_feasible_policy(observation))
+            else:
+                action = first_feasible_policy(observation)
+            observation, _reward, terminated, truncated, _info = env.step(action)
             steps += 1
             if steps > 10000:
                 raise AssertionError("Stage 3 smoke episode exceeded 10,000 decisions")
@@ -64,6 +68,19 @@ def run_smoke_test(config_path: str | Path, output_root: str | Path | None = Non
             "any_negative_truck_capacity": any(
                 truck.remaining_capacity_kg < 0 for truck in env.trucks
             ),
+            "scheduled_trips_started": env.scheduled_bus_trips_started,
+            "scheduled_trips_completed": env.scheduled_bus_trips_completed,
+            "freight_trips_completed": env.freight_trips_completed,
+            "non_freight_trips_completed": env.non_freight_trips_completed,
+            "ordinary_stops_visited": env.ordinary_stops_visited,
+            "integrated_stations_visited": env.integrated_stations_visited,
+            "ordinary_stop_boardings": env.passenger_boardings_at_ordinary_stops,
+            "ordinary_stop_alightings": env.passenger_alightings_at_ordinary_stops,
+            "bus_segment_count": env.bus_segment_count,
+            "bus_propulsion_energy_kwh": env.bus_propulsion_energy_kwh,
+            "bus_relocation_energy_kwh": env.bus_relocation_energy_kwh,
+            "bus_charging_energy_kwh": env.bus_charging_energy_kwh,
+            "minimum_physical_bus_soc": min((b.soc_kwh for b in env.physical_buses.values()), default=0.0),
             "invariants": "passed",
         }
     finally:

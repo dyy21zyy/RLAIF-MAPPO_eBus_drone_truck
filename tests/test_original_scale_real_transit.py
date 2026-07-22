@@ -143,22 +143,10 @@ def test_integrated_stations_parcels_and_bus_events_use_real_transit_inputs(tmp_
 
     env = DynamicDeliveryEnv(output_dir / "instance.json")
     observation, _info = env.reset(seed=123)
-    bus_event_times = sorted(
-        event.time_min
-        for event in env.events
-        if event.kind == "bus_arrival"
-    )
-    fixture_first_station_stop = stations[0]["stop_id"]
-    expected_first_arrivals = sorted(
-        float(row["arrival_time"])
-        for row in read_csv(output_dir / "bus_stop_times.csv")
-        if row["stop_id"] == fixture_first_station_stop
-    )
-    observed_times = []
-    if observation["agent"] == "bus" and observation["event_type"] == "BUS_ARRIVAL":
-        observed_times.append(float(observation["time_min"]))
-    observed_times.extend(bus_event_times[: len(expected_first_arrivals)])
-    assert sorted(observed_times)[: len(expected_first_arrivals)] == expected_first_arrivals
+    # Fix Phase 2 schedules only trip starts at reset; downstream station arrivals
+    # are generated causally after each actual stop departure.
+    assert not any(event.kind == "bus_arrival" for event in env.events)
+    assert any(event.kind == "bus_trip_start" for event in env.events)
     assert observation["agent"] in {"assignment", "bus", "terminal"}
 
 

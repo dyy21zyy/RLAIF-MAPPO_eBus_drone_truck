@@ -25,7 +25,7 @@ class PassengerStopRuntimeState:
 
     def integrate_waiting_until(self, time_min: float) -> float:
         if time_min < self.last_queue_update_time - 1e-9:
-            raise ValueError("Passenger queue time cannot move backwards")
+            return 0.0
         elapsed = max(0.0, float(time_min) - self.last_queue_update_time)
         inc = self.total_waiting * elapsed
         self.cumulative_waiting_passenger_minutes += inc

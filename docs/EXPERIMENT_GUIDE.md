@@ -85,3 +85,7 @@ Replay fixtures may be used only to validate the pipeline mechanics, not to clai
 Run `python -m experiments.smoke_test_experiments` before launching formal experiments. This tiny workflow generates one scenario per bank, validates the policy matrix, validates ablation and sensitivity declarations, runs a paired benchmark smoke, and aggregates smoke records. These smoke artifacts are not final results.
 
 Formal studies should use frozen test-bank scenarios for all methods, train separate policy checkpoints for each reward setting or ablation, and record an artifact manifest beside each run.
+
+### Fix Phase 2 bus diagnostics
+
+Environment smoke tests report actual bus runtime metrics including scheduled trips started/completed, freight and non-freight completions, ordinary/integrated stops visited, ordinary-stop boardings/alightings, segment count, propulsion/relocation/charging energy, and minimum physical-bus SoC. These values are runtime diagnostics from the stop-by-stop event chain, not timetable-row inferences.
