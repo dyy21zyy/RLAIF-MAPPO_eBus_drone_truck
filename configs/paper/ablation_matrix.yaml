@@ -1,0 +1,24 @@
+run_classification: formal
+experiment_kind: ablation
+baseline_variant_id: assignment_rlaif_baseline
+training_seeds: [1, 2, 3]
+scenario_banks:
+  train_manifest: data/scenarios/train/scenario_bank_manifest.json
+  validation_manifest: data/scenarios/validation/scenario_bank_manifest.json
+  test_manifest: data/scenarios/test/scenario_bank_manifest.json
+variants:
+  - variant_id: assignment_rlaif_baseline
+    display_name: Assignment-only RLAIF-MAPPO
+    execution_mode: retrain_and_evaluate
+    training_config: configs/paper/train_mappo_rlaif_assignment.yaml
+    benchmark_method_id: mappo_rlaif_assignment
+  - variant_id: no_rlaif
+    display_name: Environment-reward MAPPO
+    execution_mode: retrain_and_evaluate
+    training_config: configs/paper/train_mappo_env.yaml
+    benchmark_method_id: mappo_env
+  - variant_id: all_agent_rlaif_extension
+    display_name: Full multi-agent RLAIF-MAPPO extension
+    execution_mode: retrain_and_evaluate
+    training_config: configs/paper/train_mappo_rlaif_all.yaml
+    benchmark_method_id: mappo_rlaif_all

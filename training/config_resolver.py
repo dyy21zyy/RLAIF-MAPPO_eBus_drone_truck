@@ -25,7 +25,7 @@ def _is_placeholder(value: Any) -> bool:
 def _canonical_json_hash(path: Path) -> str:
     payload = json.loads(path.read_text(encoding="utf-8"))
     clean = dict(payload); clean.pop("artifact_hash", None)
-    return hashlib.sha256(json.dumps(clean, sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(clean, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def _load_env_config(config: dict[str, Any]) -> dict[str, Any]:

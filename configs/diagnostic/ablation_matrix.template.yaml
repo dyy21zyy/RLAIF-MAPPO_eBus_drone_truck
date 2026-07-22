@@ -1,0 +1,19 @@
+run_classification: diagnostic
+experiment_kind: ablation
+baseline_variant_id: assignment_rlaif_baseline
+training_seeds: [1]
+scenario_banks:
+  train_manifest: __OUTPUT_ROOT__/scenarios/train/scenario_bank_manifest.json
+  validation_manifest: __OUTPUT_ROOT__/scenarios/validation/scenario_bank_manifest.json
+  test_manifest: __OUTPUT_ROOT__/scenarios/test/scenario_bank_manifest.json
+variants:
+  - variant_id: no_rlaif
+    display_name: Environment-reward MAPPO diagnostic
+    execution_mode: retrain_and_evaluate
+    training_config: __OUTPUT_ROOT__/configs/train_mappo_env.yaml
+    benchmark_method_id: mappo_env
+  - variant_id: assignment_rlaif_baseline
+    display_name: Assignment-only RLAIF-MAPPO diagnostic
+    execution_mode: retrain_and_evaluate
+    training_config: __OUTPUT_ROOT__/configs/train_mappo_rlaif_assignment.yaml
+    benchmark_method_id: mappo_rlaif_assignment
