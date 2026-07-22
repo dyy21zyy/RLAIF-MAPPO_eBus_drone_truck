@@ -25,7 +25,8 @@ from training.mappo_async import (
 )
 from training.mappo_buffer import AsyncMAPPOBuffer, AsyncTransition
 from training.entity_encoders import ENTITY_ENCODER_SCHEMA_VERSION
-from training.mappo_networks import EVENT_EMBEDDING_SCHEMA_VERSION, CandidateScoringActor, CentralizedCritic, build_actor_registry
+from training.mappo_networks import EVENT_EMBEDDING_SCHEMA_VERSION, EVENT_NAME_TO_ID, CandidateScoringActor, CentralizedCritic, build_actor_registry
+from training.event_schema import decision_event_id, normalize_decision_event_type, REQUIRED_EVENT_COVERAGE
 from training.ppo_trainer import create_environment
 from training.reward_model_wrapper import RewardModelWrapper
 from envs.status import is_delivered_status
@@ -33,7 +34,7 @@ from rlaif.reward_registry import RewardRegistry
 
 AGENT_IDS = ("assignment", "truck", "bus", "station")
 FEATURE_SCHEMA_VERSION = 3
-CHECKPOINT_SCHEMA_VERSION = 3
+CHECKPOINT_SCHEMA_VERSION = 4
 ACTOR_POLICY_FIELDS = tuple(f"{agent}_policy_loss" for agent in AGENT_IDS)
 ACTOR_ENTROPY_FIELDS = tuple(f"entropy_{agent}" for agent in AGENT_IDS)
 ACTOR_KL_FIELDS = tuple(f"approx_kl_{agent}" for agent in AGENT_IDS)
@@ -141,7 +142,8 @@ def collect_episode(
     bus_charging_count = 0
     while observation["agent_id"] != "terminal":
         agent_id = str(observation["agent_id"])
-        event_type = str(observation["event_type"])
+        event_type = normalize_decision_event_type(observation["event_type"])
+        event_type_id = decision_event_id(event_type)
         validate_decision(agent_id, event_type)
         if agent_id not in actors:
             raise RuntimeError(f"No MAPPO actor registered for {agent_id}")
@@ -151,7 +153,7 @@ def collect_episode(
         actor = actors[agent_id]
         local_obs = _pad_vector(observation["features"], actor.obs_dim)
         action, log_prob = actor.act(
-            local_obs, candidate_features, mask, deterministic=deterministic
+            local_obs, event_type_id, candidate_features, mask, deterministic=deterministic
         )
         if not mask[action]:
             raise RuntimeError("Masked MAPPO sampled an infeasible action")
@@ -165,7 +167,8 @@ def collect_episode(
         next_observation, env_reward, terminated, truncated, info = env.step(action)
         done = bool(terminated or truncated)
         if isinstance(reward_wrapper, RewardRegistry):
-            total_reward, learned_reward = reward_wrapper.total_reward(agent_id, event_type, float(env_reward), local_obs, action_features, action)
+            contribution = reward_wrapper.score_transition(agent_type=agent_id, event_type=event_type, environment_reward=float(env_reward), state_features=local_obs, candidate_features=action_features, selected_action_index=action, formal_mode=False)
+            total_reward, learned_reward = contribution.total_reward, contribution.weighted_learned_contribution
         else:
             total_reward, learned_reward = transition_reward(
                 agent_id,
@@ -177,8 +180,9 @@ def collect_episode(
                 action_id=action,
                 event_type=event_type,
             )
+            learned_reward = learned_reward * float(lambda_rlaif)
         env_total += float(env_reward)
-        rlaif_total += learned_reward * float(lambda_rlaif)
+        rlaif_total += learned_reward
         if buffer is not None:
             buffer.append(
                 AsyncTransition(
@@ -192,6 +196,13 @@ def collect_episode(
                     log_prob=log_prob,
                     value=value,
                     reward=total_reward,
+                    event_type_id=event_type_id,
+                    environment_reward=float(env_reward),
+                    learned_reward_raw=float(learned_reward),
+                    learned_reward_normalized=float(learned_reward),
+                    learned_reward_clipped=float(learned_reward),
+                    learned_reward_weighted=float(learned_reward),
+                    total_reward=float(total_reward),
                     done=done,
                     next_global_state=[float(value) for value in env.get_entity_critic_state()],
                     event_type=event_type,
@@ -201,6 +212,7 @@ def collect_episode(
                         **info,
                         "env_reward": float(env_reward),
                         "rlaif_reward": learned_reward,
+                        "event_type_id": event_type_id,
                         "action_candidate": action_payload,
                         "reward_decomposition": reward_decomposition(info),
                     },
@@ -270,11 +282,14 @@ def update_mappo(
                     np.asarray([item.local_obs for item in items]), dtype=torch.float32
                 )
                 candidate_features, masks = _padded_candidate_batch(items)
+                event_type_ids = torch.tensor([int(item.event_type_id) for item in items], dtype=torch.long)
+                assert event_type_ids.shape[0] == len(items) and event_type_ids.dtype == torch.long
+                assert bool(((event_type_ids >= 0) & (event_type_ids <= 4)).all())
                 actions = torch.tensor([item.action for item in items], dtype=torch.long)
                 old_log_probs = torch.tensor([item.log_prob for item in items], dtype=torch.float32)
                 advantages = torch.tensor(buffer.advantages[batch], dtype=torch.float32)
                 new_log_probs, entropy = actor.evaluate_actions(
-                    observations, candidate_features, actions, masks
+                    observations, event_type_ids, candidate_features, masks, actions
                 )
                 log_ratio = new_log_probs - old_log_probs
                 ratio = log_ratio.exp()
@@ -340,7 +355,9 @@ def save_checkpoint(
         {
             "checkpoint_schema_version": CHECKPOINT_SCHEMA_VERSION,
             "stage": 7,
-            "algorithm": "four_agent_asynchronous_mappo_env_reward_only",
+            "algorithm": _algorithm_identity(config),
+            "rlaif_scope": _rlaif_scope(config),
+            "enabled_reward_agents": _enabled_reward_agents(config),
             "actor_state_dicts": actors.state_dict(),
             "critic_state_dict": critic.state_dict(),
             "actor_optimizer_state_dicts": {
@@ -351,15 +368,21 @@ def save_checkpoint(
             "action_mappings": {
                 "assignment": "0=TD,1..H=TBD,H+1..2H=TLD",
                 "truck": "candidate task index or idle",
-                "bus": "BUS_DEPARTURE load/idle or BUS_ARRIVAL charge/no_charge",
+                "bus": "BUS_TERMINAL_DEPARTURE load/idle or BUS_STATION_ARRIVAL charge/no_charge",
                 "station": "dispatch_drone or idle",
             },
             "feature_schema_version": FEATURE_SCHEMA_VERSION,
             "event_schema_version": EVENT_SCHEMA_VERSION,
+            "event_name_to_id": dict(EVENT_NAME_TO_ID),
+            "event_embedding_dim": next(iter(actors.values())).event_embedding_dim,
             "event_embedding_schema_version": EVENT_EMBEDDING_SCHEMA_VERSION,
             "observation_schema_version": OBSERVATION_SCHEMA_VERSION,
             "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
             "entity_encoder_schema_version": ENTITY_ENCODER_SCHEMA_VERSION,
+            "reward_checkpoint_paths": _reward_checkpoint_paths(config),
+            "reward_checkpoint_hashes": config.get("rlaif", {}).get("reward_checkpoint_hashes", {}),
+            "reward_model_schema_versions": config.get("rlaif", {}).get("reward_model_schema_versions", {}),
+            "formal_or_smoke": config.get("formal_or_smoke", "formal"),
             "reward_scale_artifact_hash": config.get("reward", {}).get("scale_artifact_hash", "unavailable"),
             "training_seed": config.get("training", {}).get("seed"),
             "code_commit": _code_commit(),
@@ -374,6 +397,29 @@ def save_checkpoint(
     )
 
 
+def _rlaif_scope(config: dict[str, Any]) -> str:
+    r=config.get("rlaif", {})
+    if not r.get("enabled", False): return "none"
+    enabled=[a for a,c in r.get("agents", {}).items() if c.get("enabled", False)]
+    if enabled == ["assignment"] or (not enabled and r.get("reward_model_checkpoint")): return "assignment"
+    if set(enabled) == set(AGENT_IDS): return "all"
+    return str(r.get("scope", "assignment"))
+
+def _enabled_reward_agents(config: dict[str, Any]) -> list[str]:
+    scope=_rlaif_scope(config)
+    if scope == "none": return []
+    if scope == "assignment": return ["assignment"]
+    if scope == "all": return list(AGENT_IDS)
+    return [a for a,c in config.get("rlaif", {}).get("agents", {}).items() if c.get("enabled", False)]
+
+def _algorithm_identity(config: dict[str, Any]) -> str:
+    return {"none":"four_agent_asynchronous_mappo_env", "assignment":"four_agent_asynchronous_mappo_rlaif_assignment", "all":"four_agent_asynchronous_mappo_rlaif_all"}.get(_rlaif_scope(config), "four_agent_asynchronous_mappo_rlaif_assignment")
+
+def _reward_checkpoint_paths(config: dict[str, Any]) -> dict[str,str]:
+    r=config.get("rlaif", {})
+    if "agents" in r: return {a:str(c.get("checkpoint")) for a,c in r.get("agents", {}).items() if c.get("enabled", False)}
+    return {"assignment": str(r.get("reward_model_checkpoint"))} if r.get("reward_model_checkpoint") else {}
+
 def _code_commit() -> str | None:
     import subprocess
     try:
@@ -381,7 +427,7 @@ def _code_commit() -> str | None:
     except Exception:
         return None
 
-def _require_checkpoint_compatible(checkpoint: dict[str, Any]) -> None:
+def _require_checkpoint_compatible(checkpoint: dict[str, Any], path: str | Path | None = None, *, requested_rlaif_scope: str | None = None, formal_mode: bool = True) -> None:
     expected = {
         "checkpoint_schema_version": CHECKPOINT_SCHEMA_VERSION,
         "event_schema_version": EVENT_SCHEMA_VERSION,
@@ -389,15 +435,26 @@ def _require_checkpoint_compatible(checkpoint: dict[str, Any]) -> None:
         "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
         "entity_encoder_schema_version": ENTITY_ENCODER_SCHEMA_VERSION,
     }
+    legacy_ok = checkpoint.get("algorithm") == "four_agent_asynchronous_mappo_env_reward_only" and path is None
     for key, value in expected.items():
         if checkpoint.get(key) != value:
-            raise ValueError(f"Incompatible MAPPO checkpoint {key}: expected {value}, got {checkpoint.get(key)}")
-    if checkpoint.get("stage") != 7 or checkpoint.get("algorithm") != "four_agent_asynchronous_mappo_env_reward_only":
-        raise ValueError("Checkpoint is not a Phase 7 four-agent asynchronous MAPPO environment-reward checkpoint")
+            if legacy_ok and ((key == "event_schema_version" and checkpoint.get(key) == 1) or (key == "candidate_schema_version" and checkpoint.get(key) == 2)):
+                continue
+            raise ValueError(f"Incompatible MAPPO checkpoint {key}: expected version {value}, actual version {checkpoint.get(key)}, checkpoint path {path}; recommended action: retrain or migrate")
+    allowed={"four_agent_asynchronous_mappo_env","four_agent_asynchronous_mappo_rlaif_assignment","four_agent_asynchronous_mappo_rlaif_all"}
+    allowed.add("four_agent_asynchronous_mappo_env_reward_only")
+    if checkpoint.get("stage") != 7 or checkpoint.get("algorithm") not in allowed:
+        raise ValueError(f"Checkpoint algorithm {checkpoint.get('algorithm')} is not compatible with MAPPO loader for {path}; recommended action: retrain or migrate")
+    if not legacy_ok and checkpoint.get("event_name_to_id") != dict(EVENT_NAME_TO_ID):
+        raise ValueError(f"Incompatible MAPPO checkpoint event_name_to_id at {path}; recommended action: retrain or migrate")
+    if formal_mode and checkpoint.get("formal_or_smoke") == "smoke":
+        raise ValueError(f"Smoke-only checkpoint cannot be loaded in formal mode: {path}")
+    if requested_rlaif_scope is not None and checkpoint.get("rlaif_scope") != requested_rlaif_scope:
+        raise ValueError(f"RLAIF scope mismatch: expected {requested_rlaif_scope}, actual {checkpoint.get('rlaif_scope')}, checkpoint path {path}; recommended action: retrain or migrate")
 
 def load_checkpoint(path):
     checkpoint = torch.load(Path(path), map_location="cpu", weights_only=False)
-    _require_checkpoint_compatible(checkpoint)
+    _require_checkpoint_compatible(checkpoint, path)
     specs_payload = checkpoint["actor_specs"]
     specs = {
         agent: (int(payload["obs_dim"]), int(payload["candidate_feature_dim"]))
@@ -408,7 +465,7 @@ def load_checkpoint(path):
         for agent, payload in specs_payload.items()
     }
     hidden_dims["default"] = list(next(iter(specs_payload.values()))["hidden_dims"])
-    actors = build_actor_registry(specs, hidden_dims)
+    actors = build_actor_registry(specs, hidden_dims, event_embedding_dim=int(checkpoint.get("event_embedding_dim", 16)))
     critic = CentralizedCritic(
         int(checkpoint["dimensions"]["global_state"]),
         checkpoint["config"]["networks"]["critic_hidden_dims"],
@@ -458,7 +515,7 @@ def _collect_actor_specs(env, seed: int, max_steps: int = 2000) -> dict[str, tup
     steps = 0
     while observation["agent_id"] != "terminal" and steps < max_steps:
         agent_id = str(observation["agent_id"])
-        event_type = str(observation["event_type"])
+        event_type = normalize_decision_event_type(observation["event_type"])
         candidate_features, candidate_names = _candidate_feature_payload(observation)
         del candidate_features
         observed_pairs.add((agent_id, event_type))
@@ -471,7 +528,8 @@ def _collect_actor_specs(env, seed: int, max_steps: int = 2000) -> dict[str, tup
             specs[agent_id] = (max(previous_obs_dim, obs_dim), candidate_dim)
         else:
             specs[agent_id] = (obs_dim, candidate_dim)
-        if set(specs) == set(AGENT_IDS) and ("bus", "BUS_ARRIVAL") in observed_pairs:
+        covered={agent:{event for a,event in observed_pairs if a==agent} for agent in AGENT_IDS}
+        if set(specs) == set(AGENT_IDS) and all(REQUIRED_EVENT_COVERAGE[a] <= covered.get(a,set()) for a in AGENT_IDS):
             break
         observation, *_ = env.step(_dimension_probe_action(env, observation))
         errors = env.check_invariants()
@@ -479,8 +537,10 @@ def _collect_actor_specs(env, seed: int, max_steps: int = 2000) -> dict[str, tup
             raise RuntimeError(f"Dimension probe violated environment invariants: {errors}")
         steps += 1
     missing = set(AGENT_IDS) - set(specs)
-    if missing:
-        raise RuntimeError(f"Could not observe Stage 9 agent dimensions for {sorted(missing)}")
+    covered={agent:{event for a,event in observed_pairs if a==agent} for agent in AGENT_IDS}
+    missing_events={a: sorted(REQUIRED_EVENT_COVERAGE[a]-covered.get(a,set())) for a in AGENT_IDS if REQUIRED_EVENT_COVERAGE[a]-covered.get(a,set())}
+    if missing or missing_events:
+        raise RuntimeError(f"Could not observe Stage 9 event coverage; missing_agents={sorted(missing)} missing_events={missing_events} observed={sorted(observed_pairs)}")
     return specs
 
 
@@ -499,7 +559,7 @@ def _actor_hidden_dims(config: dict[str, Any]) -> dict[str, Sequence[int]]:
 def _models(env, config):
     specs = _collect_actor_specs(env, int(config["training"]["seed"]))
     return (
-        build_actor_registry(specs, _actor_hidden_dims(config)),
+        build_actor_registry(specs, _actor_hidden_dims(config), event_embedding_dim=int(config.get("networks", {}).get("event_embedding_dim", 16))),
         CentralizedCritic(len(env.get_entity_critic_state()), config["networks"]["critic_hidden_dims"]),
     )
 

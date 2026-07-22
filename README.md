@@ -350,3 +350,7 @@ The environment now operates physical buses stop by stop. All passenger trips sc
 Passenger arrivals are generated with a piecewise time-dependent Poisson process. Baseline stop rates are sampled from a truncated normal distribution in [0.05, 0.60] passenger/min; demand intensity and temporal multipliers are applied afterward, so effective rates may exceed 0.60. Passenger dwell separates normal boarding/alighting service from delivery-induced loading, unloading, and charging dwell. Waiting and onboard additional delay are measured in passenger-minutes, and passengers boarding after an extra-dwell interval do not receive that past delay.
 
 Integrated-station base load is a seeded time-varying scenario artifact. Station load is base load plus active bus charging plus active drone-battery charging; overload is a soft cost integrated in kW-minutes.
+
+### Fix Phase 4 MAPPO/RLAIF runtime status
+
+MAPPO candidate actors now receive learned canonical decision-event embeddings on every forward pass. The bus policy remains one shared `bus` actor for `BUS_TERMINAL_DEPARTURE` and `BUS_STATION_ARRIVAL`; automatic events are not valid rollout-buffer transitions. Policy checkpoints distinguish environment-reward MAPPO, assignment-only RLAIF MAPPO, and full four-agent RLAIF MAPPO metadata. Runtime RLAIF accounting normalizes, clips, weights, and adds the active agent's learned contribution exactly once, with per-agent totals preserved. Formal reward-model training and validation remain deferred to Fix Phase 5.

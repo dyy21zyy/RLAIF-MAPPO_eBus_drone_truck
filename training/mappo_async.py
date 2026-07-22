@@ -6,27 +6,19 @@ from typing import Any, Sequence
 
 from training.reward_model_wrapper import RewardModelWrapper
 
-EVENT_SCHEMA_VERSION = 1
-OBSERVATION_SCHEMA_VERSION = 3
-CANDIDATE_SCHEMA_VERSION = 2
+from training.event_schema import (EVENT_SCHEMA_VERSION, OBSERVATION_SCHEMA_VERSION, CANDIDATE_SCHEMA_VERSION, REQUIRED_EVENT_COVERAGE, normalize_decision_event_type, validate_agent_event, decision_event_id, is_decision_event)
 
 ASSIGNMENT_AGENT = "assignment"
 TRUCK_AGENT = "truck"
 BUS_AGENT = "bus"
 STATION_AGENT = "station"
-VALID_AGENT_EVENTS = {
-    ASSIGNMENT_AGENT: {"PARCEL_RELEASE"},
-    TRUCK_AGENT: {"TRUCK_AVAILABLE"},
-    BUS_AGENT: {"BUS_TERMINAL_DEPARTURE", "BUS_STATION_ARRIVAL", "BUS_DEPARTURE", "BUS_ARRIVAL"},
-    STATION_AGENT: {"STATION_OPERATION"},
-}
+VALID_AGENT_EVENTS = REQUIRED_EVENT_COVERAGE
 CANONICAL_EVENT_MAP = {"BUS_DEPARTURE": "BUS_TERMINAL_DEPARTURE", "BUS_ARRIVAL": "BUS_STATION_ARRIVAL"}
 RLAIF_AGENT_TYPES = {ASSIGNMENT_AGENT, TRUCK_AGENT, BUS_AGENT, STATION_AGENT}
 
 
 def validate_decision(agent_id: str, event_type: str) -> None:
-    if agent_id not in VALID_AGENT_EVENTS or event_type not in VALID_AGENT_EVENTS[agent_id]:
-        raise ValueError(f"Invalid asynchronous decision pairing: {agent_id}/{event_type}")
+    validate_agent_event(agent_id, event_type)
 
 
 def transition_reward(
