@@ -340,3 +340,7 @@ The RLAIF stack now has v2 schemas for four agent types (`assignment`, `truck`, 
 ### Phase 9 paper experiment framework
 
 The repository includes a formal experiment scaffold for frozen scenario banks, separate policy checkpoint validation, paired benchmark evaluation, supported ablations, separated sensitivity modes, formal metrics, statistical aggregation, and provenance manifests. Start with `python -m experiments.smoke_test_experiments`; do not treat smoke outputs as paper results.
+
+### Fix Phase 2 stop-by-stop bus event chain
+
+The environment now operates physical buses stop by stop. All passenger trips scheduled before the 360-minute operation horizon are introduced, ordinary stops serve passengers without MAPPO decisions, integrated stations expose charging decisions, and freight trips alone expose terminal loading decisions. Downstream arrivals are generated after actual departures so passenger dwell, freight loading, unloading, charging, relocation, layover, and physical-bus availability propagate causally. Physical-bus state is the runtime source of truth; trip-keyed SoC, delay, and freight values are compatibility/reporting mirrors.

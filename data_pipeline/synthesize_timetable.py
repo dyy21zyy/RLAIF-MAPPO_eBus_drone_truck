@@ -40,8 +40,10 @@ def synthesize_timetable(stops: list[dict[str, Any]], config: dict[str, Any], ou
         headway = float(stops[0].get("headway_min", bus["headway_min"]))
         departures = []
         value = first
-        while value < last - 1e-9:
-            departures.append(value)
+        # Runtime schedules are minutes since the bus operation window opens, so
+        # a source clock such as 06:00 maps to minute 0 and minute 360 is excluded.
+        while value - first < horizon - 1e-9 and value < last - 1e-9:
+            departures.append(value - first)
             value += headway
         frequency = int(bus["freight_trip_frequency"])
         trips = [{"trip_id": f"trip_{index:03d}", "route_id": stops[0]["route_id"],

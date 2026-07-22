@@ -36,3 +36,4 @@ No item is marked `experiment-validated` because final formal experiments, train
 | ablations | implemented | Ablation config and runner exist; formal outputs blocked. |
 | sensitivity modes | implemented | Sensitivity config and runner exist; formal outputs blocked. |
 | artifact provenance | integration-tested | Scenario fixtures include provenance metadata. |
+| stop-by-stop physical bus event chain | unit-tested | Automatic bus trip/arrival/departure/completion/relocation events drive all scheduled pre-360 passenger trips; MAPPO sees only terminal loading and integrated-station charging decisions. |
