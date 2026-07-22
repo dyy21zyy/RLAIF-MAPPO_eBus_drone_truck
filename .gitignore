@@ -56,3 +56,10 @@ checkpoints/
 # Generated reward-scale estimation artifacts
 /results/diagnostic/reward_scales/
 /outputs/reward_reference_scales*.json
+
+# Generated ablation and sensitivity artifacts
+/results/diagnostic/ablation/
+/results/diagnostic/sensitivity/
+/results/diagnostic/experiment_matrices/
+/results/formal/ablation/
+/results/formal/sensitivity/

@@ -1,0 +1,32 @@
+run_classification: formal
+experiment_kind: sensitivity
+training_seeds: [1, 2, 3]
+training_config: configs/paper/train_mappo_rlaif_assignment.yaml
+benchmark_method_id: mappo_rlaif_assignment
+fixed_policy_checkpoint: checkpoints/formal/mappo_rlaif_assignment_seed_1.pt
+scenario_banks:
+  train_manifest: data/scenarios/train/scenario_bank_manifest.json
+  validation_manifest: data/scenarios/validation/scenario_bank_manifest.json
+  test_manifest: data/scenarios/test/scenario_bank_manifest.json
+protocols:
+  - protocol_id: fixed_policy_robustness
+    execution_mode: fixed_policy_evaluate
+  - protocol_id: retrained_policy_sensitivity
+    execution_mode: retrain_and_evaluate
+factors:
+  - factor_id: parcel_demand_multiplier
+    config_path: demand.parcel_multiplier
+    baseline: 1.0
+    values: [0.8, 1.0, 1.2]
+    protocols: [fixed_policy_robustness]
+    scenario_generation: regenerate_matched_family
+    paired_seed_strategy: matched_master_seeds
+    master_seeds: [101, 102, 103]
+  - factor_id: rlaif_lambda_assignment
+    config_path: rlaif.agents.assignment.lambda
+    baseline: 1.0
+    values: [0.0, 0.5, 1.0, 1.5]
+    protocols: [retrained_policy_sensitivity]
+    scenario_generation: reuse_matched_train_validation_test
+    paired_seed_strategy: matched_master_seeds
+    master_seeds: [101, 102, 103]
