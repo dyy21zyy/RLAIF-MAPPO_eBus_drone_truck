@@ -1,26 +1,32 @@
-# Phase 8 formal reward-model training config for station.
 run_classification: formal
-agent_type: station
-preference_schema_version: 3
-candidate_schema_version: 3
-input:
-  states: results/rlaif/station_states.jsonl
-  preferences: results/rlaif/station_preferences.jsonl
-  split_manifest: results/rlaif/station_split_manifest.json
-output:
-  checkpoint: results/checkpoints/reward_station.pt
+model:
+  event_embedding_dim: 16
+  hidden_dims: [256, 256, 128]
+  dropout: 0.10
+  activation: relu
 training:
-  loss: bradley_terry
-  exclude_answers: [tie, abstain]
-  min_samples: 1000
-  smoke_min_samples: 2
-validation:
-  grouped_holdout: true
-  min_pairwise_accuracy: 0.70
-
+  seed: 1
+  epochs: 100
+  batch_size: 128
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  max_grad_norm: 1.0
+  early_stopping_patience: 10
+  minimum_improvement: 0.0001
+  optimizer: Adam
+  device: auto
 split:
-  group_by: scenario
-  train_fraction: 0.70
+  train_fraction: 0.7
   validation_fraction: 0.15
   test_fraction: 0.15
   seed: 1
+  group_by: scenario
+validation:
+  minimum_training_pairs: 1000
+  minimum_validation_pairs: 200
+  minimum_test_pairs: 200
+  minimum_validation_pairwise_accuracy: 0.70
+  minimum_test_pairwise_accuracy: 0.70
+  minimum_event_pairwise_accuracy: 0.60
+  require_positive_average_margin: true
+  require_all_event_types_present: true
