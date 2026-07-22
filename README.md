@@ -344,3 +344,9 @@ The repository includes a formal experiment scaffold for frozen scenario banks, 
 ### Fix Phase 2 stop-by-stop bus event chain
 
 The environment now operates physical buses stop by stop. All passenger trips scheduled before the 360-minute operation horizon are introduced, ordinary stops serve passengers without MAPPO decisions, integrated stations expose charging decisions, and freight trips alone expose terminal loading decisions. Downstream arrivals are generated after actual departures so passenger dwell, freight loading, unloading, charging, relocation, layover, and physical-bus availability propagate causally. Physical-bus state is the runtime source of truth; trip-keyed SoC, delay, and freight values are compatibility/reporting mirrors.
+
+### Fix Phase 3 passenger and station-power semantics
+
+Passenger arrivals are generated with a piecewise time-dependent Poisson process. Baseline stop rates are sampled from a truncated normal distribution in [0.05, 0.60] passenger/min; demand intensity and temporal multipliers are applied afterward, so effective rates may exceed 0.60. Passenger dwell separates normal boarding/alighting service from delivery-induced loading, unloading, and charging dwell. Waiting and onboard additional delay are measured in passenger-minutes, and passengers boarding after an extra-dwell interval do not receive that past delay.
+
+Integrated-station base load is a seeded time-varying scenario artifact. Station load is base load plus active bus charging plus active drone-battery charging; overload is a soft cost integrated in kW-minutes.

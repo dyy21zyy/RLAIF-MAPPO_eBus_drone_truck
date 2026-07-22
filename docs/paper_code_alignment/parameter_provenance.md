@@ -9,3 +9,9 @@ The actual current implementation status is schema-only: provenance validation i
 ## Phase 1 reward-weight provenance
 
 The formal reward block weights added for MAPPO/RLAIF-MAPPO runtime validation are classified as `project_extension` where the source paper does not directly specify the coefficient. They must not be described as literature-derived.
+
+## Fix Phase 3 passenger and station-load provenance
+
+Passenger baseline stop-arrival rates use the paper-derived truncated normal distribution with mean 0.25 passenger/min, standard deviation 0.10 passenger/min, and baseline bounds [0.05, 0.60]. Effective passenger rates are computed as baseline × demand intensity × temporal multiplier and are not clipped back to the baseline maximum. The temporal passenger multipliers are scenario-design assumptions classified as `project_extension` unless an empirical source is later added. Explicit downstream destinations supersede the older independent alighting-probability range.
+
+Station base-load profiles are generated as seeded, piecewise-constant synthetic profiles using Uniform[80, 180] kW at 15-minute intervals by default. They are classified as `project_extension` and are not represented as observed Shanghai load data.

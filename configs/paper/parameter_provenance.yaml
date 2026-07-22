@@ -297,3 +297,38 @@ reward.scale_artifact_hash:
   category: project_extension
   source: Phase 1 runtime reward validation and normalization contract.
   notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
+fix_phase_3:
+  passenger_baseline_rate_distribution:
+    source: paper_derived
+    distribution: truncated_normal
+    mean_per_min: 0.25
+    std_per_min: 0.10
+    min_per_min: 0.05
+    max_per_min: 0.60
+  passenger_temporal_profile:
+    source: project_extension
+    note: Scenario-design multipliers; not observed Shanghai data unless an empirical source is later added.
+  passenger_effective_rate:
+    formula: baseline_rate_per_min * demand_intensity * temporal_multiplier
+    clipped_to_baseline_max: false
+  passenger_destination_model:
+    source: project_extension
+    rule: explicit downstream destination; deterministic alighting at destination
+    alighting_probability_range_status: superseded_by_explicit_destination_model
+  station_base_load_profile:
+    source: project_extension
+    distribution: uniform_80_180_kw
+    interval_min_default: 15
+    note: Synthetic scenario profile; not observed Shanghai load.
+passenger.temporal_profile:
+  category: project_extension
+  source: Fix Phase 3 scenario-design time-of-day multipliers.
+passenger.baseline_dwell_min:
+  category: project_extension
+  source: Fix Phase 3 explicit passenger-service dwell model default.
+passenger.destination_model:
+  category: project_extension
+  source: Fix Phase 3 explicit downstream destination model.
+passenger.alighting_probability_status:
+  category: project_extension
+  source: Fix Phase 3 documents that independent alighting probabilities are superseded by explicit destinations.
