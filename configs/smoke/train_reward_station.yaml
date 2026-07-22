@@ -1,15 +1,32 @@
 run_classification: smoke
-agent_type: station
-preference_schema_version: 3
-input:
-  preferences: results/smoke/reward_models/preferences.jsonl
-output:
-  integrity_report: results/smoke/reward_models/station_integrity.json
+model:
+  event_embedding_dim: 8
+  hidden_dims: [32, 16]
+  dropout: 0.0
+  activation: relu
+training:
+  seed: 7
+  epochs: 25
+  batch_size: 16
+  learning_rate: 0.01
+  weight_decay: 0.0
+  max_grad_norm: 5.0
+  early_stopping_patience: 8
+  minimum_improvement: 0.000001
+  optimizer: Adam
+  device: cpu
 split:
-  group_by: scenario
-  train_fraction: 0.70
+  train_fraction: 0.7
   validation_fraction: 0.15
   test_fraction: 0.15
-  seed: 1
-training:
-  min_samples: 2
+  seed: 7
+  group_by: scenario
+validation:
+  minimum_training_pairs: 10
+  minimum_validation_pairs: 2
+  minimum_test_pairs: 2
+  minimum_validation_pairwise_accuracy: 0.50
+  minimum_test_pairwise_accuracy: 0.50
+  minimum_event_pairwise_accuracy: 0.50
+  require_positive_average_margin: true
+  require_all_event_types_present: true

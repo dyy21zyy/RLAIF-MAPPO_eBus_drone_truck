@@ -16,6 +16,53 @@ class RewardModelCheckpointError(RuntimeError):
     """Raised when learned RLAIF reward was requested but cannot be loaded safely."""
 
 
+class RewardCheckpointError(RuntimeError):
+    """Base exception for strict reward-checkpoint loading."""
+
+class RewardCheckpointCompatibilityError(RewardCheckpointError):
+    """Checkpoint exists but is incompatible with requested runtime schemas."""
+
+class RewardCheckpointValidationError(RewardCheckpointError):
+    """Checkpoint is not formally validated for RLAIF use."""
+
+def load_strict_agent_reward_checkpoint(path: str | Path, *, agent_type: str, expected_event_types: Sequence[str] | None = None, expected_state_feature_names: Sequence[str] | None = None, expected_candidate_feature_names: Sequence[str] | None = None, expected_preference_file_hash: str | None = None, formal: bool = True):
+    import torch
+    from training.event_schema import OBSERVATION_SCHEMA_VERSION, CANDIDATE_SCHEMA_VERSION, EVENT_SCHEMA_VERSION, EVENT_NAME_TO_ID, REQUIRED_EVENT_COVERAGE
+    from rlaif.multi_agent_reward_model import AgentRewardModel
+    path=Path(path)
+    if not path.is_file(): raise RewardCheckpointError(f"Reward checkpoint does not exist: {path}")
+    if path.suffix.lower()=='.json':
+        try:
+            data=json.loads(path.read_text())
+        except Exception as exc: raise RewardCheckpointError(f"Invalid reward checkpoint JSON: {exc}") from exc
+        if data.get('smoke_placeholder') is True: raise RewardCheckpointValidationError('The supplied artifact is a legacy placeholder summary, not a trained reward-model checkpoint.')
+        raise RewardCheckpointError('The supplied artifact is JSON, not a PyTorch reward-model checkpoint.')
+    try: ck=torch.load(path,map_location='cpu',weights_only=False)
+    except Exception as exc: raise RewardCheckpointError(f"Unable to load PyTorch reward checkpoint {path}: {exc}") from exc
+    if not isinstance(ck,dict): raise RewardCheckpointError('checkpoint is not a dictionary')
+    if ck.get('checkpoint_type')!='agent_reward_model': raise RewardCheckpointCompatibilityError('checkpoint_type is not agent_reward_model')
+    if ck.get('checkpoint_schema_version') not in {1}: raise RewardCheckpointCompatibilityError('unsupported reward checkpoint schema version')
+    if formal and ck.get('run_classification')!='formal': raise RewardCheckpointValidationError('formal loading requires run_classification = formal')
+    if formal and ck.get('validation_status')!='passed': raise RewardCheckpointValidationError('formal loading requires validation_status = passed')
+    if ck.get('agent_type')!=agent_type: raise RewardCheckpointCompatibilityError(f"checkpoint agent_type {ck.get('agent_type')} does not match requested {agent_type}")
+    req=tuple(expected_event_types or sorted(REQUIRED_EVENT_COVERAGE[agent_type]))
+    if set(ck.get('compatible_event_types',[])) != set(req): raise RewardCheckpointCompatibilityError('compatible event types do not match')
+    if ck.get('observation_schema_version')!=OBSERVATION_SCHEMA_VERSION or ck.get('candidate_schema_version')!=CANDIDATE_SCHEMA_VERSION or ck.get('event_schema_version')!=EVENT_SCHEMA_VERSION: raise RewardCheckpointCompatibilityError('schema version mismatch')
+    if ck.get('event_name_to_id')!=dict(EVENT_NAME_TO_ID): raise RewardCheckpointCompatibilityError('event_name_to_id mismatch')
+    if expected_state_feature_names is not None and list(expected_state_feature_names)!=ck.get('state_feature_names'): raise RewardCheckpointCompatibilityError('state feature names/order mismatch')
+    if expected_candidate_feature_names is not None and list(expected_candidate_feature_names)!=ck.get('candidate_feature_names'): raise RewardCheckpointCompatibilityError('candidate feature names/order mismatch')
+    if int(ck.get('state_feature_dim',-1))!=len(ck.get('state_feature_names',[])) or int(ck.get('candidate_feature_dim',-1))!=len(ck.get('candidate_feature_names',[])): raise RewardCheckpointCompatibilityError('feature dimensions do not match feature names')
+    for k in ('state_normalization_mean','state_normalization_std','candidate_normalization_mean','candidate_normalization_std'):
+        vals=ck.get(k);
+        if not vals or not all(math.isfinite(float(x)) for x in vals): raise RewardCheckpointCompatibilityError(f'{k} missing or nonfinite')
+    if not math.isfinite(float(ck.get('reward_output_training_mean',float('nan')))) or float(ck.get('reward_output_training_std',0))<=0: raise RewardCheckpointCompatibilityError('reward output normalization invalid')
+    if expected_preference_file_hash is not None and ck.get('preference_file_hash')!=expected_preference_file_hash: raise RewardCheckpointCompatibilityError('preference_file_hash mismatch')
+    arch=ck.get('model_architecture',{})
+    model=AgentRewardModel(state_dim=int(ck['state_feature_dim']),candidate_dim=int(ck['candidate_feature_dim']),num_event_types=len(ck['event_name_to_id']),event_embedding_dim=int(arch.get('event_embedding_dim',16)),hidden_dims=tuple(arch.get('hidden_dims',[64,64])),dropout=float(arch.get('dropout',0.0)))
+    model.load_state_dict(ck.get('model_state_dict',{}), strict=True); model.eval()
+    return ck, model
+
+
 class RewardModelWrapper:
     """Score assignment-level objective features for RLAIF reward shaping.
 
@@ -86,6 +133,9 @@ class RewardModelWrapper:
             torch = importlib.import_module("torch")
             from rlaif.reward_model import AssignmentRewardModel
             from rlaif.multi_agent_reward_model import MultiAgentRewardModel
+
+            if self.checkpoint_path.suffix.lower()=='.json' and json.loads(self.checkpoint_path.read_text()).get('smoke_placeholder') is True:
+                raise ValueError('The supplied artifact is a legacy placeholder summary, not a trained reward-model checkpoint.')
             checkpoint = torch.load(self.checkpoint_path, map_location="cpu", weights_only=False)
             if not isinstance(checkpoint, dict):
                 raise ValueError("checkpoint is not a dictionary")
