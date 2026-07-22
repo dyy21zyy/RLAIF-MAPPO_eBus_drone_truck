@@ -18,6 +18,8 @@ from data_pipeline.parse_bus_route import load_or_generate_bus_route
 from data_pipeline.synthesize_timetable import synthesize_timetable
 from data_pipeline.build_bus_circulation import build_bus_circulation
 from data_pipeline.scenario_manifest import resolve_seeds, write_scenario_manifest
+from data_pipeline.scenario_seeds import ScenarioSeedTuple, apply_seed_tuple
+import yaml
 from utils.config import PROJECT_ROOT, load_config
 
 
@@ -74,9 +76,11 @@ def normalize_dynamic_config(config: dict[str, Any]) -> dict[str, Any]:
 REQUIRED_FILENAMES = ["road_graph.graphml", "road_nodes.csv", "road_edges.csv", "depot.csv", "bus_stops.csv", "bus_trips.csv", "bus_stop_times.csv", "bus_timetable.json", "physical_buses.csv", "trip_to_bus.csv", "bus_circulation.json", "integrated_stations.csv", "parcels.csv", "truck_distance_matrix.npy", "truck_travel_time_matrix.npy", "drone_distance_matrix.npy", "instance.yaml", "instance.json"]
 
 
-def build_instance(config_path: str | Path, fallback: bool = False, output_root: str | Path | None = None, custom_bus_route: str | Path | None = None) -> dict[str, Any]:
+def build_instance(config_path: str | Path, fallback: bool = False, output_root: str | Path | None = None, custom_bus_route: str | Path | None = None, seed_overrides: ScenarioSeedTuple | dict[str, int] | None = None) -> dict[str, Any]:
     config_path = Path(config_path)
     config = normalize_dynamic_config(load_config(config_path))
+    if seed_overrides is not None:
+        apply_seed_tuple(config, seed_overrides)
     config.setdefault("seeds", resolve_seeds(config))
     if config.get("data_mode") == "original_scale_real_transit":
         from data_pipeline.original_scale_real_transit import build_original_scale_real_transit_instance
@@ -87,6 +91,7 @@ def build_instance(config_path: str | Path, fallback: bool = False, output_root:
     root = Path(output_root) if output_root else PROJECT_ROOT / "data" / "processed"
     output_dir = root / str(config["city"]["name"])
     output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "resolved_scenario_config.yaml").write_text(yaml.safe_dump(config, sort_keys=True), encoding="utf-8")
 
     graph, warnings = build_road_graph(config, fallback=fallback)
     road_paths = save_road_graph(graph, output_dir)
@@ -111,7 +116,7 @@ def build_instance(config_path: str | Path, fallback: bool = False, output_root:
                       **{key: path.name for key, path in matrix_paths.items()}}
     instance = {"schema_version": 1, "stage": 2, "city_name": config["city"]["name"],
                 "mode": "fallback" if fallback else ("fallback_after_osm_failure" if warnings else "full_osm"),
-                "seed": config.get("project", {}).get("seed", 0), "seeds": config["seeds"], "output_directory": str(output_dir),
+                "seed": config.get("project", {}).get("seed", 0), "seeds": config["seeds"], "scenario_seed_tuple": config.get("scenario_seed_tuple"), "output_directory": str(output_dir),
                 "artifacts": artifact_names, "counts": {"road_nodes": len(graph.nodes), "road_edges": len(graph.edges),
                 "bus_stops": len(stops), "bus_trips": len(trips), "bus_stop_times": len(stop_times),
                 "physical_buses": len(circulation["physical_buses"]), "trip_to_bus": len(circulation["trip_to_bus"]),

@@ -186,7 +186,10 @@ def resolve_mappo_training_config(config: dict[str, Any], *, seed_override: int 
     out["eval_path"] = path_for("eval_name_template","eval_path")
     out["resolved_config_path"] = path_for("resolved_config_name_template","resolved_config_path")
     if "reward" in cfg: validate_nonzero_formal_reward(cfg)
-    resolved={"run_classification": cfg.get("run_classification", "formal" if "paper" in str(env.get("config_path", "")) else "smoke"), "mode": mode, "env": {"config_path": str(_need(env,"config_path")), "fallback": bool(env.get("fallback", False))}, "training": tr, "networks": net, "rlaif": rlaif, "output": out, "reward": cfg.get("reward", {})}
+    env_resolved={"config_path": str(_need(env,"config_path")), "fallback": bool(env.get("fallback", False))}
+    for key in ("scenario_bank_manifest","expected_split","expected_bank_hash","scenario_sampling_mode","scenario_sampling_seed"):
+        if key in env: env_resolved[key]=env[key]
+    resolved={"run_classification": cfg.get("run_classification", "formal" if "paper" in str(env.get("config_path", "")) else "smoke"), "mode": mode, "env": env_resolved, "training": tr, "networks": net, "rlaif": rlaif, "output": out, "reward": cfg.get("reward", {})}
     validate_run_classification(resolved, config_only=True)
     return resolved
 
