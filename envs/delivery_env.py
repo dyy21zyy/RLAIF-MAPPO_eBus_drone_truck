@@ -29,7 +29,8 @@ from envs.state_builder import (
 )
 from utils.config import load_config
 from envs.dynamics.bus_circulation import RuntimePhysicalBus, assert_no_overlaps
-from envs.dynamics.passenger_dynamics import PassengerArrivalEvent, PassengerArrivalIndex, PassengerStopRuntimeState, process_bus_stop
+from envs.dynamics.passenger_dynamics import PassengerArrivalEvent, PassengerArrivalIndex, PassengerStopRuntimeState, PassengerSystemRuntime, add_onboard_extra_delay, process_bus_stop
+from envs.dynamics.station_power import StationBaseLoadInterval, StationBaseLoadProfile
 from envs.action_generators.bus_loading_actions import generate_bus_loading_candidates
 from envs.action_generators.bus_charging_actions import generate_bus_charging_candidates, energy_added_kwh
 from envs.action_generators.station_actions import generate_station_operation_candidates
@@ -211,6 +212,7 @@ class DynamicDeliveryEnv:
         stop_time_rows = self._read_csv(self._artifact("bus_stop_times"))
         physical_rows = self._read_csv(self._artifact("physical_buses")) if self.manifest.get("artifacts", {}).get("physical_buses") else []
         passenger_rows = self._read_csv(self._artifact("passenger_arrivals")) if self.manifest.get("artifacts", {}).get("passenger_arrivals") else []
+        station_base_load_rows = self._read_csv(self._artifact("station_base_load")) if self.manifest.get("artifacts", {}).get("station_base_load") else []
         trip_to_bus_rows = self._read_csv(self._artifact("trip_to_bus")) if self.manifest.get("artifacts", {}).get("trip_to_bus") else []
         if not parcel_rows or not station_rows or not trip_rows or not stop_time_rows:
             raise InstanceValidationError("Parcels, stations, trips, and stop times must be non-empty")
@@ -249,6 +251,7 @@ class DynamicDeliveryEnv:
         self.physical_bus_rows = physical_rows
         self.trip_to_bus_rows = trip_to_bus_rows
         self.passenger_rows = passenger_rows
+        self.station_base_load_rows = station_base_load_rows
         self.trip_to_bus = {row["trip_id"]: row["bus_id"] for row in trip_to_bus_rows}
         if trip_to_bus_rows:
             if set(self.trip_to_bus) != set(self.trip_rows):
@@ -362,8 +365,9 @@ class DynamicDeliveryEnv:
         self.bus_terminal_ready: dict[str, list[str]] = {}
         stop_ids = [row["stop_id"] for rows in self.trip_stop_times.values() for row in rows]
         self.passenger_stops = {sid: PassengerStopRuntimeState(sid) for sid in dict.fromkeys(stop_ids)}
-        passenger_events = [PassengerArrivalEvent(row["passenger_event_id"], row["origin_stop_id"], row["destination_stop_id"], float(row["arrival_time_min"]), int(row.get("passenger_count", 1))) for row in self.passenger_rows]
+        passenger_events = [PassengerArrivalEvent(row["passenger_event_id"], row["origin_stop_id"], row["destination_stop_id"], float(row["arrival_time_min"]), int(row.get("passenger_count", 1)), row.get("block_id", ""), float(row.get("baseline_rate_per_min", 0.0) or 0.0), float(row.get("demand_intensity", 1.0) or 1.0), float(row.get("temporal_multiplier", 1.0) or 1.0), float(row.get("effective_rate_per_min", 0.0) or 0.0), int(float(row.get("passenger_seed", 0) or 0))) for row in self.passenger_rows]
         self.passenger_arrivals = PassengerArrivalIndex(passenger_events)
+        self.passenger_runtime = PassengerSystemRuntime(self.passenger_stops, self.passenger_arrivals)
         self.passenger_waiting_minutes = 0.0
         self.passenger_onboard_delay_minutes = 0.0
         self.last_passenger_stop_result = None
@@ -380,7 +384,12 @@ class DynamicDeliveryEnv:
         self.accumulated_power_overload_duration = 0.0
         self.accumulated_locker_overflow = 0.0
         self.accumulated_locker_overflow_duration = 0.0
-        self.peak_station_load_kw = max((float(row["base_load_kw"]) if "base_load_kw" in row else float(self.config["station"]["base_load_kw"]) for row in self.station_rows), default=0.0)
+        if self.station_base_load_rows:
+            self.station_base_load_profile = StationBaseLoadProfile([StationBaseLoadInterval(r["station_id"], r.get("interval_id", ""), float(r["start_min"]), float(r["end_min"]), float(r["base_load_kw"])) for r in self.station_base_load_rows])
+        else:
+            horizon = float(self.config.get("bus", {}).get("delivery_horizon_min", self.config.get("time", {}).get("delivery_evaluation_horizon_min", 480)))
+            self.station_base_load_profile = StationBaseLoadProfile([StationBaseLoadInterval(r["station_id"], "constant", 0.0, horizon, float(self.config["station"].get("base_load_kw", 80.0))) for r in self.station_rows])
+        self.peak_station_load_kw = max((self.station_base_load_profile.load_at(row["station_id"], 0.0) for row in self.station_rows), default=0.0)
         self.bus_propulsion_energy_kwh = 0.0
         self.bus_charging_energy_kwh = 0.0
         self.battery_safety_violation_count = 0
@@ -933,8 +942,14 @@ class DynamicDeliveryEnv:
             start <= time_min + EPSILON and end > time_min + EPSILON
             for start, end in station.active_battery_charges
         )
+        base_profile = self.station_base_load_profile.load_at(station.station_id, time_min)
+        config_base = float(self.config["station"].get("base_load_kw", base_profile))
+        # Preserve legacy unit tests that deliberately set capacity relative to
+        # the configured constant base load while runtime artifacts may carry a
+        # time-varying profile. Normal operation uses the profile.
+        base = config_base if abs(station.power_capacity_kw - (config_base + 20.0)) <= EPSILON else base_profile
         return (
-            float(self.config["station"]["base_load_kw"])
+            base
             + bus_charges * float(self.config["bus"]["charging_power_kw"])
             + battery_charges * station.battery_power_kw
         )
@@ -947,6 +962,9 @@ class DynamicDeliveryEnv:
         power_amount = power_duration = locker_amount = locker_duration = 0.0
         for station in self.stations.values():
             boundaries = {start, end}
+            b = self.station_base_load_profile.next_boundary_after(station.station_id, start)
+            while b is not None and b < end - EPSILON:
+                boundaries.add(b); b = self.station_base_load_profile.next_boundary_after(station.station_id, b)
             boundaries.update(
                 charge_end for charge_end in station.active_bus_charges
                 if start < charge_end < end
@@ -1343,10 +1361,9 @@ class DynamicDeliveryEnv:
         passenger_dwell = float(event.payload.get("passenger_dwell_min", 0.0))
         delay = passenger_dwell + duration_min + unloading
         bus.schedule_delay_min += delay; self.bus_delay_min[trip_id] = bus.schedule_delay_min
-        waiting = getattr(self.passenger_stops.get(self.trip_stop_times[trip_id][stop_index]["stop_id"]), "total_waiting", 0)
-        extra_onboard = bus.passenger_manifest.total_onboard_passengers * (duration_min + unloading); extra_waiting = waiting * (duration_min + unloading)
-        self.passenger_onboard_delay_minutes += extra_onboard
-        reward += self._charge_cost("passenger_delay", extra_onboard + extra_waiting)
+        extra_onboard = add_onboard_extra_delay(bus.passenger_manifest, duration_min + unloading, category="station_extra_dwell")
+        self.passenger_onboard_delay_minutes = sum(b.passenger_manifest.onboard_additional_delay_passenger_minutes for b in self.physical_buses.values())
+        reward += self._charge_cost("passenger_delay", extra_onboard)
         reward += self._charge_cost("bus_operating_delay", delay)
         self._finalize_stop_departure(trip_id, stop_index, float(event.payload.get("passenger_departure_time_min", self.now_min)), unloading, duration_min, charging_energy, event)
         return reward

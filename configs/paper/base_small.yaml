@@ -84,17 +84,35 @@ parcel:
   - 4.0
   - 4.5
 passenger:
-  alighting_probability_max: 0.25
-  alighting_probability_min: 0.05
-  alighting_time_sec_per_passenger: 1.5
-  allow_arrivals_during_dwell: true
-  baseline_rate_max_per_min: 0.6
+  process: piecewise_time_dependent_poisson
   baseline_rate_mean_per_min: 0.25
+  baseline_rate_std_per_min: 0.10
   baseline_rate_min_per_min: 0.05
-  baseline_rate_std_per_min: 0.1
-  boarding_time_sec_per_passenger: 3.0
+  baseline_rate_max_per_min: 0.60
   demand_intensity: 1.0
-  process: time_dependent_poisson
+  temporal_profile:
+    - block_id: early
+      start_min: 0
+      end_min: 120
+      multiplier: 0.75
+    - block_id: peak
+      start_min: 120
+      end_min: 240
+      multiplier: 1.25
+    - block_id: midday
+      start_min: 240
+      end_min: 360
+      multiplier: 1.00
+    - block_id: late
+      start_min: 360
+      end_min: 480
+      multiplier: 0.50
+  boarding_time_sec_per_passenger: 3.0
+  alighting_time_sec_per_passenger: 1.5
+  baseline_dwell_min: 0.0
+  allow_arrivals_during_dwell: true
+  destination_model: explicit_downstream_destination
+  alighting_probability_status: superseded_by_explicit_destination_model
 scenario:
   num_parcels: 30
   size: small

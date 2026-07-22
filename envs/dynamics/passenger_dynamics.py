@@ -14,6 +14,12 @@ class PassengerArrivalEvent:
     destination_stop_id: str
     arrival_time_min: float
     passenger_count: int = 1
+    block_id: str = ""
+    baseline_rate_per_min: float = 0.0
+    demand_intensity: float = 1.0
+    temporal_multiplier: float = 1.0
+    effective_rate_per_min: float = 0.0
+    passenger_seed: int = 0
 
 @dataclass
 class PassengerStopRuntimeState:
@@ -82,7 +88,7 @@ def sample_stop_rates(stop_ids: Iterable[str], seed: int, intensity: float = 1.0
         val = rng.normal(mean, std)
         while val < min_rate or val > max_rate:
             val = rng.normal(mean, std)
-        rates[str(stop_id)] = float(min(max(val * float(intensity), max_rate), min_rate))
+        rates[str(stop_id)] = float(val) * float(intensity)
     return rates
 
 def generate_arrival_events(stop_ids: list[str], horizon_min: float, seed: int, intensity: float = 1.0, rates: dict[str, float] | None = None) -> tuple[dict[str, float], list[PassengerArrivalEvent], dict[str, Any]]:
@@ -96,7 +102,7 @@ def generate_arrival_events(stop_ids: list[str], horizon_min: float, seed: int, 
             t = float(rng.uniform(0.0, float(horizon_min)))
             events.append(PassengerArrivalEvent(f"pe_{origin}_{j:06d}", origin, dest, t, 1))
     events.sort(key=lambda e: (e.arrival_time_min, e.origin_stop_id, e.passenger_event_id))
-    provenance = {"process":"time_dependent_poisson_pre_generated","seed":int(seed),"intensity":float(intensity),"rate_bounds_per_min":[0.05,0.60],"destination_rule":"downstream_uniform"}
+    provenance = {"process":"homogeneous_poisson_pre_generated","seed":int(seed),"intensity":float(intensity),"rate_bounds_per_min":[0.05,0.60],"destination_rule":"downstream_uniform"}
     return rates, events, provenance
 
 class PassengerArrivalIndex:
@@ -128,12 +134,15 @@ class StopProcessingResult:
     waiting_passenger_minutes: float
     onboard_additional_delay_passenger_minutes: float
     departure_time_min: float
+    incremental_waiting_passenger_minutes: float = 0.0
+    incremental_onboard_additional_delay_passenger_minutes: float = 0.0
+    normal_passenger_dwell_min: float = 0.0
     terminated_by_iteration_cap: bool = False
 
 def process_bus_stop(stop: PassengerStopRuntimeState, bus: PassengerBusManifest, arrivals: PassengerArrivalIndex, arrival_time_min: float, *, baseline_dwell_min: float = 0.0, boarding_time_sec: float = 3.0, alighting_time_sec: float = 1.5, operational_dwell_min: float = 0.0, max_iterations: int = 1000) -> StopProcessingResult:
     before = stop.total_waiting
-    wait_inc = arrivals.apply_until(stop, arrival_time_min)
-    wait_minutes_inc = stop.cumulative_waiting_passenger_minutes
+    wait_before_minutes = stop.cumulative_waiting_passenger_minutes
+    arrivals.apply_until(stop, arrival_time_min)
     alight = bus.alight(stop.stop_id)
     dwell = baseline_dwell_min + operational_dwell_min + alight * alighting_time_sec / 60.0
     boarded_total = 0
@@ -141,7 +150,7 @@ def process_bus_stop(stop: PassengerStopRuntimeState, bus: PassengerBusManifest,
     while True:
         iters += 1
         if iters > max_iterations:
-            return StopProcessingResult(before, alight, boarded_total, bus.total_onboard_passengers, dwell, stop.cumulative_waiting_passenger_minutes, bus.onboard_additional_delay_passenger_minutes, arrival_time_min + dwell, True)
+            return StopProcessingResult(before, alight, boarded_total, bus.total_onboard_passengers, dwell, stop.cumulative_waiting_passenger_minutes, bus.onboard_additional_delay_passenger_minutes, arrival_time_min + dwell, stop.cumulative_waiting_passenger_minutes - wait_before_minutes, 0.0, dwell, True)
         boarded = bus.board_from_stop(stop)
         if boarded:
             boarded_total += boarded
@@ -150,6 +159,44 @@ def process_bus_stop(stop: PassengerStopRuntimeState, bus: PassengerBusManifest,
         added = arrivals.apply_until(stop, departure)
         if added <= 0 or bus.remaining_capacity() <= 0:
             break
-    additional = max(0.0, dwell - baseline_dwell_min)
-    bus.onboard_additional_delay_passenger_minutes += bus.total_onboard_passengers * additional
-    return StopProcessingResult(before, alight, boarded_total, bus.total_onboard_passengers, dwell, stop.cumulative_waiting_passenger_minutes, bus.onboard_additional_delay_passenger_minutes, arrival_time_min + dwell, False)
+    incremental_waiting = stop.cumulative_waiting_passenger_minutes - wait_before_minutes
+    return StopProcessingResult(before, alight, boarded_total, bus.total_onboard_passengers, dwell, stop.cumulative_waiting_passenger_minutes, bus.onboard_additional_delay_passenger_minutes, arrival_time_min + dwell, incremental_waiting, 0.0, dwell, False)
+
+
+class PassengerSystemRuntime:
+    """Central clock owner for waiting passenger-minute integration."""
+    def __init__(self, stops: dict[str, PassengerStopRuntimeState], arrivals: PassengerArrivalIndex):
+        self.stops = stops; self.arrivals = arrivals; self.last_update_time = 0.0; self.cumulative_waiting_passenger_minutes = 0.0
+    def integrate_all_queues_until(self, time_min: float) -> float:
+        if time_min < self.last_update_time - 1e-9:
+            raise ValueError("passenger queue time cannot move backward")
+        target = float(time_min)
+        before = sum(s.cumulative_waiting_passenger_minutes for s in self.stops.values())
+        # Advance in exact arrival-time order so passengers arriving between global
+        # clock ticks accumulate waiting time through the rest of the interval.
+        while True:
+            next_time = None
+            for sid, events in self.arrivals.by_stop.items():
+                cur = self.arrivals.cursor.get(sid, 0)
+                if cur < len(events):
+                    t = events[cur].arrival_time_min
+                    if self.last_update_time - 1e-9 <= t <= target + 1e-9:
+                        next_time = t if next_time is None else min(next_time, t)
+            if next_time is None:
+                for stop in self.stops.values():
+                    stop.integrate_waiting_until(target)
+                break
+            for stop in self.stops.values():
+                stop.integrate_waiting_until(next_time)
+            for stop in self.stops.values():
+                self.arrivals.apply_until(stop, next_time)
+            self.last_update_time = next_time
+        self.last_update_time = target
+        after = sum(s.cumulative_waiting_passenger_minutes for s in self.stops.values())
+        self.cumulative_waiting_passenger_minutes = after
+        return after - before
+
+def add_onboard_extra_delay(bus: PassengerBusManifest, duration_min: float, *, category: str = "extra") -> float:
+    inc = max(0.0, float(duration_min)) * max(0, int(bus.total_onboard_passengers))
+    bus.onboard_additional_delay_passenger_minutes += inc
+    return inc
