@@ -1,12 +1,13 @@
-experiment: {name: paper_sensitivity_smoke, base_config: configs/shanghai_small.yaml, seeds: [0], output_dir: results/paper_sensitivity, fallback: true}
+run_classification: formal
 experiments:
   - mode: fixed_policy_robustness
-    output_table: fixed_policy_robustness.csv
+    policy_checkpoint: results/formal/policies/mappo_rlaif_all_seed_1.pt
+    policy_checkpoint_hash: pending_fixed_hash
+    reward_checkpoints_fixed: true
     dimensions:
-      - {name: parcel_count, values: [30, 60]}
-      - {name: rlaif_lambda, values: [0.0, 0.2]}
+      - {name: demand_multiplier, values: [0.8, 1.0, 1.2]}
   - mode: retrained_policy_sensitivity
-    output_table: retrained_policy_sensitivity.csv
+    combined_table: false
     dimensions:
-      - {name: preference_label_volume, values: [100, 500]}
-      - {name: truck_count, values: [1, 2]}
+      - {name: demand_multiplier, value: 0.8, checkpoint: results/formal/sensitivity/demand_0_8_seed_1.pt, policy_checkpoint_hash: pending_demand_0_8}
+      - {name: demand_multiplier, value: 1.2, checkpoint: results/formal/sensitivity/demand_1_2_seed_1.pt, policy_checkpoint_hash: pending_demand_1_2}

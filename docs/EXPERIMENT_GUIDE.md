@@ -89,3 +89,11 @@ Formal studies should use frozen test-bank scenarios for all methods, train sepa
 ### Fix Phase 2 bus diagnostics
 
 Environment smoke tests report actual bus runtime metrics including scheduled trips started/completed, freight and non-freight completions, ordinary/integrated stops visited, ordinary-stop boardings/alightings, segment count, propulsion/relocation/charging energy, and minimum physical-bus SoC. These values are runtime diagnostics from the stop-by-stop event chain, not timetable-row inferences.
+
+## Fix Phase 6 formal evaluation integrity
+
+Formal evaluation now uses frozen scenario-bank manifests. All methods share identical scenario artifacts, and paired comparisons validate scenario ID, instance hash, scenario-manifest hash, and exogenous artifact hashes before comparison. Environment MAPPO, assignment-only RLAIF-MAPPO, and full RLAIF-MAPPO are separate formal method identities with separate policy checkpoints. Full RLAIF evaluation requires four agent-specific reward checkpoints loaded through `RewardRegistry`; assignment-only RLAIF enables only the assignment reward model. Reward models do not select evaluation actions; they validate lineage and score selected transitions for decomposition only.
+
+Formal metrics are fail-closed: missing instrumentation is missing, not zero. Legitimate zero values require an instrumented source and explicit legitimate-zero provenance. Ablations that require retraining require separate checkpoints and actual configuration differences. Sensitivity experiments distinguish fixed-policy robustness from retrained-policy sensitivity and do not aggregate the two modes together by default.
+
+This infrastructure does not claim that the final 100-scenario, three-seed paper benchmark has been executed; formal readiness remains blocked until final frozen banks, trained policies, and validated formal reward checkpoints exist.

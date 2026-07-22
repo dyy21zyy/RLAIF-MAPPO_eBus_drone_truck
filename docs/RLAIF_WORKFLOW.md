@@ -302,3 +302,11 @@ State collection records the policy source (`random`, environment-reward MAPPO c
 Labels are valid only when produced by an external evaluator API or by validated replay labels. Offline prompt-building mode creates zero labels. A/B order is randomized reproducibly and records original order, display order, evaluator answer, and resolved original winner. `tie` and `abstain` are accepted but excluded from Bradley--Terry training.
 
 Reward models default to four independent checkpoints: `results/checkpoints/reward_assignment.pt`, `results/checkpoints/reward_truck.pt`, `results/checkpoints/reward_bus.pt`, and `results/checkpoints/reward_station.pt`. Each checkpoint stores agent type, compatible events, v2 schema versions, feature names/dimensions, normalization statistics, reward mean/std, data and split hashes, validation metrics, and model configuration. Formal MAPPO RLAIF training fails closed when an enabled agent checkpoint is missing or incompatible.
+
+## Fix Phase 6 formal evaluation integrity
+
+Formal evaluation now uses frozen scenario-bank manifests. All methods share identical scenario artifacts, and paired comparisons validate scenario ID, instance hash, scenario-manifest hash, and exogenous artifact hashes before comparison. Environment MAPPO, assignment-only RLAIF-MAPPO, and full RLAIF-MAPPO are separate formal method identities with separate policy checkpoints. Full RLAIF evaluation requires four agent-specific reward checkpoints loaded through `RewardRegistry`; assignment-only RLAIF enables only the assignment reward model. Reward models do not select evaluation actions; they validate lineage and score selected transitions for decomposition only.
+
+Formal metrics are fail-closed: missing instrumentation is missing, not zero. Legitimate zero values require an instrumented source and explicit legitimate-zero provenance. Ablations that require retraining require separate checkpoints and actual configuration differences. Sensitivity experiments distinguish fixed-policy robustness from retrained-policy sensitivity and do not aggregate the two modes together by default.
+
+This infrastructure does not claim that the final 100-scenario, three-seed paper benchmark has been executed; formal readiness remains blocked until final frozen banks, trained policies, and validated formal reward checkpoints exist.

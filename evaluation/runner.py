@@ -116,3 +116,38 @@ class EvaluationRunner:
             if self.config.get("fail_fast") and rows[-1]["status"]=="failed": break
         write_records_csv(self.output_dir/"episodes.csv",rows)
         return rows
+
+# --- Formal Phase-6 helper API ---
+def build_reward_registry_for_method(method_spec):
+    """Load the exact set of RLAIF reward wrappers required by a formal method.
+
+    Environment MAPPO returns None; assignment-only loads only assignment; full
+    RLAIF loads assignment/truck/bus/station through RewardRegistry.
+    """
+    agents=tuple(getattr(method_spec,'enabled_reward_agents',()) or ())
+    if not agents: return None
+    from rlaif.reward_registry import RewardRegistry
+    checkpoints=dict(getattr(method_spec,'reward_checkpoints',{}) or {})
+    missing=[a for a in agents if not checkpoints.get(a)]
+    if missing: raise ValueError(f'missing reward checkpoints for enabled agents: {missing}')
+    return RewardRegistry({'rlaif':{'enabled':True,'fail_on_invalid_reward_model':True,'fallback_to_env_reward':False,'agents':{a:{'enabled':True,'checkpoint':checkpoints[a],'lambda':1.0,'checkpoint_hash':hashlib.sha256(str(checkpoints[a]).encode()).hexdigest()} for a in agents}}})
+
+def select_action_with_policy(policy, observation, action_mask, *, deterministic=True):
+    """Select an evaluation action from policy only; reward models are ignored."""
+    if hasattr(policy,'act'):
+        try: return int(policy.act(observation, action_mask, deterministic=deterministic)[0])
+        except TypeError: return int(policy.act(observation, action_mask)[0])
+    if hasattr(policy,'select_action'): return int(policy.select_action(observation, None))
+    if callable(policy): return int(policy(observation, action_mask))
+    return _first_feasible(action_mask)
+
+def score_rlaif_decomposition(registry, transitions, *, formal_mode=True):
+    from rlaif.reward_registry import empty_rlaif_training_totals, update_rlaif_training_totals
+    totals=empty_rlaif_training_totals()
+    if registry is None:
+        totals['fallback_count']=0; return totals
+    for t in transitions:
+        c=registry.score_transition(agent_type=t['agent_type'],event_type=t.get('event_type','ASSIGNMENT_DECISION'),environment_reward=float(t.get('environment_reward',0.0)),state_features=t.get('state_features',[]),candidate_features=t.get('candidate_features',[]),selected_action_index=int(t.get('selected_action_index',0)),formal_mode=formal_mode)
+        update_rlaif_training_totals(totals,c)
+    totals['fallback_count']=totals.get('rlaif_fallback_count',0)
+    return totals
