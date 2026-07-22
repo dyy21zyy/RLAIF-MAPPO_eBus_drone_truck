@@ -20,6 +20,9 @@ class MetricRecord:
     finite: bool
 
 class FormalMetricValidationError(RuntimeError): pass
+class MissingFormalMetricError(FormalMetricValidationError): pass
+class NonFiniteFormalMetricError(FormalMetricValidationError): pass
+class FormalMetricReconciliationError(FormalMetricValidationError): pass
 
 def metric_source_map(metrics:dict[str,Any])->dict[str,str]:
     return {k:(v.get('source') if isinstance(v,dict) else k) for k,v in metrics.items()}
@@ -27,11 +30,11 @@ def metric_source_map(metrics:dict[str,Any])->dict[str,str]:
 def _coerce(name:str, obj:Any)->MetricRecord:
     if isinstance(obj,MetricRecord): return obj
     if isinstance(obj,dict):
-        if obj.get('availability') == 'missing': raise FormalMetricValidationError(f'missing required metric: {name}')
-        if 'value' not in obj: raise FormalMetricValidationError(f'missing value for metric: {name}')
+        if obj.get('availability') == 'missing': raise MissingFormalMetricError(f'missing required metric: {name}')
+        if 'value' not in obj: raise MissingFormalMetricError(f'missing value for metric: {name}')
         val=obj['value']; finite=math.isfinite(float(val))
         return MetricRecord(val, obj.get('availability','available'), obj.get('source',name), bool(obj.get('legitimate_zero', float(val)==0.0)), finite)
-    if obj is None: raise FormalMetricValidationError(f'missing required metric: {name}')
+    if obj is None: raise MissingFormalMetricError(f'missing required metric: {name}')
     finite=math.isfinite(float(obj))
     return MetricRecord(obj,'available',name,bool(float(obj)==0.0),finite)
 
@@ -40,15 +43,15 @@ def validate_formal_metrics(row:dict[str,Any], *, fail_on_missing:bool=True)->di
     out={}
     for name in required:
         if name not in row:
-            if fail_on_missing: raise FormalMetricValidationError(f'missing required metric: {name}')
+            if fail_on_missing: raise MissingFormalMetricError(f'missing required metric: {name}')
             continue
         rec=_coerce(name,row[name])
-        if not rec.finite: raise FormalMetricValidationError(f'nonfinite metric: {name}')
+        if not rec.finite: raise NonFiniteFormalMetricError(f'nonfinite metric: {name}')
         if float(rec.value)==0.0 and not rec.legitimate_zero: raise FormalMetricValidationError(f'zero metric lacks legitimate-zero provenance: {name}')
         out[name]=asdict(rec)
     total=sum(float(out[f'rlaif_{a}_weighted']['value']) for a in ('assignment','truck','bus','station'))
-    if abs(total-float(out['rlaif_total_weighted']['value']))>1e-9: raise FormalMetricValidationError('RLAIF total does not reconcile')
+    if abs(total-float(out['rlaif_total_weighted']['value']))>1e-9: raise FormalMetricReconciliationError('RLAIF total does not reconcile')
     combined=float(out['environment_reward']['value'])+float(out['rlaif_total_weighted']['value'])
-    if abs(combined-float(out['combined_reward_total']['value']))>1e-9: raise FormalMetricValidationError('combined reward does not reconcile')
+    if abs(combined-float(out['combined_reward_total']['value']))>1e-9: raise FormalMetricReconciliationError('combined reward does not reconcile')
     out['metric_source_map']={k:v['source'] for k,v in out.items()}
     return out

@@ -1,0 +1,22 @@
+run_classification: diagnostic
+scenario_bank:
+  manifest: __GENERATED_SCENARIO_BANK_MANIFEST__
+methods:
+  - method_id: truck_direct_heuristic
+  - method_id: integrated_rule_based
+  - method_id: mappo_env
+    policy_checkpoints:
+      "1": __GENERATED_MAPPO_ENV_CHECKPOINT__
+  - method_id: mappo_rlaif_assignment
+    policy_checkpoints:
+      "1": __GENERATED_ASSIGNMENT_RLAIF_POLICY__
+    reward_checkpoints:
+      assignment: __GENERATED_ASSIGNMENT_REWARD_CHECKPOINT__
+  - method_id: mappo_rlaif_all
+    policy_checkpoints:
+      "1": __GENERATED_FULL_RLAIF_POLICY__
+    reward_checkpoints:
+      assignment: __GENERATED_ASSIGNMENT_REWARD_CHECKPOINT__
+      truck: __GENERATED_TRUCK_REWARD_CHECKPOINT__
+      bus: __GENERATED_BUS_REWARD_CHECKPOINT__
+      station: __GENERATED_STATION_REWARD_CHECKPOINT__

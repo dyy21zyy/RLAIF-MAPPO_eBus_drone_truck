@@ -71,7 +71,7 @@ def load_checkpoint_metadata(path: str|Path) -> dict[str,Any]:
 def validate_policy_checkpoint(spec: FormalPolicySpec, metadata_or_path: dict[str,Any] | str | Path) -> dict[str,Any]:
     if spec.method_id not in LEARNED_METHODS: return {}
     meta = load_checkpoint_metadata(metadata_or_path) if not isinstance(metadata_or_path,dict) else dict(metadata_or_path)
-    if spec.formal_mode and str(meta.get('run_classification','formal')) == 'smoke': raise PolicyCheckpointValidationError('smoke checkpoint rejected formally')
+    if spec.formal_mode and str(meta.get('run_classification','formal')) in {'smoke','diagnostic'}: raise PolicyCheckpointValidationError('smoke/diagnostic checkpoint rejected formally')
     if spec.expected_algorithm and meta.get('algorithm') != spec.expected_algorithm: raise PolicyCheckpointValidationError(f"checkpoint algorithm {meta.get('algorithm')} != {spec.expected_algorithm}")
     scope=meta.get('rlaif_scope', meta.get('RLAIF scope', 'none'))
     if scope != spec.expected_rlaif_scope: raise PolicyCheckpointValidationError(f'checkpoint RLAIF scope {scope} != {spec.expected_rlaif_scope}')
@@ -80,6 +80,8 @@ def validate_policy_checkpoint(spec: FormalPolicySpec, metadata_or_path: dict[st
     if spec.training_seed is not None and int(meta.get('training_seed',-1)) != int(spec.training_seed): raise PolicyCheckpointValidationError('checkpoint training seed mismatch')
     for k in ('training_scenario_bank_hash','resolved_training_config_hash','code_commit'):
         if spec.formal_mode and not meta.get(k): raise PolicyCheckpointValidationError(f'missing checkpoint lineage field: {k}')
+    if meta.get('checkpoint_schema_version') is None: raise PolicyCheckpointValidationError('missing checkpoint schema version')
+    if spec.formal_mode and meta.get('validation_status') in {'smoke_only','diagnostic_only'}: raise PolicyCheckpointValidationError('non-formal validation status rejected formally')
     r_hashes=meta.get('reward_checkpoint_hashes') or {}
     for a in spec.enabled_reward_agents:
         if not r_hashes.get(a): raise PolicyCheckpointValidationError(f'missing reward checkpoint hash for {a}')
