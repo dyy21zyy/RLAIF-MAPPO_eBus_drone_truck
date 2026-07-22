@@ -1,0 +1,12 @@
+run_classification: smoke
+training: {episodes: 1, max_steps_per_episode: 5}
+rlaif:
+  enabled: true
+  scope: all
+  fallback_to_env_reward: false
+  fail_on_invalid_reward_model: true
+  agents:
+    assignment: {enabled: true, checkpoint: results/diagnostic/rlaif/reward_models/reward_assignment.pt, lambda: 1.0, reward_clip: 2.0}
+    truck: {enabled: true, checkpoint: results/diagnostic/rlaif/reward_models/reward_truck.pt, lambda: 1.0, reward_clip: 2.0}
+    bus: {enabled: true, checkpoint: results/diagnostic/rlaif/reward_models/reward_bus.pt, lambda: 1.0, reward_clip: 2.0}
+    station: {enabled: true, checkpoint: results/diagnostic/rlaif/reward_models/reward_station.pt, lambda: 1.0, reward_clip: 2.0}

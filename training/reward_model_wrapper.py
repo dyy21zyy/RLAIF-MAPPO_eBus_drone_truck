@@ -52,10 +52,19 @@ def load_strict_agent_reward_checkpoint(path: str | Path, *, agent_type: str, ex
     if expected_state_feature_names is not None and list(expected_state_feature_names)!=ck.get('state_feature_names'): raise RewardCheckpointCompatibilityError('state feature names/order mismatch')
     if expected_candidate_feature_names is not None and list(expected_candidate_feature_names)!=ck.get('candidate_feature_names'): raise RewardCheckpointCompatibilityError('candidate feature names/order mismatch')
     if int(ck.get('state_feature_dim',-1))!=len(ck.get('state_feature_names',[])) or int(ck.get('candidate_feature_dim',-1))!=len(ck.get('candidate_feature_names',[])): raise RewardCheckpointCompatibilityError('feature dimensions do not match feature names')
-    for k in ('state_normalization_mean','state_normalization_std','candidate_normalization_mean','candidate_normalization_std'):
-        vals=ck.get(k);
-        if not vals or not all(math.isfinite(float(x)) for x in vals): raise RewardCheckpointCompatibilityError(f'{k} missing or nonfinite')
-    if not math.isfinite(float(ck.get('reward_output_training_mean',float('nan')))) or float(ck.get('reward_output_training_std',0))<=0: raise RewardCheckpointCompatibilityError('reward output normalization invalid')
+    expected_lengths = {
+        'state_normalization_mean': int(ck.get('state_feature_dim', -1)),
+        'state_normalization_std': int(ck.get('state_feature_dim', -1)),
+        'candidate_normalization_mean': int(ck.get('candidate_feature_dim', -1)),
+        'candidate_normalization_std': int(ck.get('candidate_feature_dim', -1)),
+    }
+    for k, expected_len in expected_lengths.items():
+        vals=ck.get(k)
+        if not vals or len(vals) != expected_len or not all(math.isfinite(float(x)) for x in vals):
+            raise RewardCheckpointCompatibilityError(f'{k} missing, nonfinite, or dimension mismatch')
+        if k.endswith('_std') and not all(float(x) > 0 for x in vals):
+            raise RewardCheckpointCompatibilityError(f'{k} must be positive')
+    if not math.isfinite(float(ck.get('reward_output_training_mean',float('nan')))) or not math.isfinite(float(ck.get('reward_output_training_std',float('nan')))) or float(ck.get('reward_output_training_std',0))<=0: raise RewardCheckpointCompatibilityError('reward output normalization invalid')
     if expected_preference_file_hash is not None and ck.get('preference_file_hash')!=expected_preference_file_hash: raise RewardCheckpointCompatibilityError('preference_file_hash mismatch')
     arch=ck.get('model_architecture',{})
     model=AgentRewardModel(state_dim=int(ck['state_feature_dim']),candidate_dim=int(ck['candidate_feature_dim']),num_event_types=len(ck['event_name_to_id']),event_embedding_dim=int(arch.get('event_embedding_dim',16)),hidden_dims=tuple(arch.get('hidden_dims',[64,64])),dropout=float(arch.get('dropout',0.0)))

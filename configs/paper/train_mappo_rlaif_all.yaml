@@ -1,0 +1,11 @@
+run_classification: formal
+rlaif:
+  enabled: true
+  scope: all
+  fallback_to_env_reward: false
+  fail_on_invalid_reward_model: true
+  agents:
+    assignment: {enabled: true, checkpoint: results/formal/reward_models/reward_assignment.pt, checkpoint_hash: REPLACE_WITH_REAL_HASH, lambda: 1.0, reward_clip: 2.0}
+    truck: {enabled: true, checkpoint: results/formal/reward_models/reward_truck.pt, checkpoint_hash: REPLACE_WITH_REAL_HASH, lambda: 1.0, reward_clip: 2.0}
+    bus: {enabled: true, checkpoint: results/formal/reward_models/reward_bus.pt, checkpoint_hash: REPLACE_WITH_REAL_HASH, lambda: 1.0, reward_clip: 2.0}
+    station: {enabled: true, checkpoint: results/formal/reward_models/reward_station.pt, checkpoint_hash: REPLACE_WITH_REAL_HASH, lambda: 1.0, reward_clip: 2.0}
