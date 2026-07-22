@@ -39,6 +39,9 @@ from envs.action_generators.station_actions import generate_station_operation_ca
 from envs.dynamics.station_dynamics import dispatch_drone as station_dispatch_drone, start_battery_charging, complete_battery_charging
 from envs.dynamics.bus_event_chain import BUS_TRIP_START, BUS_ARRIVE_STOP, BUS_DEPART_STOP, BUS_TRIP_COMPLETE, BUS_RELOCATION_COMPLETE, RuntimeTripState
 from envs.tracing.bus_trace import BusStopTraceRow, BusTraceCollector
+from envs.tracing.event_trace import EventTraceCollector, EventTraceRow
+from envs.tracing.truck_trace import TruckTraceCollector, TruckTraceRow
+from envs.tracing.parcel_trace import ParcelTraceCollector, ParcelTraceRow
 
 EPSILON = 1e-9
 class InstanceValidationError(ValueError):
@@ -324,6 +327,10 @@ class DynamicDeliveryEnv:
         self.bus_segment_index: dict[str, int] = {trip_id: 0 for trip_id in self.trip_rows}
         self.runtime_trip_states: dict[str, RuntimeTripState] = {}
         self.bus_trace = BusTraceCollector(enabled=bool(self.config.get("debug", {}).get("collect_bus_trace", True)))
+        trace_enabled = bool(self.config.get("debug", {}).get("collect_event_trace", self.config.get("debug", {}).get("collect_traces", True)))
+        self.event_trace = EventTraceCollector(enabled=trace_enabled)
+        self.truck_trace = TruckTraceCollector(enabled=trace_enabled)
+        self.parcel_trace = ParcelTraceCollector(enabled=trace_enabled)
         self.scheduled_bus_trips_started = 0
         self.scheduled_bus_trips_completed = 0
         self.freight_trips_completed = 0
@@ -499,6 +506,8 @@ class DynamicDeliveryEnv:
         reward += self._advance()
         self.reward_total += reward
         info = self._info(reward)
+        self._record_decision_trace(decision, selected)
+        self._record_parcel_snapshot(decision.event.kind)
         info.update({"requested_action": int(action), "applied_action": selected, "action_corrected": corrected})
         return self._observation(), reward, self.terminated, self.truncated, info
 
@@ -513,6 +522,7 @@ class DynamicDeliveryEnv:
                 self.now_min = self.horizon_min
                 break
             self.now_min = target_time
+            self._record_event_trace(event, False, None)
             if event.kind == "parcel_release":
                 parcel = self.parcels[event.payload["parcel_id"]]
                 parcel.status = "PENDING_ASSIGNMENT"
@@ -520,6 +530,7 @@ class DynamicDeliveryEnv:
                 if fallback:
                     self.fallback_feasibility_events += 1
                 self.current_decision = Decision("assignment", event, mask, fallback)
+                self._record_event_trace(event, True, "assignment")
             elif event.kind == "truck_available":
                 truck_index = int(event.payload["truck_index"])
                 scheduled_time = self.pending_truck_decision_min.get(truck_index)
@@ -534,6 +545,7 @@ class DynamicDeliveryEnv:
                     continue
                 surface = build_truck_decision_surface(self, truck)
                 self.current_decision = Decision("truck", event, surface.action_mask())
+                self._record_event_trace(event, True, "truck")
             elif event.kind == "truck_departure":
                 pass
             elif event.kind == "truck_arrive_stop":
@@ -585,6 +597,7 @@ class DynamicDeliveryEnv:
             elif event.kind == "station_operation":
                 surface = build_station_decision_surface(self, event.payload["station_id"])
                 self.current_decision = Decision("station", event, surface.action_mask())
+                self._record_event_trace(event, True, "station")
             elif event.kind == "drone_dispatch":
                 reward += self._dispatch_drone(
                     event.payload["parcel_id"],
@@ -1145,6 +1158,7 @@ class DynamicDeliveryEnv:
             event.payload["passenger_departure_time_min"] = presult.departure_time_min
             surface = build_bus_loading_decision_surface(self, trip_id)
             self.current_decision = Decision("bus", event, surface.action_mask())
+            self._record_event_trace(event, True, "bus")
         else:
             self._finalize_stop_departure(trip_id, 0, presult.departure_time_min, 0.0, 0.0, 0.0)
         return 0.0
@@ -1196,7 +1210,7 @@ class DynamicDeliveryEnv:
         if stop_index == len(rows)-1:
             self._push_bus_event(presult.departure_time_min + unloading, BUS_TRIP_COMPLETE, {"trip_id":trip_id,"physical_bus_id":bus.physical_bus_id,"stop_index":stop_index})
         elif station_id:
-            surface = build_bus_charging_decision_surface(self, event); self.current_decision = Decision("bus", event, surface.action_mask())
+            surface = build_bus_charging_decision_surface(self, event); self.current_decision = Decision("bus", event, surface.action_mask()); self._record_event_trace(event, True, "bus")
         else:
             self._finalize_stop_departure(trip_id, stop_index, presult.departure_time_min, unloading, 0.0, 0.0, event)
         return 0.0
@@ -1563,6 +1577,48 @@ class DynamicDeliveryEnv:
             "delivered_parcels": delivered,
             "total_parcels": len(self.parcels),
         }
+
+
+    def _canonical_event_name(self, kind: str) -> str:
+        return {"parcel_release":"PARCEL_RELEASE", "truck_available":"TRUCK_AVAILABLE", "bus_departure":"BUS_TERMINAL_DEPARTURE", BUS_TRIP_START:"BUS_TERMINAL_DEPARTURE", BUS_ARRIVE_STOP:"BUS_STATION_ARRIVAL", "bus_arrival":"BUS_STATION_ARRIVAL", "station_operation":"STATION_OPERATION"}.get(kind, str(kind).upper())
+
+    def _record_event_trace(self, event: Event, is_decision: bool, agent: str | None) -> None:
+        payload = event.payload
+        self.event_trace.append(EventTraceRow(self.event_sequence, float(event.time_min), float(self.now_min), event.kind, self._canonical_event_name(event.kind), bool(is_decision), agent, payload.get("truck_id") or payload.get("physical_bus_id") or payload.get("parcel_id"), payload.get("trip_id"), payload.get("physical_bus_id"), payload.get("stop_id"), payload.get("station_id"), payload.get("parcel_id"), None, None))
+        if event.kind.startswith("truck"):
+            self.truck_trace.append(TruckTraceRow(self.event_sequence, float(self.now_min), str(payload.get("truck_id", payload.get("truck_index", "truck"))), event.kind, int(payload.get("route_index", 0) or 0), payload.get("stop_id") or payload.get("final_location_id"), list(payload.get("parcel_ids", [])), 0.0, 0.0, float(self.config["truck"].get("weight_capacity_kg", self.config["truck"].get("capacity_kg", 0.0))), float(self.config["truck"].get("volume_capacity_m3", 0.0))))
+
+    def _record_decision_trace(self, decision: Decision, selected: int) -> None:
+        self.event_trace.append(EventTraceRow(self.event_sequence, float(decision.event.time_min), float(self.now_min), decision.event.kind, self._canonical_event_name(decision.event.kind), True, decision.agent, decision.event.payload.get("truck_id") or decision.event.payload.get("physical_bus_id") or decision.event.payload.get("parcel_id"), decision.event.payload.get("trip_id"), decision.event.payload.get("physical_bus_id"), decision.event.payload.get("stop_id"), decision.event.payload.get("station_id"), decision.event.payload.get("parcel_id"), int(selected), self.current_transition_id))
+
+    def _record_parcel_snapshot(self, event_kind: str) -> None:
+        for parcel in self.parcels.values():
+            self.parcel_trace.append(ParcelTraceRow(self.event_sequence, float(self.now_min), parcel.parcel_id, parcel.status, parcel.mode, parcel.station_id, parcel.truck_id, event_kind))
+
+    def export_bus_trace(self) -> list[dict]:
+        return self.bus_trace.as_dicts()
+    def export_passenger_trace(self) -> list[dict]:
+        return [{"stop_id": sid, "waiting_passenger_minutes": st.cumulative_waiting_passenger_minutes, "waiting_passengers": st.total_waiting} for sid, st in self.passenger_stops.items()]
+    def export_station_power_trace(self) -> list[dict]:
+        horizon = float(self.horizon_min)
+        rows=[]
+        for st in self.stations.values():
+            base = current_station_base_load_kw(self, st.station_id, self.now_min)
+            bus = sum(st.active_bus_charges)
+            batt = len(st.active_battery_charges) * float(st.battery_power_kw)
+            total=base+bus+batt
+            rows.append({"station_id":st.station_id,"start_min":0.0,"end_min":horizon,"duration_min":horizon,"base_load_kw":base,"bus_charging_load_kw":bus,"battery_charging_load_kw":batt,"total_load_kw":total,"capacity_kw":st.power_capacity_kw,"peak_load_kw":self.peak_station_load_kw,"overload_kw_min":self.accumulated_power_overload,"overload_duration_min":self.accumulated_power_overload_duration,"bus_charging_energy_kwh":self.bus_charging_energy_kwh,"battery_charging_energy_kwh":0.0})
+        return rows
+    def export_reward_ledger(self) -> list[dict]:
+        return self.reward_ledger.to_dict()
+    def export_event_trace(self) -> list[dict]:
+        return self.event_trace.as_dicts()
+    def export_truck_trace(self) -> list[dict]:
+        return self.truck_trace.as_dicts()
+    def export_parcel_state_trace(self) -> list[dict]:
+        return self.parcel_trace.as_dicts()
+    def get_formal_runtime_metrics(self) -> dict[str, float | int]:
+        return self.get_metrics()
 
     def get_metrics(self) -> dict[str, Any]:
         """Return the current dependency-light environment metric snapshot."""

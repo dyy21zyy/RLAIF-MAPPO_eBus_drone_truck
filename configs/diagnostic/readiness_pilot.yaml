@@ -1,7 +1,7 @@
 run_classification: diagnostic
 mode: environment_reward
 env:
-  config_path: configs/paper/base_medium.yaml
+  config_path: configs/shanghai_small.yaml
   fallback: true
 project:
   seed: 1
@@ -12,16 +12,16 @@ training:
   - 1
   - 2
   - 3
-  total_episodes: 3000
-  rollout_episodes: 10
+  total_episodes: 20
+  rollout_episodes: 5
   optimizer: Adam
   lr_actor: 5.0e-05
   lr_critic: 5.0e-05
   gamma: 0.997
   gae_lambda: 0.95
   clip_eps: 0.2
-  ppo_epochs: 5
-  batch_size: 128
+  ppo_epochs: 2
+  batch_size: 32
   entropy_coef: 0.01
   value_coef: 0.5
   max_grad_norm: 0.5
@@ -29,25 +29,20 @@ training:
 networks:
   event_embedding_dim: 16
   assignment_hidden_dims:
-  - 256
-  - 256
-  - 128
+  - 64
+  - 64
   truck_hidden_dims:
-  - 256
-  - 256
-  - 128
+  - 64
+  - 64
   bus_hidden_dims:
-  - 256
-  - 256
-  - 128
+  - 64
+  - 64
   station_hidden_dims:
-  - 256
-  - 256
-  - 128
+  - 64
+  - 64
   critic_hidden_dims:
-  - 256
-  - 256
-  - 128
+  - 64
+  - 64
 rlaif:
   enabled: false
   fallback_to_env_reward: false
@@ -70,6 +65,7 @@ reward:
   undelivered: 10.0
   battery_shortage: 1.0
   infeasible_action: 5.0
-  apply_reference_scales: true
-  scale_artifact: outputs/reward_reference_scales_v1.json
-  scale_artifact_hash: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  apply_reference_scales: false
+debug:
+  collect_event_trace: true
+  collect_bus_trace: true
