@@ -1,0 +1,16 @@
+run_classification: smoke
+scenario_bank:
+  split: test
+  manifest: results/smoke/scenarios/test/scenario_bank_manifest.json
+  expected_count: 3
+training_seeds: [1]
+paired_evaluation: true
+fallback: true
+fail_on_missing_artifact: true
+fail_on_missing_metric: true
+output_root: results/smoke/benchmark
+methods:
+  - method_id: truck_direct_heuristic
+    display_name: Truck-direct heuristic
+  - method_id: integrated_rule_based
+    display_name: Integrated rule-based heuristic

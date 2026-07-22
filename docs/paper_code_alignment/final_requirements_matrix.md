@@ -37,3 +37,11 @@ No item is marked `experiment-validated` because final formal experiments, train
 | sensitivity modes | implemented | Sensitivity config and runner exist; formal outputs blocked. |
 | artifact provenance | integration-tested | Scenario fixtures include provenance metadata. |
 | stop-by-stop physical bus event chain | unit-tested | Automatic bus trip/arrival/departure/completion/relocation events drive all scheduled pre-360 passenger trips; MAPPO sees only terminal loading and integrated-station charging decisions. |
+
+## Fix Phase 6 formal evaluation integrity
+
+Formal evaluation now uses frozen scenario-bank manifests. All methods share identical scenario artifacts, and paired comparisons validate scenario ID, instance hash, scenario-manifest hash, and exogenous artifact hashes before comparison. Environment MAPPO, assignment-only RLAIF-MAPPO, and full RLAIF-MAPPO are separate formal method identities with separate policy checkpoints. Full RLAIF evaluation requires four agent-specific reward checkpoints loaded through `RewardRegistry`; assignment-only RLAIF enables only the assignment reward model. Reward models do not select evaluation actions; they validate lineage and score selected transitions for decomposition only.
+
+Formal metrics are fail-closed: missing instrumentation is missing, not zero. Legitimate zero values require an instrumented source and explicit legitimate-zero provenance. Ablations that require retraining require separate checkpoints and actual configuration differences. Sensitivity experiments distinguish fixed-policy robustness from retrained-policy sensitivity and do not aggregate the two modes together by default.
+
+This infrastructure does not claim that the final 100-scenario, three-seed paper benchmark has been executed; formal readiness remains blocked until final frozen banks, trained policies, and validated formal reward checkpoints exist.
