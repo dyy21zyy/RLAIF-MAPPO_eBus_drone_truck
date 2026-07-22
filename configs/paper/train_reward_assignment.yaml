@@ -1,7 +1,8 @@
 # Phase 8 formal reward-model training config for assignment.
+run_classification: formal
 agent_type: assignment
-preference_schema_version: v2
-candidate_schema_version: v2
+preference_schema_version: 3
+candidate_schema_version: 3
 input:
   states: results/rlaif/assignment_states.jsonl
   preferences: results/rlaif/assignment_preferences.jsonl
@@ -16,3 +17,10 @@ training:
 validation:
   grouped_holdout: true
   min_pairwise_accuracy: 0.70
+
+split:
+  group_by: scenario
+  train_fraction: 0.70
+  validation_fraction: 0.15
+  test_fraction: 0.15
+  seed: 1

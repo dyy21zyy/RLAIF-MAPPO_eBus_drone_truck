@@ -1,0 +1,15 @@
+run_classification: smoke
+agent_type: truck
+preference_schema_version: 3
+input:
+  preferences: results/smoke/reward_models/preferences.jsonl
+output:
+  integrity_report: results/smoke/reward_models/truck_integrity.json
+split:
+  group_by: scenario
+  train_fraction: 0.70
+  validation_fraction: 0.15
+  test_fraction: 0.15
+  seed: 1
+training:
+  min_samples: 2
