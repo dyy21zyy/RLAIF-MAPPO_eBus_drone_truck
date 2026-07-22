@@ -1,0 +1,49 @@
+run_classification: diagnostic
+scenario_bank:
+  manifest: __GENERATED_TRAIN_BANK_MANIFEST__
+  split: train
+output:
+  artifact: __GENERATED_SCALE_ARTIFACT__
+reference_policies:
+  - truck_direct_reference
+  - integrated_rule_reference
+  - coverage_reference
+estimator:
+  method: percentile
+  percentile: 95
+minimum_valid_episodes: 1
+maximum_failure_fraction: 1.0
+minimum_scale_overrides:
+  bus_battery_violation:
+    value: 1.0
+    reason: "Diagnostic-only override: source is instrumented but diagnostic reference rollouts may produce no violation."
+  infeasible_action:
+    value: 1.0
+    reason: "Diagnostic-only override: reference policies select feasible actions, so infeasible penalties should remain zero."
+  passenger_delay:
+    value: 1.0
+    reason: "Diagnostic-only override for instrumented-zero component in the tiny diagnostic bank."
+  bus_operating_delay:
+    value: 1.0
+    reason: "Diagnostic-only override for instrumented-zero component in the tiny diagnostic bank."
+  parcel_lateness:
+    value: 1.0
+    reason: "Diagnostic-only override for instrumented-zero component in the tiny diagnostic bank."
+  energy_cost:
+    value: 1.0
+    reason: "Diagnostic-only override for instrumented-zero component in the tiny diagnostic bank."
+  power_overload:
+    value: 1.0
+    reason: "Diagnostic-only override for instrumented-zero component in the tiny diagnostic bank."
+  locker_overflow:
+    value: 1.0
+    reason: "Diagnostic-only override for instrumented-zero component in the tiny diagnostic bank."
+  truck_cost:
+    value: 1.0
+    reason: "Diagnostic-only override for instrumented-zero component in the tiny diagnostic bank."
+  undelivered:
+    value: 1.0
+    reason: "Diagnostic-only override for instrumented-zero component in the tiny diagnostic bank."
+  battery_shortage:
+    value: 1.0
+    reason: "Diagnostic-only override for instrumented-zero component in the tiny diagnostic bank."

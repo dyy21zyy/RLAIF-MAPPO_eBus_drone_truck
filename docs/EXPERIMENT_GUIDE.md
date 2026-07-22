@@ -107,3 +107,7 @@ Status: pilot-validated for the diagnostic readiness pilot; blocked for formal R
 This step corrects environment semantics and formal configuration gates only. It
 must not be interpreted as final formal-training readiness: final reward-scale
 estimation and a real end-to-end readiness pilot remain later-step work.
+
+### Step 6A reward-scale protocol
+
+Use `configs/paper/reward_scale_estimation.yaml` as the formal protocol template. It requires a frozen train split bank and writes the final artifact only when run later by the user. Diagnostic preparation and estimation write under `results/diagnostic/reward_scales/`, which is ignored and must not be committed.

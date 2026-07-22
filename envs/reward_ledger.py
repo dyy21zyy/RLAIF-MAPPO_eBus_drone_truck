@@ -9,37 +9,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from typing import Any
+from envs.reward_components import REWARD_COMPONENTS as CANONICAL_REWARD_COMPONENTS
 
 REWARD_LEDGER_SCHEMA_VERSION = 1
 
-REWARD_COMPONENTS = {
-    "passenger_waiting_delay",
-    "onboard_additional_passenger_delay",
-    "bus_operating_delay",
-    "parcel_lateness",
-    "undelivered_parcels",
-    "truck_cost",
-    "bus_energy",
-    "drone_energy",
-    "station_power_overload",
-    "locker_overflow",
-    "battery_shortage",
-    "bus_battery_violation",
-    "infeasible_action",
-}
+REWARD_COMPONENTS = set(CANONICAL_REWARD_COMPONENTS)
+
 
 LEGACY_COMPONENT_MAP = {
-    "passenger_delay": "passenger_waiting_delay",
+    "passenger_delay": "passenger_delay",
     "bus_operating_delay": "bus_operating_delay",
     "parcel_lateness": "parcel_lateness",
-    "energy_cost": "bus_energy",
-    "power_overload": "station_power_overload",
+    "energy_cost": "energy_cost",
+    "power_overload": "power_overload",
     "bus_battery_violation": "bus_battery_violation",
     "locker_overflow": "locker_overflow",
     "truck_cost": "truck_cost",
-    "undelivered": "undelivered_parcels",
+    "undelivered": "undelivered",
     "battery_shortage": "battery_shortage",
     "infeasible_action": "infeasible_action",
+    "station_power_overload": "power_overload",
+    "undelivered_parcels": "undelivered",
+    "bus_energy": "energy_cost",
+    "drone_energy": "energy_cost",
+    "passenger_waiting_delay": "passenger_delay",
+    "onboard_additional_passenger_delay": "passenger_delay",
 }
 
 @dataclass(frozen=True)
@@ -49,6 +43,10 @@ class RewardEntry:
     raw_amount: float
     normalized_amount: float
     weighted_amount: float
+    reference_scale: float = 1.0
+    configured_weight: float = 1.0
+    reward_contribution: float = 0.0
+    scale_artifact_hash: str | None = None
     entity_ids: tuple[str, ...] = ()
     parcel_ids: tuple[str, ...] = ()
     source_transition_ids: tuple[str, ...] = ()
@@ -62,6 +60,10 @@ class RewardEntry:
         object.__setattr__(self, "raw_amount", float(self.raw_amount))
         object.__setattr__(self, "normalized_amount", float(self.normalized_amount))
         object.__setattr__(self, "weighted_amount", float(self.weighted_amount))
+        object.__setattr__(self, "reference_scale", float(self.reference_scale))
+        object.__setattr__(self, "configured_weight", float(self.configured_weight))
+        reward = self.reward_contribution if self.reward_contribution else -float(self.weighted_amount)
+        object.__setattr__(self, "reward_contribution", float(reward))
         object.__setattr__(self, "entity_ids", tuple(map(str, self.entity_ids)))
         object.__setattr__(self, "parcel_ids", tuple(map(str, self.parcel_ids)))
         object.__setattr__(self, "source_transition_ids", tuple(map(str, self.source_transition_ids)))
@@ -79,17 +81,18 @@ class RewardLedger:
         self.entries.append(entry)
 
     def add_cost(self, *, event_time: float, component: str, raw_amount: float, weight: float,
-                 reference_scale: float = 1.0, entity_ids=(), parcel_ids=(),
+                 reference_scale: float = 1.0, scale_artifact_hash: str | None = None, entity_ids=(), parcel_ids=(),
                  source_transition_ids=(), decision_chain_refs=(), provenance: str = "environment") -> float:
         canonical = LEGACY_COMPONENT_MAP.get(component, component)
         raw = max(0.0, float(raw_amount))
         scale = max(abs(float(reference_scale)), 1e-9)
         normalized = raw / scale
         weighted = normalized * float(weight)
-        self.add(RewardEntry(event_time, canonical, raw, normalized, weighted,
+        reward = -weighted
+        self.add(RewardEntry(event_time, canonical, raw, normalized, weighted, scale, float(weight), reward, scale_artifact_hash,
                              tuple(entity_ids), tuple(parcel_ids), tuple(source_transition_ids),
                              tuple(decision_chain_refs), provenance))
-        return -weighted
+        return reward
 
     def reward_sum(self) -> float:
         return -sum(entry.weighted_amount for entry in self.entries)

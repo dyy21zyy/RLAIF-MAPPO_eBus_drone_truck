@@ -18,6 +18,7 @@ import numpy as np
 
 from envs.decision_schema import DecisionSurface
 from envs.reward_ledger import RewardLedger
+from envs.reward_components import REWARD_COMPONENTS
 from envs.reward_scales import load_reward_scale_artifact
 from envs.status import is_delivered_status
 from envs.state_builder import (
@@ -387,8 +388,7 @@ class DynamicDeliveryEnv:
         self.truck_parcels_routed = 0
         self.truck_weight_utilization_sum = 0.0
         self.truck_volume_utilization_sum = 0.0
-        reward_components = ("passenger_delay", "bus_operating_delay", "parcel_lateness", "energy_cost", "power_overload",
-            "bus_battery_violation", "locker_overflow", "truck_cost", "undelivered", "battery_shortage", "infeasible_action")
+        reward_components = REWARD_COMPONENTS
         self.raw_cost_components = {name: 0.0 for name in reward_components}
         self.normalized_cost_components = {name: 0.0 for name in reward_components}
         self.weighted_cost_components = {name: 0.0 for name in reward_components}
@@ -396,8 +396,10 @@ class DynamicDeliveryEnv:
         self.reward_reference_scales = {name: 1.0 for name in reward_components}
         reward_cfg = self.config.get("reward", {})
         if reward_cfg.get("apply_reference_scales", False):
-            artifact = load_reward_scale_artifact(reward_cfg.get("scale_artifact"), expected_hash=reward_cfg.get("scale_artifact_hash"), required_components=set(reward_components))
+            artifact = load_reward_scale_artifact(reward_cfg.get("scale_artifact"), expected_hash=reward_cfg.get("scale_artifact_hash"), expected_training_bank_hash=reward_cfg.get("expected_training_scenario_bank_hash"), required_components=reward_components, formal_mode=str(self.config.get("run_classification", "")).lower()=="formal")
             self.reward_reference_scales.update(artifact.scales)
+            self.reward_scale_artifact_hash = artifact.artifact_hash
+        self.reward_scale_artifact_hash = getattr(self, "reward_scale_artifact_hash", None)
         self.parcels = {
             row["parcel_id"]: ParcelState(
                 parcel_id=row["parcel_id"], release_time_min=float(row.get("release_time_min", row.get("release_time"))),
@@ -1426,7 +1428,7 @@ class DynamicDeliveryEnv:
         if component == "undelivered":
             parcel_ids = [p.parcel_id for p in self.parcels.values() if not is_delivered_status(p.status)]
         chains = [ref for pid in parcel_ids for ref in self.parcel_decision_chains.get(pid, [])]
-        return self.reward_ledger.add_cost(event_time=self.now_min, component=component, raw_amount=amount, weight=weight, parcel_ids=parcel_ids, source_transition_ids=([self.current_transition_id] if self.current_transition_id else []), decision_chain_refs=chains, provenance=("terminal_team_distribution" if component == "undelivered" else "environment"))
+        return self.reward_ledger.add_cost(event_time=self.now_min, component=component, raw_amount=amount, weight=weight, reference_scale=scale, scale_artifact_hash=getattr(self, "reward_scale_artifact_hash", None), parcel_ids=parcel_ids, source_transition_ids=([self.current_transition_id] if self.current_transition_id else []), decision_chain_refs=chains, provenance=("terminal_team_distribution" if component == "undelivered" else "environment"))
 
     def _finish_episode(self) -> float:
         if self.terminated:
