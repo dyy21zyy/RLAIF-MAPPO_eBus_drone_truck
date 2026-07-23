@@ -125,7 +125,7 @@ def prepare(output_root: Path, *, force: bool=False, resume: bool=False, counts:
     scale_cfg.setdefault('scenario_bank', {})['expected_bank_hash'] = manifests['train']['bank_hash']
     runtime_scale_cfg = output_root/'configs/reward_scale_estimation.resolved.yaml'; runtime_scale_cfg.parent.mkdir(parents=True, exist_ok=True)
     runtime_scale_cfg.write_text(yaml.safe_dump(scale_cfg, sort_keys=False))
-    scale = run_estimation(paths['train'], runtime_scale_cfg, scale_path, run_classification='formal', scenario_limit=scale_scenario_limit, force=force)
+    scale = run_estimation(paths['train'], runtime_scale_cfg, scale_path, run_classification='formal', scenario_limit=scale_scenario_limit, force=force, resume=resume)
     scale = _validate_reward_scale(scale_path, manifests['train']['bank_hash']) if scale is None else scale
     reward_models = {}
     for agent in ('assignment','truck','bus','station'):

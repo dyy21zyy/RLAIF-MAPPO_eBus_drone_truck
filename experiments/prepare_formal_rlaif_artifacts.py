@@ -9,7 +9,7 @@ import argparse, hashlib, json, os, subprocess, sys
 from pathlib import Path
 from typing import Any
 import yaml
-from evaluation.scenario_bank import sha256_file, load_bank_manifest
+from evaluation.scenario_bank import sha256_file, load_bank_manifest, load_scenario_bank, verify_scenario_hashes
 from experiments.generate_formal_multiagent_preferences import generate as generate_preferences
 from training.config_resolver import resolve_mappo_training_config
 from experiments.train_multi_agent_reward_models import main as train_reward_main
@@ -107,7 +107,7 @@ def _inject_artifacts(template_path: Path, output_path: Path, manifest: dict[str
     tpl = _load_yaml(template_path)
     train_manifest = Path(cfg["scenario_bank"]["final_train_manifest"])
     train_bank_manifest = load_bank_manifest(train_manifest)
-    bank_hash = train_bank_manifest.get("bank_hash") or manifest.get("scenario_bank",{}).get("bank_hash") or manifest.get("scenario_bank_hash")
+    bank_hash = train_bank_manifest.get("bank_hash")
     if not bank_hash: raise RuntimeError("formal train bank manifest missing canonical bank_hash")
     manifest_file_hash = sha256_file(train_manifest)
     scale = Path(tpl.get("reward", {}).get("scale_artifact", "results/formal/reward_scales/final_reward_reference_scales.json"))
@@ -189,8 +189,18 @@ def prepare(config_path: Path, output_root: Path, *, resume: bool) -> dict[str, 
     if not train_manifest.is_file():
         raise RuntimeError(f"missing formal train bank manifest: {train_manifest}")
     train_bank_manifest = load_bank_manifest(train_manifest)
-    canonical_train_bank_hash = train_bank_manifest.get("bank_hash") or manifest.get("scenario_bank",{}).get("bank_hash") or manifest.get("scenario_bank_hash")
-    if not bank_hash: raise RuntimeError("formal train bank manifest missing canonical bank_hash")
+    canonical_train_bank_hash = train_bank_manifest.get("bank_hash")
+    if not canonical_train_bank_hash:
+        raise RuntimeError("formal train bank manifest missing canonical bank_hash")
+    if any(p in str(canonical_train_bank_hash) for p in PLACEHOLDERS):
+        raise RuntimeError("formal train bank manifest contains placeholder bank_hash")
+    if train_bank_manifest.get("split") != "train":
+        raise RuntimeError("formal train bank manifest must have split=train")
+    if int(train_bank_manifest.get("scenario_count") or 0) <= 0:
+        raise RuntimeError("formal train bank manifest scenario_count must be positive")
+    train_bank = load_scenario_bank(train_manifest)
+    for scenario in train_bank.scenarios:
+        verify_scenario_hashes(scenario)
     manifest_file_hash = sha256_file(train_manifest)
     evaluator = verify_evaluator_config(cfg)
     pref_manifest = output_root / "preference_manifest.json"
