@@ -299,7 +299,23 @@ class DynamicDeliveryEnv:
         del options  # Reserved for Gymnasium compatibility.
         self.seed = int(self.config["project"]["seed"] if seed is None else seed)
         self.now_min = 0.0
-        self.horizon_min = float(self.config["bus"]["delivery_horizon_min"])
+        time_cfg = self.config.setdefault("time", {})
+        bus_cfg = self.config.setdefault("bus", {})
+        canonical = time_cfg.get("delivery_evaluation_horizon_min")
+        legacy = bus_cfg.get("delivery_horizon_min")
+        if canonical is None and legacy is None:
+            raise InstanceValidationError("missing time.delivery_evaluation_horizon_min (legacy alias bus.delivery_horizon_min is accepted)")
+        if canonical is None:
+            canonical = legacy
+        elif legacy is not None and float(canonical) != float(legacy):
+            raise InstanceValidationError(
+                "conflicting delivery horizon values: "
+                f"time.delivery_evaluation_horizon_min={canonical!r} "
+                f"bus.delivery_horizon_min={legacy!r}"
+            )
+        time_cfg["delivery_evaluation_horizon_min"] = canonical
+        bus_cfg["delivery_horizon_min"] = canonical
+        self.horizon_min = float(canonical)
         self.event_sequence = 0
         self.events: list[Event] = []
         self.current_decision: Decision | None = None

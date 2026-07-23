@@ -40,11 +40,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(yaml.safe_dump(config, sort_keys=False))
         return 0
     if not is_torch_runtime_available():
-        print("SKIP: Stage 6 assignment PPO training requires PyTorch.")
+        message = "Stage 6 assignment PPO training requires PyTorch."
+        if config.get("run_classification") == "formal":
+            raise RuntimeError(f"formal Assignment PPO cannot skip: {message}")
+        print(f"SKIP: {message}")
         return 0
     from training.ppo_trainer import train_assignment_ppo
 
     result = train_assignment_ppo(config)
+    if config.get("run_classification") == "formal":
+        rows = result.get("rows", [])
+        updates = sum(1 for row in rows if row.get("policy_loss") not in (None, ""))
+        if updates <= 0:
+            raise RuntimeError("formal Assignment PPO completed zero optimizer updates")
     print(f"Saved Stage 6 assignment PPO checkpoint to {result['checkpoint_path']}")
     return 0
 

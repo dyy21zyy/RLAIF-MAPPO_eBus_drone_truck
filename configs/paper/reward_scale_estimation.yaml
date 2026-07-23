@@ -25,3 +25,6 @@ minimum_scale_overrides:
   battery_shortage:
     value: 1.0
     reason: "Instrumented-zero in final train-bank reference rollouts; kept explicit to preserve denominator availability."
+  infeasible_action:
+    value: 1.0
+    reason: "Instrumented-zero in reduced/formal reference rollouts when canonical policies avoid invalid actions; explicit denominator preserves validation without adding a reward component."
