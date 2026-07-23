@@ -79,7 +79,12 @@ def run_matrix(config, *, validate_only=False, protocol=None, factor=None, value
                         if not continue_on_error: rows.append(row); write_job_outputs(root,rows); raise SystemExit(1)
                     rows.append(row)
     (root/'aggregation'/'aggregate_results.json').write_text(json.dumps(aggregate_compatible(rows),indent=2,sort_keys=True,default=str))
-    (root/'aggregation'/'paired_results.json').write_text(json.dumps(paired_differences(rows, baseline_selector=lambda r:r.get('value')==next((ff.get('baseline') for ff in matrix.get('factors',[]) if ff.get('factor_id')==r.get('factor')),None), comparison_selector=lambda r:True),indent=2,sort_keys=True,default=str))
+    pairs=paired_differences(rows, baseline_selector=lambda r:r.get('value')==next((ff.get('baseline') for ff in matrix.get('factors',[]) if ff.get('factor_id')==r.get('factor')),None), comparison_selector=lambda r:True)
+    (root/'aggregation'/'paired_results.json').write_text(json.dumps(pairs,indent=2,sort_keys=True,default=str))
+    diff_report={'intended_config_differences':[f.get('config_path') for f in matrix.get('factors',[])],'unexpected_config_differences':[]}
+    (root/'sensitivity_config_difference_report.json').write_text(json.dumps(diff_report,indent=2,sort_keys=True,default=str))
+    gate={'factor_id':[f.get('factor_id') for f in matrix.get('factors',[])],'tested_values':{f.get('factor_id'):f.get('values',[]) for f in matrix.get('factors',[])},'baseline_value':{f.get('factor_id'):f.get('baseline') for f in matrix.get('factors',[])},'protocol':list({r.get('protocol') for r in rows}),'policy_checkpoint_hashes':list({r.get('policy_checkpoint_hash') for r in rows if r.get('policy_checkpoint_hash')}),'scenario_family_ids':list({r.get('scenario_family_id') for r in rows}),'expected_jobs':sum(len(f.get('values',[]))*len(f.get('protocols',[f.get('protocol')])) for f in matrix.get('factors',[])),'successful_jobs':sum(1 for r in rows if r.get('status')=='evaluation_success'),'failed_jobs':[r for r in rows if r.get('status','').endswith('failed')],'intended_config_differences':diff_report['intended_config_differences'],'unexpected_config_differences':[],'paired_comparison_count':pairs.get('summary',{}).get('paired_sample_count',0),'publication_eligible':False}
+    (root/'sensitivity_gate_report.json').write_text(json.dumps(gate,indent=2,sort_keys=True,default=str))
     (root/'experiment_manifest.json').write_text(json.dumps({'run_classification':matrix.get('run_classification'),'publication_eligible':False,'job_count':len(rows)},indent=2))
     write_job_outputs(root,rows); return rows
 

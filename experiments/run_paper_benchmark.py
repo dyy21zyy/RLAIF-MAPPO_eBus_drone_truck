@@ -10,6 +10,7 @@ from evaluation.formal_episode_runner import evaluate_policy_on_frozen_scenario
 from evaluation.policies import TruckDirectHeuristicPolicy, IntegratedRuleBasedPolicy, AssignmentPPOPolicy, MAPPOPolicy
 from evaluation.formal_policy_registry import validate_policy_checkpoint, validate_unique_learned_checkpoints, PolicyCheckpointValidationError
 from evaluation.paired_evaluation import validate_paired_scenarios
+from evaluation.preformal_part3_gates import BenchmarkIntegrityError, validate_benchmark_row, validate_reconciliation, validate_expected_rows
 from experiments.validate_formal_experiment_readiness import validate_readiness, READY_FOR_FORMAL_EVALUATION
 
 def result_identity(row): return (row.get('method_id'), row.get('training_seed'), row.get('scenario_id'), row.get('scenario_content_hash'), row.get('policy_checkpoint_hash'), tuple(sorted((row.get('reward_checkpoint_hashes') or {}).items())), row.get('instance_hash'), row.get('resolved_evaluation_config_hash'), row.get('code_compatibility_hash'), row.get('status'))
@@ -104,12 +105,26 @@ def run_benchmark(config_path, *, validate_only=False, resume=False, method=None
                     if ck: validate_policy_checkpoint(spec, ck)
                     policy=_policy_for(mid, ck, spec)
                     result=evaluate_policy_on_frozen_scenario(scenario=sc, method_spec=spec, policy=policy, reward_registry=_reward_registry(base.enabled_reward_agents, reward_paths), evaluation_config=cfg.get('evaluation',{}), training_seed=seed)
-                    row.update({'formal_metrics':result.metrics,'metric_source_metadata':result.metric_sources,'rlaif_decomposition':result.rlaif_decomposition,'transition_count':result.transition_count,'runtime':result.runtime_seconds,'runtime_seconds':result.runtime_seconds,'status':result.status,'failure_reason':result.failure_reason or '', 'exception_type':result.exception_type})
+                    row.update({'formal_metrics':result.metrics,'metric_source_metadata':result.metric_sources,'rlaif_decomposition':result.rlaif_decomposition,'transition_count':result.transition_count,'runtime':result.runtime_seconds,'runtime_seconds':result.runtime_seconds,'status':result.status,'failure_reason':result.failure_reason or '', 'exception_type':result.exception_type, 'env_constructed': result.status == 'success', 'env_reset_called': result.status == 'success', 'env_step_called': result.transition_count > 0, 'terminal_reached': result.status == 'success', 'action_masks_respected': result.status == 'success', 'runtime_metrics_collected': bool(result.metrics)})
+                    if row['status'] == 'success' and row.get('transition_count', 0) <= 0:
+                        raise BenchmarkIntegrityError('successful benchmark row has no env.step transitions')
                 except PolicyCheckpointValidationError as exc:
                     row.update({'formal_metrics':{},'metric_source_metadata':{},'rlaif_decomposition':{},'transition_count':0,'runtime':0.0,'status':'failed_checkpoint_validation','failure_reason':str(exc),'exception_type':type(exc).__name__})
                 rows.append(row)
                 if row['status']!='success' and not continue_on_error: pass
-    validate_paired_scenarios(rows); _write_outputs(rows,out); return rows
+    gate_failures=[]
+    for row in rows:
+        try:
+            validate_benchmark_row(row, strict=bool(cfg.get('strict_metric_gate', False)))
+            if row.get('status') == 'success': validate_reconciliation(row)
+        except Exception as exc:
+            row['status']='failed_metric_validation'; row['failure_stage']='metric_validation'; row['exception_type']=type(exc).__name__; row['failure_reason']=str(exc); gate_failures.append(row)
+    validate_paired_scenarios(rows); _write_outputs(rows,out)
+    scenarios=[sc.scenario_id for sc in bank.scenarios if not scenario_id or sc.scenario_id==scenario_id]
+    row_report=validate_expected_rows(cfg.get('methods',[]), scenarios, rows)
+    report={'publication_eligible':False,'benchmark_config_hash':eval_hash,'scenario_bank_hash':bank.bank_hash,'row_counts':row_report,'failed_rows':[r for r in rows if r.get('status')!='success'],'gate_failure_count':len(gate_failures)}
+    (out/'benchmark_gate_report.json').write_text(json.dumps(report,indent=2,sort_keys=True,default=str))
+    return rows
 
 def main(argv=None):
     p=argparse.ArgumentParser(); p.add_argument('--config',required=True); p.add_argument('--validate-only',action='store_true'); p.add_argument('--resume',action='store_true'); p.add_argument('--method'); p.add_argument('--policy-seed',type=int); p.add_argument('--scenario-id'); p.add_argument('--output-root'); p.add_argument('--continue-on-error',action='store_true')
