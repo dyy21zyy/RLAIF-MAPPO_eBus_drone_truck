@@ -91,7 +91,12 @@ def run_estimation(scenario_bank, config, output, *, run_classification=None, sc
     if report_only:
         print(json.dumps({"report_only":True,"training_scenario_bank_hash":manifest["bank_hash"],"scenario_count":len(bank.scenarios),"run_classification":classification}, indent=2)); return None
     out=Path(output); outdir=out.parent
-    if out.exists() and not force: raise FileExistsError(f"output exists; use --force: {out}")
+    if resume and force: raise ValueError("--resume and --force are mutually exclusive")
+    if out.exists() and not force:
+        if resume:
+            load_reward_scale_artifact(out, expected_training_bank_hash=manifest["bank_hash"], formal_mode=(classification=="formal"))
+            return json.loads(out.read_text(encoding="utf-8"))
+        raise FileExistsError(f"output exists; use --force: {out}")
     outdir.mkdir(parents=True, exist_ok=True)
     resolved_cfg=json.loads(json.dumps(cfg, sort_keys=True, default=str)); resolved_cfg["run_classification"]=classification; resolved_cfg["scenario_bank"]={**resolved_cfg.get("scenario_bank",{}),"manifest":str(scenario_bank),"bank_hash":manifest["bank_hash"]}
     resolved_hash=sha256_json(resolved_cfg)
@@ -100,10 +105,29 @@ def run_estimation(scenario_bank, config, output, *, run_classification=None, sc
     progress_path = outdir / "reward_scale_episode_components.progress.jsonl"
     completed: dict[tuple[str, str], dict[str, Any]] = {}
     if resume and progress_path.exists() and not force:
-        for line in progress_path.read_text(encoding="utf-8").splitlines():
+        expected_scenarios = {s.scenario_id: s for s in selected}
+        expected_policies = {p.name: p for p in pols}
+        for lineno, line in enumerate(progress_path.read_text(encoding="utf-8").splitlines(), start=1):
             if line.strip():
                 rec = json.loads(line)
-                completed[(str(rec.get("reference_policy")), str(rec.get("scenario_id")))] = rec
+                key = (str(rec.get("reference_policy")), str(rec.get("scenario_id")))
+                if key in completed:
+                    raise RewardScaleEstimationError(f"duplicate reward-scale progress row for {key}")
+                pol = expected_policies.get(key[0]); scen = expected_scenarios.get(key[1])
+                if pol is None or scen is None:
+                    raise RewardScaleEstimationError(f"progress row {lineno} is outside current scenario/policy set")
+                checks = {
+                    "scenario_bank_hash": manifest["bank_hash"],
+                    "scenario_content_hash": scen.scenario_content_hash,
+                    "reference_policy_version": pol.version,
+                    "estimation_seed": seed,
+                    "resolved_config_hash": resolved_hash,
+                    "run_classification": classification,
+                }
+                for field, expected_value in checks.items():
+                    if rec.get(field) != expected_value:
+                        raise RewardScaleEstimationError(f"incompatible reward-scale progress row {lineno}: {field} mismatch")
+                completed[key] = rec
     rows=[]; failures=[]; steps_total=0
     progress_handle = progress_path.open("a", encoding="utf-8")
     try:
@@ -116,7 +140,7 @@ def run_estimation(scenario_bank, config, output, *, run_classification=None, sc
                     if row.get("episode_status") == "failed": failures.append(row)
                     steps_total += int(row.get("transition_count") or 0)
                     continue
-                t=time.time(); base={"scenario_id":s.scenario_id,"scenario_content_hash":s.scenario_content_hash,"instance_hash":s.instance_hash,"scenario_bank_hash":bank.bank_hash,"reference_policy":pol.name,"reference_policy_version":pol.version,"estimation_seed":seed,"run_classification":classification}
+                t=time.time(); base={"scenario_id":s.scenario_id,"scenario_content_hash":s.scenario_content_hash,"instance_hash":s.instance_hash,"scenario_bank_hash":bank.bank_hash,"reference_policy":pol.name,"reference_policy_version":pol.version,"estimation_seed":seed,"resolved_config_hash":resolved_hash,"run_classification":classification}
                 try:
                     env=DynamicDeliveryEnv(s.instance_path)
                     env.config.setdefault("reward", {})["apply_reference_scales"] = False
@@ -139,6 +163,12 @@ def run_estimation(scenario_bank, config, output, *, run_classification=None, sc
                     progress_handle.write(json.dumps(row, sort_keys=True)+"\n"); progress_handle.flush()
     finally:
         progress_handle.close()
+    seen_keys=set()
+    for r in rows:
+        key=(str(r.get("reference_policy")), str(r.get("scenario_id")))
+        if key in seen_keys:
+            raise RewardScaleEstimationError(f"duplicate reward-scale episode row for {key}")
+        seen_keys.add(key)
     rows.sort(key=lambda r: (str(r.get("reference_policy")), str(r.get("scenario_id"))))
     failures.sort(key=lambda r: (str(r.get("reference_policy")), str(r.get("scenario_id"))))
     ep_csv=outdir/"reward_scale_episode_components.csv"; ep_jsonl=outdir/"reward_scale_episode_components.jsonl"
@@ -160,7 +190,7 @@ def run_estimation(scenario_bank, config, output, *, run_classification=None, sc
     artifact["artifact_hash"]=canonical_payload_hash(artifact)
     out.write_text(json.dumps(artifact, indent=2, sort_keys=True)+"\n")
     (outdir/"reward_scale_manifest.json").write_text(json.dumps({"artifact":out.name,"artifact_hash":artifact["artifact_hash"],"validation_status":artifact["validation_status"],"runtime_files":[ep_csv.name,ep_jsonl.name,stat_csv.name,stat_json.name,"reward_scale_failures.json"]}, indent=2, sort_keys=True))
-    load_reward_scale_artifact(out, expected_hash=artifact["artifact_hash"], expected_training_bank_hash=bank.bank_hash, formal_mode=False)
+    load_reward_scale_artifact(out, expected_hash=artifact["artifact_hash"], expected_training_bank_hash=bank.bank_hash, formal_mode=(classification=="formal"))
     return artifact
 
 def main():

@@ -9,7 +9,7 @@ def manifest(tmp_path):
 
 
 def test_complete_assignment_and_full_configs_generated_without_placeholders(tmp_path):
-    cfg={'scenario_bank':{'final_train_manifest':str(tmp_path/'bank.json')}}; (tmp_path/'bank.json').write_text('{"x":1}')
+    cfg={'scenario_bank':{'final_train_manifest':str(tmp_path/'bank.json')}}; (tmp_path/'bank.json').write_text('{"split":"train","scenario_count":1,"bank_hash":"bankhash","scenarios":[]}')
     out1=tmp_path/'configs'/'mappo_rlaif_assignment.yaml'; out2=tmp_path/'configs'/'mappo_rlaif_all.yaml'
     _inject_artifacts(Path('configs/paper/train_mappo_rlaif_assignment.yaml'), out1, manifest(tmp_path), ('assignment',), cfg)
     _inject_artifacts(Path('configs/paper/train_mappo_rlaif_all.yaml'), out2, manifest(tmp_path), tuple(AGENT_TYPES), cfg)
@@ -26,7 +26,7 @@ def test_complete_assignment_and_full_configs_generated_without_placeholders(tmp
 
 def test_mappo_method_fairness_except_rlaif_scope_and_outputs(tmp_path):
     env=yaml.safe_load(Path('configs/paper/train_mappo_env.yaml').read_text())
-    cfg={'scenario_bank':{'final_train_manifest':str(tmp_path/'bank.json')}}; (tmp_path/'bank.json').write_text('{"x":1}')
+    cfg={'scenario_bank':{'final_train_manifest':str(tmp_path/'bank.json')}}; (tmp_path/'bank.json').write_text('{"split":"train","scenario_count":1,"bank_hash":"bankhash","scenarios":[]}')
     out=tmp_path/'configs'/'mappo_rlaif_all.yaml'; _inject_artifacts(Path('configs/paper/train_mappo_rlaif_all.yaml'), out, manifest(tmp_path), tuple(AGENT_TYPES), cfg)
     r=yaml.safe_load(out.read_text())
     for key in ('training','networks','reward'):

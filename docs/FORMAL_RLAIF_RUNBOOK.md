@@ -22,7 +22,7 @@ python -m experiments.prepare_formal_experiment_inputs \
   --resume
 ```
 
-Expected outputs include the frozen train/validation/test scenario-bank manifests and the final reward-scale artifact under `results/formal/`. On a first run, use normal creation or `--force` to intentionally rebuild all requested formal inputs. On interrupted runs, use `--resume` to reuse only validated compatible scenario banks and the reward-scale estimator progress. `--resume` and `--force` are mutually exclusive.
+Expected outputs include the frozen train/validation/test scenario-bank manifests and the final reward-scale artifact under `results/formal/`. On a first run, use normal creation or `--force` to intentionally rebuild all requested formal inputs. On interrupted runs, use `--resume`: if a completed reward-scale artifact already exists, it is loaded and reused only after canonical validation passes; if the final artifact is absent, compatible progress rows are reused and only unfinished scenario/policy pairs continue. `--resume` fails closed on incompatible, stale, blocked, or hash-invalid reward-scale artifacts or progress. `--force` explicitly rebuilds artifacts according to the existing force path. `--resume` and `--force` are mutually exclusive.
 
 All scenario identities in formal configs and lineage use the scenario-bank manifest internal canonical `bank_hash`. The manifest-file SHA is recorded separately as `manifest_file_hash` for file-integrity metadata only and must not substitute for `bank_hash`.
 
