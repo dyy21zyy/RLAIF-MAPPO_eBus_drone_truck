@@ -111,3 +111,13 @@ estimation and a real end-to-end readiness pilot remain later-step work.
 ### Step 6A reward-scale protocol
 
 Use `configs/paper/reward_scale_estimation.yaml` as the formal protocol template. It requires a frozen train split bank and writes the final artifact only when run later by the user. Diagnostic preparation and estimation write under `results/diagnostic/reward_scales/`, which is ignored and must not be committed.
+
+## Running the diagnostic and strict pre-formal gates
+
+1. Prepare diagnostic artifacts: `python -m experiments.prepare_diagnostic_preformal_gate --output-root results/diagnostic/preformal_gate --force`.
+2. Run diagnostic validate-only: `python -m experiments.run_preformal_gate --config results/diagnostic/preformal_gate/preformal_gate.resolved.yaml --output-root results/diagnostic/preformal_gate/run --validate-only`.
+3. Execute diagnostic integration: `python -m experiments.run_preformal_gate --config results/diagnostic/preformal_gate/preformal_gate.resolved.yaml --output-root results/diagnostic/preformal_gate/run --continue-on-error`.
+4. Resume diagnostic integration: add `--resume --continue-on-error` to the same command.
+5. Run strict report-only validation: `python -m experiments.run_preformal_gate --config configs/preformal/preformal_gate.template.yaml --output-root results/preformal/gate --validate-only --strict`.
+
+Diagnostic mode validates the orchestration path with small local artifacts and remains publication-ineligible. Strict mode is a formal-candidate readiness check and must block on missing formal scenario banks, reward-scale artifacts, reward checkpoints, policy checkpoints, or placeholder hashes. Runtime reports, resolved configs, checkpoints, benchmark outputs, ablation outputs, sensitivity outputs, readiness reports, and launch plans stay under ignored `results/` roots and are not committed.

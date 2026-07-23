@@ -68,3 +68,8 @@ checkpoints/
 *.bin
 *.joblib
 /results/preformal/
+
+# Generated diagnostic and pre-formal artifacts
+/results/diagnostic/preformal_gate/
+/results/preformal/
+/results/formal/

@@ -213,6 +213,8 @@ class PreformalGate:
             "reward_model_hashes": self.config.get("reward_model_hashes", {}),
             "policy_checkpoint_hashes": self.config.get("policy_checkpoint_hashes", {}),
             "benchmark_row_counts": self.config.get("benchmark_row_counts", {}),
+            "training_transition_counts": self.config.get("training_transition_counts", {}),
+            "optimizer_update_counts": self.config.get("optimizer_update_counts", {}),
             "ablation_job_counts": self.config.get("ablation_job_counts", {}),
             "sensitivity_job_counts": self.config.get("sensitivity_job_counts", {}),
             "paired_comparison_counts": self.config.get("paired_comparison_counts", {}),

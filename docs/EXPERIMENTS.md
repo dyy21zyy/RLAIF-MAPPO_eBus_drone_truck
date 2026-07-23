@@ -168,3 +168,11 @@ This infrastructure does not claim that the final 100-scenario, three-seed paper
 ## Fix Phase 7 readiness note
 
 Status: pilot-validated for the diagnostic readiness pilot; blocked for formal RLAIF until all four final formal reward checkpoints and manifests validate. Diagnostic and smoke artifacts are not experiment-validated formal artifacts.
+
+## Diagnostic pre-formal gate
+
+The diagnostic pre-formal gate is a small, real integration workload and is explicitly publication-ineligible (`publication_eligible=false`, `run_classification=diagnostic`). Generate its local-only inputs with `python -m experiments.prepare_diagnostic_preformal_gate --output-root results/diagnostic/preformal_gate --force`. The helper writes scenario-bank manifests, reward-scale metadata, diagnostic reward checkpoints, and resolved configs only below `results/diagnostic/preformal_gate/`, which is ignored by Git.
+
+Use `python -m experiments.run_preformal_gate --config results/diagnostic/preformal_gate/preformal_gate.resolved.yaml --output-root results/diagnostic/preformal_gate/run --validate-only` for report-only validation, then omit `--validate-only` and add `--continue-on-error` to execute the diagnostic gate. Use `--resume --continue-on-error` to exercise identity-based resume behavior.
+
+Strict pre-formal validation is different: `python -m experiments.run_preformal_gate --config configs/preformal/preformal_gate.template.yaml --output-root results/preformal/gate --validate-only --strict` must honestly report blockers while formal artifacts and hashes are unresolved. The diagnostic pre-formal workflow has been executed to validate the integration path. Final formal readiness still requires real formal scenario banks, reward-scale artifacts, validated reward checkpoints, and a passing strict pre-formal run.
