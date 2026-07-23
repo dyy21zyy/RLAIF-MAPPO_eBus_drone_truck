@@ -18,3 +18,54 @@ workload:
 formal_launch_commands:
   - python experiments/train_mappo_async.py --config configs/paper/mappo_formal.yaml
   - python experiments/run_paper_benchmark.py --config configs/paper/benchmark_formal.yaml
+
+artifact_inventory:
+  output: results/preformal/gate/artifact_inventory.json
+  artifacts:
+    train_scenario_bank: {path: REPLACE_WITH_REAL_TRAIN_BANK_MANIFEST, hash: REPLACE_WITH_REAL_TRAIN_BANK_HASH}
+    validation_scenario_bank: {path: REPLACE_WITH_REAL_VALIDATION_BANK_MANIFEST, hash: REPLACE_WITH_REAL_VALIDATION_BANK_HASH}
+    test_scenario_bank: {path: REPLACE_WITH_REAL_TEST_BANK_MANIFEST, hash: REPLACE_WITH_REAL_TEST_BANK_HASH}
+    reward_scale_artifact: {path: REPLACE_WITH_REAL_REWARD_SCALE_ARTIFACT, hash: REPLACE_WITH_REAL_SCALE_HASH}
+    assignment_reward_checkpoint: {path: REPLACE_WITH_REAL_ASSIGNMENT_REWARD_CHECKPOINT, hash: REPLACE_WITH_REAL_ASSIGNMENT_REWARD_HASH}
+    truck_reward_checkpoint: {path: REPLACE_WITH_REAL_TRUCK_REWARD_CHECKPOINT, hash: REPLACE_WITH_REAL_TRUCK_REWARD_HASH}
+    bus_reward_checkpoint: {path: REPLACE_WITH_REAL_BUS_REWARD_CHECKPOINT, hash: REPLACE_WITH_REAL_BUS_REWARD_HASH}
+    station_reward_checkpoint: {path: REPLACE_WITH_REAL_STATION_REWARD_CHECKPOINT, hash: REPLACE_WITH_REAL_STATION_REWARD_HASH}
+    assignment_ppo_checkpoint: {path: REPLACE_WITH_REAL_ASSIGNMENT_PPO_CHECKPOINT, hash: REPLACE_WITH_REAL_ASSIGNMENT_PPO_HASH}
+    mappo_env_checkpoint: {path: REPLACE_WITH_REAL_MAPPO_ENV_CHECKPOINT, hash: REPLACE_WITH_REAL_MAPPO_ENV_HASH}
+    mappo_rlaif_assignment_checkpoint: {path: REPLACE_WITH_REAL_MAPPO_ASSIGNMENT_RLAIF_CHECKPOINT, hash: REPLACE_WITH_REAL_MAPPO_ASSIGNMENT_RLAIF_HASH}
+    mappo_rlaif_all_checkpoint: {path: REPLACE_WITH_REAL_MAPPO_ALL_RLAIF_CHECKPOINT, hash: REPLACE_WITH_REAL_MAPPO_ALL_RLAIF_HASH}
+scenario_banks:
+  mode: load_or_generate_reduced_formal_candidate
+  required_metadata: {run_classification: formal, experiment_stage: preformal, publication_eligible: false}
+  train_manifest: REPLACE_WITH_REAL_TRAIN_BANK_MANIFEST
+  validation_manifest: REPLACE_WITH_REAL_VALIDATION_BANK_MANIFEST
+  test_manifest: REPLACE_WITH_REAL_TEST_BANK_MANIFEST
+reward_scale:
+  estimator: production_reward_reference_scale_estimator
+  artifact_path: REPLACE_WITH_REAL_REWARD_SCALE_ARTIFACT
+  artifact_hash: REPLACE_WITH_REAL_SCALE_HASH
+  expected_training_bank_hash: REPLACE_WITH_REAL_TRAIN_BANK_HASH
+reward_models:
+  rlaif_scope: assignment
+  enabled_reward_agents: [assignment]
+  assignment: {path: REPLACE_WITH_REAL_ASSIGNMENT_REWARD_CHECKPOINT, hash: REPLACE_WITH_REAL_ASSIGNMENT_REWARD_HASH}
+  truck: {enabled: false, path: REPLACE_WITH_REAL_TRUCK_REWARD_CHECKPOINT, hash: REPLACE_WITH_REAL_TRUCK_REWARD_HASH}
+  bus: {enabled: false, path: REPLACE_WITH_REAL_BUS_REWARD_CHECKPOINT, hash: REPLACE_WITH_REAL_BUS_REWARD_HASH}
+  station: {enabled: false, path: REPLACE_WITH_REAL_STATION_REWARD_CHECKPOINT, hash: REPLACE_WITH_REAL_STATION_REWARD_HASH}
+short_training:
+  training_seed: 1
+  mappo_total_episodes: 60
+  assignment_ppo_episodes: 40
+  scenario_sampler_mode: train_bank_round_robin
+methods:
+  assignment_ppo: {enabled: true, required: true}
+  mappo_env: {enabled: true, required: true}
+  mappo_rlaif_assignment: {enabled: true, required: true}
+  mappo_rlaif_all: {enabled: false, required: false}
+stages:
+  required: [artifact_inventory, scenario_bank_validation, reward_scale_validation, reward_model_validation, environment_mappo_training, assignment_ppo_training, assignment_rlaif_mappo_training, policy_checkpoint_validation]
+  optional: [full_rlaif_mappo_training]
+strict_fallback_rules:
+  fallback_to_env_reward: false
+  fail_on_invalid_reward_model: true
+  strict_preformal_fallback_count_must_equal: 0

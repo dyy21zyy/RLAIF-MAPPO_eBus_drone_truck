@@ -14,3 +14,41 @@ workload:
   ablation_methods: [mappo_env, mappo_rlaif_assignment]
   sensitivity_factor: drone_speed
   sensitivity_values: [0.9, 1.1]
+
+artifact_inventory:
+  output: results/diagnostic/preformal_gate/artifact_inventory.json
+  permitted_diagnostic_artifacts: ['*']
+  artifacts:
+    train_scenario_bank: {path: results/diagnostic/preformal_gate/scenario_banks/train/manifest.json}
+    validation_scenario_bank: {path: results/diagnostic/preformal_gate/scenario_banks/validation/manifest.json}
+    test_scenario_bank: {path: results/diagnostic/preformal_gate/scenario_banks/test/manifest.json}
+    reward_scale_artifact: {path: results/diagnostic/preformal_gate/reward_reference_scales.json}
+scenario_banks:
+  mode: generate_small_diagnostic
+  output_root: results/diagnostic/preformal_gate/scenario_banks
+  required_metadata: {run_classification: diagnostic, experiment_stage: preformal_diagnostic, publication_eligible: false}
+reward_scale:
+  estimator: production_reward_reference_scale_estimator
+  artifact_path: results/diagnostic/preformal_gate/reward_reference_scales.json
+  run_classification: diagnostic
+  publication_eligible: false
+reward_models:
+  rlaif_scope: assignment
+  enabled_reward_agents: []
+  diagnostic_placeholders_resolve_under: results/diagnostic/preformal_gate/reward_models
+short_training:
+  training_seed: 1
+  mappo_total_episodes: 2
+  assignment_ppo_episodes: 2
+methods:
+  assignment_ppo: {enabled: true, required: false}
+  mappo_env: {enabled: true, required: true}
+  mappo_rlaif_assignment: {enabled: false, required: false}
+  mappo_rlaif_all: {enabled: false, required: false}
+stages:
+  required: [artifact_inventory, scenario_bank_validation, reward_scale_validation, environment_mappo_training]
+  optional: [reward_model_validation, assignment_rlaif_mappo_training, full_rlaif_mappo_training]
+strict_fallback_rules:
+  fallback_to_env_reward: true
+  fail_on_invalid_reward_model: false
+  diagnostic_fallback_must_be_recorded: true
