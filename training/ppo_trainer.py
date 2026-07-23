@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import json
 import math
+import hashlib
+import subprocess
 import random
 from pathlib import Path
 from typing import Any
@@ -40,6 +42,12 @@ def set_training_seed(seed: int) -> None:
 def create_environment(config: dict[str, Any], output_root: str | Path | None = None) -> DynamicDeliveryEnv:
     env_config = config["env"]
     instance_path = env_config.get("instance_path")
+    if not instance_path and env_config.get("train_scenario_bank_manifest"):
+        from evaluation.scenario_bank import load_scenario_bank
+        bank = load_scenario_bank(env_config["train_scenario_bank_manifest"])
+        if env_config.get("expected_train_bank_hash") and bank.bank_hash != env_config.get("expected_train_bank_hash"):
+            raise ValueError("Assignment PPO train bank hash mismatch")
+        instance_path = bank.scenarios[0].instance_path
     if instance_path:
         return DynamicDeliveryEnv(instance_path, env_config.get("config_path"))
     instance = build_instance(
@@ -47,7 +55,7 @@ def create_environment(config: dict[str, Any], output_root: str | Path | None = 
         fallback=bool(env_config.get("fallback", True)),
         output_root=output_root,
     )
-    return DynamicDeliveryEnv(Path(instance["output_directory"]) / "instance.json")
+    return DynamicDeliveryEnv(Path(instance["output_directory"]) / "instance.json", env_config.get("config_path"))
 
 
 def _action_feature_vector(env: DynamicDeliveryEnv, action_id: int, feasible: bool) -> list[float]:
@@ -70,6 +78,10 @@ def _episode_metrics(env: DynamicDeliveryEnv, counts: dict[str, int]) -> dict[st
         "bus_charging_count": counts["bus_charge"],
     }
 
+
+def _fit_obs(values: list[float], dim: int) -> list[float]:
+    vals = [float(v) for v in values]
+    return vals[:dim] if len(vals) > dim else vals + [0.0] * (dim - len(vals))
 
 def _first_feasible(action_mask: list[bool]) -> int:
     return next(index for index, feasible in enumerate(action_mask) if feasible)
@@ -127,7 +139,7 @@ def collect_episode(
             env_reward_total += float(reward)
             continue
 
-        obs = [float(value) for value in observation["features"]]
+        obs = _fit_obs(observation["features"], model.obs_dim)
         mask = [bool(value) for value in observation["action_mask"]]
         parcel_id = str(observation["entity_id"])
         event_time = float(observation["time_min"])
@@ -158,7 +170,7 @@ def collect_episode(
         rlaif_reward_total += r_rlaif
         done = bool(terminated or truncated)
         next_obs = (
-            [float(value) for value in next_observation["features"]]
+            _fit_obs(next_observation["features"], model.obs_dim)
             if next_observation["agent"] == "assignment"
             else [0.0] * model.obs_dim
         )
@@ -238,6 +250,40 @@ def update_ppo(
     return result
 
 
+def _file_hash(path: str | Path | None) -> str | None:
+    if not path or not Path(path).is_file():
+        return None
+    h = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1048576), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _code_commit() -> str | None:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        return None
+
+
+def _assignment_lineage(config: dict[str, Any]) -> dict[str, Any]:
+    env = config.get("env", {})
+    return {
+        "algorithm_identity": "assignment_ppo",
+        "training_seed": config.get("training", {}).get("seed"),
+        "train_bank_path": env.get("train_scenario_bank_manifest"),
+        "train_bank_hash": env.get("expected_train_bank_hash"),
+        "validation_bank_path": env.get("validation_scenario_bank_manifest"),
+        "validation_bank_hash": env.get("expected_validation_bank_hash"),
+        "environment_config_hash": _file_hash(env.get("config_path")),
+        "policy_architecture": config.get("policy", {}),
+        "training_hyperparameters": config.get("training", {}),
+        "fixed_baseline_policy_identities": config.get("fixed_baseline_policies", {"truck": "first_feasible", "bus": config.get("bus_baseline", {}).get("name"), "station": "first_feasible"}),
+        "code_commit": _code_commit(),
+    }
+
+
 def save_assignment_checkpoint(path: str | Path, model: AssignmentActorCritic, optimizer: torch.optim.Optimizer, config: dict[str, Any]) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +291,7 @@ def save_assignment_checkpoint(path: str | Path, model: AssignmentActorCritic, o
         "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(),
         "obs_dim": model.obs_dim, "action_dim": model.action_dim, "hidden_dims": list(model.hidden_dims),
         "config": config, "stage": 6, "agent": "assignment",
+        "algorithm": "assignment_ppo", "lineage": _assignment_lineage(config),
     }, path)
 
 

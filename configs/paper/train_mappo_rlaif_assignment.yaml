@@ -1,11 +1,90 @@
 run_classification: formal
+mode: rlaif_reward
+env:
+  config_path: configs/paper/base_medium.yaml
+  fallback: false
+project:
+  seed: 1
+address: {}
+training:
+  seed: 1
+  training_seeds:
+  - 1
+  - 2
+  - 3
+  total_episodes: 3000
+  rollout_episodes: 10
+  optimizer: Adam
+  lr_actor: 5.0e-05
+  lr_critic: 5.0e-05
+  gamma: 0.997
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  ppo_epochs: 5
+  batch_size: 128
+  entropy_coef: 0.01
+  value_coef: 0.5
+  max_grad_norm: 0.5
+  event_time_reference_min: 1.0
+networks:
+  event_embedding_dim: 16
+  assignment_hidden_dims:
+  - 256
+  - 256
+  - 128
+  truck_hidden_dims:
+  - 256
+  - 256
+  - 128
+  bus_hidden_dims:
+  - 256
+  - 256
+  - 128
+  station_hidden_dims:
+  - 256
+  - 256
+  - 128
+  critic_hidden_dims:
+  - 256
+  - 256
+  - 128
 rlaif:
   enabled: true
   scope: assignment
   fallback_to_env_reward: false
   fail_on_invalid_reward_model: true
   agents:
-    assignment: {enabled: true, checkpoint: results/formal/reward_models/reward_assignment.pt, checkpoint_hash: REPLACE_WITH_REAL_HASH, lambda: 1.0, reward_clip: 2.0}
-    truck: {enabled: false}
-    bus: {enabled: false}
-    station: {enabled: false}
+    assignment:
+      enabled: true
+      checkpoint: results/formal/reward_models/reward_assignment.pt
+      checkpoint_hash: REPLACE_WITH_FINAL_ASSIGNMENT_REWARD_HASH
+      lambda: 1.0
+      reward_clip: 2.0
+    truck:
+      enabled: false
+    bus:
+      enabled: false
+    station:
+      enabled: false
+output:
+  output_root: results/formal/mappo_rlaif_assignment
+  checkpoint_name_template: mappo_rlaif_assignment_seed_{seed}.pt
+  training_log_name_template: mappo_rlaif_assignment_seed_{seed}.csv
+  eval_name_template: mappo_rlaif_assignment_seed_{seed}_eval.json
+  resolved_config_name_template: mappo_rlaif_assignment_seed_{seed}_resolved.yaml
+reward:
+  passenger_delay: 1.0
+  bus_operating_delay: 1.0
+  parcel_lateness: 1.0
+  energy_cost: 0.2
+  power_overload: 1.0
+  bus_battery_violation: 5.0
+  locker_overflow: 1.0
+  truck_cost: 0.0
+  undelivered: 10.0
+  battery_shortage: 1.0
+  infeasible_action: 5.0
+  apply_reference_scales: true
+  scale_artifact: outputs/reward_reference_scales_v1.json
+  expected_training_scenario_bank_hash: REPLACE_WITH_REAL_TRAIN_BANK_HASH
+  scale_artifact_hash: REPLACE_WITH_REAL_SCALE_HASH
