@@ -11,6 +11,22 @@ from envs.reward_components import REWARD_COMPONENTS
 
 PLACEHOLDER_RE = re.compile(r"REPLACE_WITH_(?:REAL|FINAL)_HASH|REPLACE_WITH_FINAL_[A-Z_]+_HASH|PLACEHOLDER|TBD")
 
+RUNTIME_CONFIG_OUTPUT_NAMES = {
+    "train_assignment_ppo": "assignment_ppo.yaml",
+    "train_mappo_env": "mappo_env.yaml",
+    "train_mappo_rlaif_assignment": "mappo_rlaif_assignment.yaml",
+    "train_mappo_rlaif_all": "mappo_rlaif_all.yaml",
+    "benchmark": "benchmark.yaml",
+}
+
+RUNTIME_CONFIG_TEMPLATE_ORDER = (
+    "train_mappo_env",
+    "train_mappo_rlaif_assignment",
+    "train_mappo_rlaif_all",
+    "train_assignment_ppo",
+    "benchmark",
+)
+
 def _freeze_value(cfg: dict[str, Any], dotted: str, default: int) -> int:
     cur: Any = cfg
     for part in dotted.split('.'):
@@ -98,10 +114,10 @@ def _write_resolved_configs(output_root: Path, manifests: dict[str, dict[str, An
     output_root = Path(output_root)
     scale = {"artifact_hash": scale_hash, "training_scenario_bank_hash": manifests["train"]["bank_hash"]}
     resolved = {}
-    for name in ("train_mappo_env", "train_mappo_rlaif_assignment", "train_mappo_rlaif_all", "train_assignment_ppo", "benchmark"):
+    for name in RUNTIME_CONFIG_TEMPLATE_ORDER:
         src = Path("configs/paper") / (name + ".yaml")
         if src.exists():
-            resolved[name] = str(_resolve_config(src, output_root / "configs" / (name + ".resolved.yaml"), manifests, scale, output_root, reward_models))
+            resolved[name] = str(_resolve_config(src, output_root / "configs" / RUNTIME_CONFIG_OUTPUT_NAMES[name], manifests, scale, output_root, reward_models))
     return resolved
 
 def prepare(output_root: Path, *, force: bool=False, resume: bool=False, counts: dict[str,int]|None=None, scale_scenario_limit: int|None=None) -> dict[str, Any]:
@@ -132,9 +148,9 @@ def prepare(output_root: Path, *, force: bool=False, resume: bool=False, counts:
         p = output_root/f'reward_models/reward_{agent}.pt'
         if p.is_file(): reward_models[agent] = {'path': str(p), 'hash': sha256_file(p)}
     resolved = {}
-    for name in ('train_mappo_env','train_mappo_rlaif_assignment','train_mappo_rlaif_all','train_assignment_ppo','benchmark'):
+    for name in RUNTIME_CONFIG_TEMPLATE_ORDER:
         src = Path('configs/paper')/(name + '.yaml')
-        if src.exists(): resolved[name] = str(_resolve_config(src, output_root/'configs'/(name+'.resolved.yaml'), manifests, scale, output_root, reward_models))
+        if src.exists(): resolved[name] = str(_resolve_config(src, output_root/'configs'/RUNTIME_CONFIG_OUTPUT_NAMES[name], manifests, scale, output_root, reward_models))
     manifest = {'scenario_banks': {k:{'path':str(paths[k]/'scenario_bank_manifest.json'),'count':manifests[k]['scenario_count'],'bank_hash':manifests[k]['bank_hash']} for k in manifests}, 'reward_scale': {'path': str(scale_path), 'artifact_hash': scale['artifact_hash'], 'training_scenario_bank_hash': scale['training_scenario_bank_hash'], 'estimator': scale.get('estimator'), 'component_validation_status': {k:v.get('status') for k,v in scale.get('components',{}).items()}}, 'resolved_configs': resolved, 'formal_reward_models': reward_models, 'rlaif_status': 'available' if 'assignment' in reward_models else 'RLAIF_BLOCKED_MISSING_FORMAL_ASSIGNMENT_REWARD_CHECKPOINT'}
     (output_root/'formal_input_manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True)+'\n')
     return manifest
