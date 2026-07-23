@@ -43,7 +43,21 @@ def normalize_dynamic_config(config: dict[str, Any]) -> dict[str, Any]:
         bus[canonical] = source
     _map_alias("non_service_relocation_time_min", "relocation_time_min", 5.0)
     _map_alias("minimum_layover_time_min", "minimum_layover_min", 2.0)
-    bus.setdefault("delivery_horizon_min", config.get("time", {}).get("delivery_evaluation_horizon_min", 480))
+    time_cfg = config.setdefault("time", {})
+    canonical = time_cfg.get("delivery_evaluation_horizon_min")
+    legacy = bus.get("delivery_horizon_min")
+    if canonical is None and legacy is None:
+        canonical = 480
+    elif canonical is None:
+        canonical = legacy
+    elif legacy is not None and float(canonical) != float(legacy):
+        raise ValueError(
+            "conflicting delivery horizon values: "
+            f"time.delivery_evaluation_horizon_min={canonical!r} "
+            f"bus.delivery_horizon_min={legacy!r}"
+        )
+    time_cfg["delivery_evaluation_horizon_min"] = canonical
+    bus["delivery_horizon_min"] = canonical
     bus.setdefault("bus_speed_kmph", bus.get("nominal_speed_kmph", 30.0))
     bus.setdefault("bus_battery_kwh", bus.get("battery_capacity_kwh", 160.0))
     bus.setdefault("bus_min_soc_kwh", bus.get("minimum_safe_energy_kwh", 40.0))

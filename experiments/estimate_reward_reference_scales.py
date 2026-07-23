@@ -97,28 +97,50 @@ def run_estimation(scenario_bank, config, output, *, run_classification=None, sc
     resolved_hash=sha256_json(resolved_cfg)
     selected=bank.scenarios[:scenario_limit] if scenario_limit else bank.scenarios
     pols=get_reference_policies(policies or cfg.get("reference_policies"))
+    progress_path = outdir / "reward_scale_episode_components.progress.jsonl"
+    completed: dict[tuple[str, str], dict[str, Any]] = {}
+    if resume and progress_path.exists() and not force:
+        for line in progress_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rec = json.loads(line)
+                completed[(str(rec.get("reference_policy")), str(rec.get("scenario_id")))] = rec
     rows=[]; failures=[]; steps_total=0
-    for pol in pols:
-        for s in selected:
-            t=time.time(); base={"scenario_id":s.scenario_id,"scenario_content_hash":s.scenario_content_hash,"instance_hash":s.instance_hash,"scenario_bank_hash":bank.bank_hash,"reference_policy":pol.name,"reference_policy_version":pol.version,"estimation_seed":seed,"run_classification":classification}
-            try:
-                env=DynamicDeliveryEnv(s.instance_path)
-                env.config.setdefault("reward", {})["apply_reference_scales"] = False
-                env.reward_reference_scales={c:1.0 for c in REWARD_COMPONENTS}
-                obs,_=env.reset(seed=seed)
-                transitions=0; term=trunc=False; info={}
-                while obs.get("agent_id") != "terminal" and not (term or trunc):
-                    obs, reward, term, trunc, info = env.step(_select(pol, obs)); transitions += 1
-                    if transitions > int(cfg.get("maximum_transitions", 10000)): raise RuntimeError("maximum transitions exceeded")
-                raw=dict(getattr(env,"raw_cost_components", {}) or info.get("raw_cost_components", {}))
-                row={**base,"episode_status":"success","transition_count":transitions,"runtime":time.time()-t,"released_parcels":len(getattr(env,"parcels",{})),"delivered_parcels":(info.get("delivered_parcels", 0) if isinstance(info.get("delivered_parcels", 0), int) else len(info.get("delivered_parcels", []))) if isinstance(info,dict) else 0,"failure_reason":"","exception_type":""}
-                for c in REWARD_COMPONENTS: row[f"raw_{c}"]=raw.get(c, None)
-                if transitions <= 0: raise RuntimeError("no real env.step occurred")
-                rows.append(row); steps_total += transitions
-            except Exception as exc:
-                row={**base,"episode_status":"failed","transition_count":0,"runtime":time.time()-t,"released_parcels":None,"delivered_parcels":None,"failure_reason":str(exc),"exception_type":exc.__class__.__name__}
-                for c in REWARD_COMPONENTS: row[f"raw_{c}"]=None
-                rows.append(row); failures.append(row)
+    progress_handle = progress_path.open("a", encoding="utf-8")
+    try:
+        for pol in pols:
+            for s in selected:
+                key = (pol.name, s.scenario_id)
+                if key in completed:
+                    row = completed[key]
+                    rows.append(row)
+                    if row.get("episode_status") == "failed": failures.append(row)
+                    steps_total += int(row.get("transition_count") or 0)
+                    continue
+                t=time.time(); base={"scenario_id":s.scenario_id,"scenario_content_hash":s.scenario_content_hash,"instance_hash":s.instance_hash,"scenario_bank_hash":bank.bank_hash,"reference_policy":pol.name,"reference_policy_version":pol.version,"estimation_seed":seed,"run_classification":classification}
+                try:
+                    env=DynamicDeliveryEnv(s.instance_path)
+                    env.config.setdefault("reward", {})["apply_reference_scales"] = False
+                    env.reward_reference_scales={c:1.0 for c in REWARD_COMPONENTS}
+                    obs,_=env.reset(seed=seed)
+                    transitions=0; term=trunc=False; info={}
+                    while obs.get("agent_id") != "terminal" and not (term or trunc):
+                        obs, reward, term, trunc, info = env.step(_select(pol, obs)); transitions += 1
+                        if transitions > int(cfg.get("maximum_transitions", 10000)): raise RuntimeError("maximum transitions exceeded")
+                    raw=dict(getattr(env,"raw_cost_components", {}) or info.get("raw_cost_components", {}))
+                    row={**base,"episode_status":"success","transition_count":transitions,"runtime":time.time()-t,"released_parcels":len(getattr(env,"parcels",{})),"delivered_parcels":(info.get("delivered_parcels", 0) if isinstance(info.get("delivered_parcels", 0), int) else len(info.get("delivered_parcels", []))) if isinstance(info,dict) else 0,"failure_reason":"","exception_type":""}
+                    for c in REWARD_COMPONENTS: row[f"raw_{c}"]=raw.get(c, None)
+                    if transitions <= 0: raise RuntimeError("no real env.step occurred")
+                    rows.append(row); steps_total += transitions
+                    progress_handle.write(json.dumps(row, sort_keys=True)+"\n"); progress_handle.flush()
+                except Exception as exc:
+                    row={**base,"episode_status":"failed","transition_count":0,"runtime":time.time()-t,"released_parcels":None,"delivered_parcels":None,"failure_reason":str(exc),"exception_type":exc.__class__.__name__}
+                    for c in REWARD_COMPONENTS: row[f"raw_{c}"]=None
+                    rows.append(row); failures.append(row)
+                    progress_handle.write(json.dumps(row, sort_keys=True)+"\n"); progress_handle.flush()
+    finally:
+        progress_handle.close()
+    rows.sort(key=lambda r: (str(r.get("reference_policy")), str(r.get("scenario_id"))))
+    failures.sort(key=lambda r: (str(r.get("reference_policy")), str(r.get("scenario_id"))))
     ep_csv=outdir/"reward_scale_episode_components.csv"; ep_jsonl=outdir/"reward_scale_episode_components.jsonl"
     fields=list(rows[0].keys()) if rows else []
     with ep_csv.open("w", newline="") as f: w=csv.DictWriter(f, fields); w.writeheader(); w.writerows(rows)
@@ -142,7 +164,7 @@ def run_estimation(scenario_bank, config, output, *, run_classification=None, sc
     return artifact
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--scenario-bank", required=True); ap.add_argument("--config", required=True); ap.add_argument("--output", required=True); ap.add_argument("--run-classification"); ap.add_argument("--scenario-limit", type=int); ap.add_argument("--policy", action="append"); ap.add_argument("--seed", type=int, default=0); ap.add_argument("--resume", action="store_true"); ap.add_argument("--report-only", action="store_true"); ap.add_argument("--force", action="store_true")
+    ap=argparse.ArgumentParser(); ap.add_argument("--scenario-bank", required=True); ap.add_argument("--config", required=True); ap.add_argument("--output", required=True); ap.add_argument("--run-classification"); ap.add_argument("--scenario-limit", type=int); ap.add_argument("--policy", action="append"); ap.add_argument("--seed", type=int, default=0); ap.add_argument("--resume", action="store_true"); ap.add_argument("--workers", type=int, default=1, help="Reserved bounded worker count; deterministic serial execution is used when 1."); ap.add_argument("--report-only", action="store_true"); ap.add_argument("--force", action="store_true")
     a=ap.parse_args(); r=run_estimation(a.scenario_bank,a.config,a.output,run_classification=a.run_classification,scenario_limit=a.scenario_limit,policies=a.policy,seed=a.seed,force=a.force,report_only=a.report_only,resume=a.resume)
     if r is not None: print(json.dumps({"artifact":a.output,"artifact_hash":r["artifact_hash"],"validation_status":r["validation_status"],"scales":r["scales"],"statuses":{k:v["status"] for k,v in r["components"].items()}}, indent=2, sort_keys=True))
 if __name__ == "__main__": main()

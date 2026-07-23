@@ -22,7 +22,16 @@ def main(argv=None):
     Path(resolved['output']['resolved_config_path']).parent.mkdir(parents=True, exist_ok=True)
     Path(resolved['output']['resolved_config_path']).write_text(yaml.safe_dump(resolved, sort_keys=False), encoding='utf-8')
     if not is_torch_runtime_available():
-        print('SKIP: Stage 7 asynchronous MAPPO training requires PyTorch.'); return 0
+        message = 'Stage 7 asynchronous MAPPO training requires PyTorch.'
+        if resolved.get('run_classification') == 'formal':
+            raise RuntimeError(f'formal MAPPO cannot skip: {message}')
+        print(f'SKIP: {message}'); return 0
     from training.mappo_trainer import train_mappo_async
-    result=train_mappo_async(resolved); print(f"Saved Phase 7 checkpoint to {result['checkpoint_path']}"); return 0
+    result=train_mappo_async(resolved)
+    if resolved.get('run_classification') == 'formal':
+        rows = result.get('rows', [])
+        updates = sum(1 for row in rows if row.get('policy_loss') not in (None, '') or row.get('value_loss') not in (None, ''))
+        if updates <= 0:
+            raise RuntimeError('formal MAPPO completed zero optimizer updates')
+    print(f"Saved Phase 7 checkpoint to {result['checkpoint_path']}"); return 0
 if __name__=='__main__': raise SystemExit(main())
