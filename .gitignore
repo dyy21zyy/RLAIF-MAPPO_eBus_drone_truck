@@ -63,3 +63,8 @@ checkpoints/
 /results/diagnostic/experiment_matrices/
 /results/formal/ablation/
 /results/formal/sensitivity/
+*.npy
+*.npz
+*.bin
+*.joblib
+/results/preformal/

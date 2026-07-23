@@ -1,0 +1,20 @@
+run_classification: formal
+experiment_stage: preformal
+publication_eligible: false
+output_root: results/preformal/gate
+note: These are pre-formal validation runs. They are not final paper experiments.
+enable_full_rlaif: false
+workload:
+  train_scenarios: 10
+  validation_scenarios: 3
+  test_scenarios: 5
+  training_seeds: [1]
+  mappo_total_episodes: 60
+  rollout_episodes: 5
+  benchmark_evaluations_per_test_scenario: 1
+  ablation_methods: [mappo_env, mappo_rlaif_assignment]
+  sensitivity_factor: drone_speed
+  sensitivity_values: [0.9, 1.1]
+formal_launch_commands:
+  - python experiments/train_mappo_async.py --config configs/paper/mappo_formal.yaml
+  - python experiments/run_paper_benchmark.py --config configs/paper/benchmark_formal.yaml

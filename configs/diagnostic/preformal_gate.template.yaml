@@ -1,0 +1,16 @@
+run_classification: diagnostic
+experiment_stage: preformal_diagnostic
+publication_eligible: false
+output_root: results/diagnostic/preformal_gate
+note: These are pre-formal validation runs. They are not final paper experiments.
+workload:
+  train_scenarios: 2
+  validation_scenarios: 1
+  test_scenarios: 1
+  training_seeds: [1]
+  mappo_total_episodes: 2
+  rollout_episodes: 1
+  benchmark_evaluations_per_test_scenario: 1
+  ablation_methods: [mappo_env, mappo_rlaif_assignment]
+  sensitivity_factor: drone_speed
+  sensitivity_values: [0.9, 1.1]
