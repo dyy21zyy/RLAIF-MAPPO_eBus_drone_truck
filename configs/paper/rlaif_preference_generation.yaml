@@ -1,5 +1,6 @@
 run_classification: formal
 scenario_bank:
+  source_mode: frozen_scenario_rollout
   final_train_manifest: results/formal/scenarios/train/scenario_bank_manifest.json
   expected_train_bank_hash_env: FORMAL_TRAIN_BANK_HASH
   disallow_splits:

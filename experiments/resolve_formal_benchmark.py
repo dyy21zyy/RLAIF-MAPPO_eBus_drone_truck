@@ -4,6 +4,7 @@ import argparse, json, sys, hashlib
 from pathlib import Path
 from typing import Any
 import yaml
+from evaluation.scenario_bank import load_bank_manifest, load_scenario_bank, verify_scenario_hashes, sha256_file
 from evaluation.formal_policy_registry import LEARNED_METHODS, get_formal_policy_spec, validate_policy_checkpoint, validate_unique_learned_checkpoints
 from rlaif.runtime_agent_reward_model import RuntimeAgentRewardModel
 from training.event_schema import REQUIRED_EVENT_COVERAGE
@@ -67,11 +68,18 @@ def resolve(template:Path, artifact_root:Path, output:Path)->dict[str,Any]:
     cfg['methods']=[m for m in cfg.get('methods',[]) if m.get('method_id') not in LEARNED_METHODS]+method_entries
     test_manifest=artifact_root/'scenarios'/'test'/'scenario_bank_manifest.json'
     cfg.setdefault('scenario_bank',{})
-    if test_manifest.exists():
-        cfg['scenario_bank']['manifest']=str(test_manifest)
-        cfg['scenario_bank']['expected_bank_hash']=sha(test_manifest)
-    else:
-        cfg['scenario_bank']['expected_bank_hash']=cfg['scenario_bank'].get('expected_bank_hash_resolved','missing-test-bank')
+    if not test_manifest.exists():
+        raise RuntimeError('missing formal test scenario-bank manifest')
+    tm=load_bank_manifest(test_manifest)
+    if tm.get('split') != 'test': raise RuntimeError('invalid formal test scenario-bank split')
+    expected_count=int(cfg.get('scenario_bank',{}).get('expected_count', tm.get('scenario_count', -1)))
+    if int(tm.get('scenario_count', -1)) != expected_count: raise RuntimeError('invalid formal test scenario-bank scenario_count')
+    bank_hash=tm.get('bank_hash')
+    if not bank_hash or any(p.lower() in str(bank_hash).lower() for p in PLACEHOLDERS): raise RuntimeError('invalid formal test scenario-bank bank_hash')
+    for scenario in load_scenario_bank(test_manifest).scenarios: verify_scenario_hashes(scenario)
+    cfg['scenario_bank']['manifest']=str(test_manifest)
+    cfg['scenario_bank']['expected_bank_hash']=bank_hash
+    cfg['scenario_bank']['manifest_file_hash']=sha256_file(test_manifest)
     cfg['benchmark_output_root']=str(artifact_root/'benchmark')
     text=yaml.safe_dump(cfg,sort_keys=False)
     if any(p in text for p in PLACEHOLDERS): raise RuntimeError('resolved benchmark config contains placeholder')
