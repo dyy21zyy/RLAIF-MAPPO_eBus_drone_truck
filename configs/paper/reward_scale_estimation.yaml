@@ -12,3 +12,16 @@ estimator:
   percentile: 95
 minimum_valid_episodes: 1
 maximum_failure_fraction: 0.0
+minimum_scale_overrides:
+  bus_battery_violation:
+    value: 1.0
+    reason: "Instrumented-zero in final train-bank reference rollouts; kept explicit to preserve denominator availability."
+  locker_overflow:
+    value: 1.0
+    reason: "Instrumented-zero in final train-bank reference rollouts; kept explicit to preserve denominator availability."
+  truck_cost:
+    value: 1.0
+    reason: "Truck cost has zero formal weight and can be instrumented-zero; explicit denominator prevents placeholder scales."
+  battery_shortage:
+    value: 1.0
+    reason: "Instrumented-zero in final train-bank reference rollouts; kept explicit to preserve denominator availability."
