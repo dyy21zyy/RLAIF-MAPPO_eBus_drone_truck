@@ -1,0 +1,91 @@
+run_classification: formal
+scenario_bank:
+  final_train_manifest: results/formal/scenarios/train/scenario_bank_manifest.json
+  expected_train_bank_hash_env: FORMAL_TRAIN_BANK_HASH
+  disallow_splits:
+    - validation
+    - test
+    - diagnostic
+    - smoke
+preference_split:
+  train_fraction: 0.70
+  validation_fraction: 0.15
+  test_fraction: 0.15
+  seed: 8001
+  group_by: scenario
+  reject_leakage_keys:
+    - scenario_id
+    - transition_id
+    - state_hash
+    - candidate_pair_hash
+    - reversed_candidate_pair_hash
+    - evaluator_response_hash
+formal_counts_rationale: >-
+  The repository does not define paper-final per-agent formal preference counts.
+  These explicit reduced-formal targets are source controlled so full-scale counts
+  are auditable and not hidden in Python code. They are intentionally separate
+  per agent and must be increased for publication runs when budget allows.
+evaluator:
+  provider: openai_compatible
+  api_key_env: OPENAI_API_KEY
+  base_url_env: OPENAI_BASE_URL
+  model_env: OPENAI_MODEL
+  prompt_version: four_agent_consequence_v1
+  structured_output_schema_version: rlaif_preference_json_v1
+  temperature: 0.0
+  max_retries: 3
+  timeout_seconds: 60
+  failure_policy: fail_closed_no_fake_labels
+  cache_dir: results/formal/rlaif/evaluator_cache
+agents:
+  assignment:
+    agent_type: assignment
+    supported_event_types: [PARCEL_RELEASE]
+    target_valid_pair_count: 200
+    scenario_allocation: proportional_final_train_bank
+    output_preferences: results/formal/rlaif/preferences/preference_assignment.jsonl
+    failed_requests: results/formal/rlaif/failed/assignment_failed.jsonl
+    reward_checkpoint: results/formal/reward_models/reward_assignment.pt
+  truck:
+    agent_type: truck
+    supported_event_types: [TRUCK_AVAILABLE]
+    target_valid_pair_count: 160
+    scenario_allocation: proportional_final_train_bank
+    output_preferences: results/formal/rlaif/preferences/preference_truck.jsonl
+    failed_requests: results/formal/rlaif/failed/truck_failed.jsonl
+    reward_checkpoint: results/formal/reward_models/reward_truck.pt
+  bus:
+    agent_type: bus
+    supported_event_types: [BUS_TERMINAL_DEPARTURE, BUS_STATION_ARRIVAL]
+    target_valid_pair_count: 200
+    scenario_allocation: balanced_across_bus_event_types
+    output_preferences: results/formal/rlaif/preferences/preference_bus.jsonl
+    failed_requests: results/formal/rlaif/failed/bus_failed.jsonl
+    reward_checkpoint: results/formal/reward_models/reward_bus.pt
+  station:
+    agent_type: station
+    supported_event_types: [STATION_OPERATION]
+    target_valid_pair_count: 160
+    scenario_allocation: proportional_final_train_bank
+    output_preferences: results/formal/rlaif/preferences/preference_station.jsonl
+    failed_requests: results/formal/rlaif/failed/station_failed.jsonl
+    reward_checkpoint: results/formal/reward_models/reward_station.pt
+reward_model:
+  config_template:
+    run_classification: formal
+    model: {event_embedding_dim: 16, hidden_dims: [64, 64], dropout: 0.0}
+    training: {seed: 8001, learning_rate: 0.001, weight_decay: 0.0, epochs: 30, batch_size: 32, early_stopping_patience: 6, max_grad_norm: 1.0, device: cpu}
+    split: {train_fraction: 0.70, validation_fraction: 0.15, test_fraction: 0.15, seed: 8001, group_by: scenario}
+    validation:
+      minimum_training_pairs: 8
+      minimum_validation_pairs: 2
+      minimum_test_pairs: 2
+      minimum_validation_pairwise_accuracy: 0.51
+      minimum_test_pairwise_accuracy: 0.51
+      minimum_event_pairwise_accuracy: 0.50
+      require_all_event_types_present: true
+      require_positive_average_margin: true
+outputs:
+  manifest: results/formal/rlaif/formal_rlaif_artifact_manifest.json
+  full_rlaif_runtime_config: results/formal/configs/mappo_rlaif_all.yaml
+  full_formal_launch_commands: results/formal/rlaif/full_formal_launch_commands.txt
