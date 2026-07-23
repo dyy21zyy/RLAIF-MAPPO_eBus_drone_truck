@@ -73,3 +73,7 @@ checkpoints/
 /results/diagnostic/preformal_gate/
 /results/preformal/
 /results/formal/
+
+# Generated parameter-freeze artifacts
+/results/formal/freeze/
+/results/diagnostic/parameter_freeze/

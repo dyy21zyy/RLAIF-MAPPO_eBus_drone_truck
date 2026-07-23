@@ -1,0 +1,153 @@
+freeze_schema_version: 1
+run_classification: formal
+experiment_stage: final
+publication_eligible: true
+
+paper_method_contract:
+  primary_rlaif_method: {key: paper_method_contract.primary_rlaif_method, value: mappo_rlaif_assignment, category: scientific_fixed, source: configs/paper/final_experiment_freeze.template.yaml, rationale: Assignment-only RLAIF-MAPPO is the primary paper RLAIF baseline.}
+  full_rlaif_extension_enabled: {key: paper_method_contract.full_rlaif_extension_enabled, value: true, category: method_specific, source: configs/paper/final_experiment_freeze.template.yaml, rationale: Full four-agent RLAIF is an optional extension reported separately.}
+  reward_model_role: {key: paper_method_contract.reward_model_role, value: score_selected_transition_only, category: scientific_fixed, source: configs/paper/final_experiment_freeze.template.yaml, rationale: Reward models provide learned reward for the selected transition and never choose or rerank actions.}
+
+scientific_contract:
+  agents: {key: scientific_contract.agents, value: [assignment, truck, bus, station], category: scientific_fixed, source: paper/code contract, rationale: Four decision agents used by asynchronous MAPPO.}
+  decision_events: {key: scientific_contract.decision_events, value: {PARCEL_RELEASE: assignment, TRUCK_AVAILABLE: truck, BUS_TERMINAL_DEPARTURE: bus, BUS_STATION_ARRIVAL: bus, STATION_OPERATION: station}, category: scientific_fixed, source: env event semantics, rationale: Only these decision events may create MAPPO transitions.}
+  automatic_events_create_transitions: {key: scientific_contract.automatic_events_create_transitions, value: false, category: scientific_fixed, source: paper/code contract, rationale: Automatic simulation events are not policy decision points.}
+  station_baseline_actions: {key: scientific_contract.station_baseline_actions, value: [dispatch_drone, idle], category: scientific_fixed, source: station baseline, rationale: Battery recharging remains automatic; learned charging is excluded from baseline.}
+
+scenario_protocol:
+  train_scenario_count: {key: scenario_protocol.train_scenario_count, value: 300, category: scientific_fixed, source: final freeze decision, rationale: Final train bank count is explicit rather than inferred.}
+  validation_scenario_count: {key: scenario_protocol.validation_scenario_count, value: 60, category: scientific_fixed, source: final freeze decision, rationale: Validation bank count is explicit and disjoint.}
+  test_scenario_count: {key: scenario_protocol.test_scenario_count, value: 100, category: scientific_fixed, source: final freeze requirement, rationale: Paper benchmark uses 100 final test scenarios.}
+  generation_base_config: {key: scenario_protocol.generation_base_config, value: configs/paper/base_medium.yaml, category: path_only, source: configs/paper/base_medium.yaml, rationale: Medium scenario is canonical formal scale.}
+  train_bank_hash: {key: scenario_protocol.train_bank_hash, value: REPLACE_WITH_FINAL_TRAIN_BANK_HASH, category: estimated_and_frozen, source: final train bank manifest, rationale: Must be replaced by real generated train-bank hash.}
+  validation_bank_hash: {key: scenario_protocol.validation_bank_hash, value: REPLACE_WITH_FINAL_VALIDATION_BANK_HASH, category: estimated_and_frozen, source: final validation bank manifest, rationale: Must be replaced by real generated validation-bank hash.}
+  test_bank_hash: {key: scenario_protocol.test_bank_hash, value: REPLACE_WITH_FINAL_TEST_BANK_HASH, category: estimated_and_frozen, source: final test bank manifest, rationale: Must be replaced by real generated test-bank hash.}
+  sampling_mode: {key: scenario_protocol.sampling_mode, value: frozen_bank_manifest_order, category: scientific_fixed, source: final freeze decision, rationale: Methods use identical paired scenarios without resampling drift.}
+  split_disjoint: {key: scenario_protocol.split_disjoint, value: true, category: scientific_fixed, source: final freeze decision, rationale: Train, validation, and test splits must not overlap.}
+  reward_scales_use: {key: scenario_protocol.reward_scales_use, value: train_only, category: scientific_fixed, source: final freeze decision, rationale: Reward reference scales are estimated from train scenarios only.}
+  training_uses_test_bank: {key: scenario_protocol.training_uses_test_bank, value: false, category: scientific_fixed, source: final freeze decision, rationale: Test bank is reserved for final paired evaluation only.}
+
+seed_protocol:
+  training_seeds: {key: seed_protocol.training_seeds, value: [1, 2, 3], category: seed_specific, source: final freeze requirement, rationale: Three independent training seeds for learned methods.}
+  namespaces:
+    scenario_generation: {key: seed_protocol.namespaces.scenario_generation, value: 10000, category: seed_specific, source: final freeze decision, rationale: Scenario generation has a separate namespace.}
+    scenario_sampling: {key: seed_protocol.namespaces.scenario_sampling, value: 20000, category: seed_specific, source: final freeze decision, rationale: Scenario sampling has a separate namespace.}
+    network_initialization: {key: seed_protocol.namespaces.network_initialization, value: 30000, category: seed_specific, source: final freeze decision, rationale: Network initialization seed is derived from training seed in its namespace.}
+    policy_action_sampling: {key: seed_protocol.namespaces.policy_action_sampling, value: 40000, category: seed_specific, source: final freeze decision, rationale: Policy stochastic action sampling is isolated.}
+    minibatch_shuffling: {key: seed_protocol.namespaces.minibatch_shuffling, value: 50000, category: seed_specific, source: final freeze decision, rationale: PPO minibatch order is independently reproducible.}
+    reward_model_training: {key: seed_protocol.namespaces.reward_model_training, value: 60000, category: seed_specific, source: final freeze decision, rationale: Reward model training has independent randomness.}
+    bootstrap_statistics: {key: seed_protocol.namespaces.bootstrap_statistics, value: 20260723, category: seed_specific, source: final freeze decision, rationale: Bootstrap confidence intervals are independently reproducible.}
+
+network_architecture:
+  methods: [mappo_env, mappo_rlaif_assignment, mappo_rlaif_all]
+  event_embedding_dim: {key: network.event_embedding_dim, value: 16, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared event embedding dimension for all four-agent MAPPO methods.}
+  assignment_actor_hidden_dims: {key: network.assignment_actor_hidden_dims, value: [256, 256, 128], category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared assignment actor capacity prevents RLAIF capacity confounding.}
+  truck_actor_hidden_dims: {key: network.truck_actor_hidden_dims, value: [256, 256, 128], category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared truck actor capacity.}
+  bus_actor_hidden_dims: {key: network.bus_actor_hidden_dims, value: [256, 256, 128], category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared bus actor capacity.}
+  station_actor_hidden_dims: {key: network.station_actor_hidden_dims, value: [256, 256, 128], category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared station actor capacity.}
+  critic_hidden_dims: {key: network.critic_hidden_dims, value: [256, 256, 128], category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared centralized critic capacity.}
+  activation: {key: network.activation, value: tanh, category: scientific_fixed, source: training/mappo_trainer.py, rationale: Canonical hidden activation.}
+  actor_initialization: {key: network.actor_initialization, value: orthogonal_gain_0.01, category: scientific_fixed, source: training/mappo_trainer.py, rationale: Reproducible actor initialization.}
+  critic_initialization: {key: network.critic_initialization, value: orthogonal_gain_1.0, category: scientific_fixed, source: training/mappo_trainer.py, rationale: Reproducible critic initialization.}
+
+training_protocol:
+  mappo_optimization:
+    optimizer: {key: training.optimizer, value: Adam, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared optimizer.}
+    lr_actor: {key: training.lr_actor, value: 0.00005, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared actor learning rate.}
+    lr_critic: {key: training.lr_critic, value: 0.00005, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared critic learning rate.}
+    gamma: {key: training.gamma, value: 0.997, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Base event-time discount.}
+    gae_lambda: {key: training.gae_lambda, value: 0.95, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared GAE lambda.}
+    clip_eps: {key: training.clip_eps, value: 0.2, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared PPO clip.}
+    ppo_epochs: {key: training.ppo_epochs, value: 5, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared PPO epochs.}
+    batch_size: {key: training.batch_size, value: 128, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared batch size.}
+    entropy_coef: {key: training.entropy_coef, value: 0.01, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared entropy coefficient.}
+    value_coef: {key: training.value_coef, value: 0.5, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared value coefficient.}
+    max_grad_norm: {key: training.max_grad_norm, value: 0.5, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared gradient clipping.}
+    rollout_episodes: {key: training.rollout_episodes, value: 10, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Shared rollout collection period.}
+    total_training_episodes: {key: training.total_training_episodes, value: 3000, category: scientific_fixed, source: final freeze requirement, rationale: Final MAPPO training budget is 3000 episodes per seed.}
+  event_time_discount:
+    enabled: {key: training.event_time_discount.enabled, value: true, category: scientific_fixed, source: paper method, rationale: Asynchronous MAPPO discounts by elapsed event time.}
+    event_time_reference_unit_min: {key: training.event_time_reference_unit_min, value: 1.0, category: scientific_fixed, source: configs/paper/train_mappo_env.yaml, rationale: Tau in gamma_i = gamma^(delta_t/tau).}
+    time_difference_calculation: {key: training.time_difference_calculation, value: elapsed_minutes_between_consecutive_decision_transitions, category: scientific_fixed, source: paper method, rationale: Delta time uses adjacent decision transitions.}
+    terminal_handling: {key: training.terminal_handling, value: no_bootstrap_after_terminal, category: scientific_fixed, source: training/mappo_trainer.py, rationale: Terminal states do not bootstrap value.}
+
+reward_weights:
+  components:
+    passenger_delay: {weight: 1.0, physical_unit: passenger_minutes, sign_convention: penalty_nonnegative, source: configs/paper/base_medium.yaml, rationale: Passenger delay penalty.}
+    bus_operating_delay: {weight: 1.0, physical_unit: bus_minutes, sign_convention: penalty_nonnegative, source: configs/paper/base_medium.yaml, rationale: Bus operating delay penalty.}
+    parcel_lateness: {weight: 1.0, physical_unit: parcel_minutes_late, sign_convention: penalty_nonnegative, source: configs/paper/base_medium.yaml, rationale: Parcel lateness penalty.}
+    energy_cost: {weight: 0.2, physical_unit: kwh, sign_convention: penalty_nonnegative, source: configs/paper/base_medium.yaml, rationale: Energy-use penalty.}
+    power_overload: {weight: 1.0, physical_unit: kw_over_capacity_minutes, sign_convention: penalty_nonnegative, source: configs/paper/base_medium.yaml, rationale: Grid overload penalty.}
+    bus_battery_violation: {weight: 5.0, physical_unit: kwh_below_safe, sign_convention: penalty_nonnegative, source: configs/paper/base_medium.yaml, rationale: Safety violation penalty.}
+    locker_overflow: {weight: 1.0, physical_unit: kg_over_capacity, sign_convention: penalty_nonnegative, source: configs/paper/base_medium.yaml, rationale: Locker overflow penalty.}
+    truck_cost: {weight: 0.0, physical_unit: km_cost, sign_convention: penalty_nonnegative, source: configs/paper/base_medium.yaml, rationale: Zero in baseline because truck directness is constrained elsewhere.}
+    undelivered: {weight: 10.0, physical_unit: parcel_count, sign_convention: penalty_nonnegative, source: configs/paper/base_medium.yaml, rationale: Strong terminal undelivered penalty.}
+    battery_shortage: {weight: 1.0, physical_unit: battery_count_short, sign_convention: penalty_nonnegative, source: configs/paper/base_medium.yaml, rationale: Drone battery availability penalty.}
+    infeasible_action: {weight: 5.0, physical_unit: action_count, sign_convention: penalty_nonnegative, source: configs/paper/base_medium.yaml, rationale: Invalid action penalty.}
+
+reward_reference_scale:
+  artifact_path: {key: reward_reference_scale.artifact_path, value: results/formal/reward_scales/final_reward_reference_scales.json, category: path_only, source: configs/paper/reward_scale_estimation.yaml, rationale: Final generated scale artifact path.}
+  artifact_hash: {key: reward_reference_scale.artifact_hash, value: REPLACE_WITH_FINAL_REWARD_SCALE_HASH, category: estimated_and_frozen, source: final reward scale artifact, rationale: Real formal scale hash is required before readiness.}
+  training_bank_hash: {key: reward_reference_scale.training_bank_hash, value: REPLACE_WITH_FINAL_TRAIN_BANK_HASH, category: estimated_and_frozen, source: final train bank, rationale: Scale lineage must match train bank hash.}
+  artifact_version: {key: reward_reference_scale.artifact_version, value: 1, category: estimated_and_frozen, source: envs/reward_scales.py, rationale: Scale schema version.}
+  estimator: {key: reward_reference_scale.estimator, value: percentile, category: scientific_fixed, source: configs/paper/reward_scale_estimation.yaml, rationale: Robust per-component reference scale estimator.}
+  percentile: {key: reward_reference_scale.percentile, value: 95, category: scientific_fixed, source: configs/paper/reward_scale_estimation.yaml, rationale: 95th percentile normalizes typical high magnitude.}
+  reference_policy_suite: {key: reward_reference_scale.reference_policy_suite, value: [truck_direct_reference, integrated_rule_reference, coverage_reference], category: scientific_fixed, source: configs/paper/reward_scale_estimation.yaml, rationale: Reference suite estimates component scales from train bank.}
+  component_statuses: {key: reward_reference_scale.component_statuses, value: required_for_all_components, category: estimated_and_frozen, source: final reward scale artifact, rationale: Every canonical component requires a valid scale status.}
+
+rlaif_parameters:
+  fallback_to_env_reward: {key: rlaif.fallback_to_env_reward, value: false, category: scientific_fixed, source: paper method, rationale: Formal RLAIF cannot silently fallback.}
+  normalization_order: {key: rlaif.normalization_order, value: [raw_reward_model_score, checkpoint_statistics_normalization, symmetric_clipping, agent_specific_lambda_weighting, addition_to_environment_reward], category: scientific_fixed, source: paper method, rationale: Learned reward transformation order is frozen.}
+  learned_reward_uses_environment_reference_scale: {key: rlaif.learned_reward_uses_environment_reference_scale, value: false, category: scientific_fixed, source: paper method, rationale: Environment reference scales do not apply to learned RLAIF reward.}
+  methods:
+    mappo_rlaif_assignment:
+      scope: {key: rlaif.mappo_rlaif_assignment.scope, value: assignment, category: method_specific, source: configs/paper/train_mappo_rlaif_assignment.yaml, rationale: Assignment-only RLAIF baseline.}
+      agents:
+        assignment: {enabled: true, lambda: 1.0, reward_clip: 2.0, checkpoint_path: results/formal/reward_models/reward_assignment.pt, checkpoint_hash: REPLACE_WITH_FINAL_ASSIGNMENT_REWARD_HASH}
+        truck: {enabled: false, lambda: null, reward_clip: null, checkpoint_path: null, checkpoint_hash: null}
+        bus: {enabled: false, lambda: null, reward_clip: null, checkpoint_path: null, checkpoint_hash: null}
+        station: {enabled: false, lambda: null, reward_clip: null, checkpoint_path: null, checkpoint_hash: null}
+    mappo_rlaif_all:
+      scope: {key: rlaif.mappo_rlaif_all.scope, value: all, category: method_specific, source: configs/paper/train_mappo_rlaif_all.yaml, rationale: Full four-agent RLAIF extension.}
+      agents:
+        assignment: {enabled: true, lambda: 1.0, reward_clip: 2.0, checkpoint_path: results/formal/reward_models/reward_assignment.pt, checkpoint_hash: REPLACE_WITH_FINAL_ASSIGNMENT_REWARD_HASH}
+        truck: {enabled: true, lambda: 1.0, reward_clip: 2.0, checkpoint_path: results/formal/reward_models/reward_truck.pt, checkpoint_hash: REPLACE_WITH_FINAL_TRUCK_REWARD_HASH}
+        bus: {enabled: true, lambda: 1.0, reward_clip: 2.0, checkpoint_path: results/formal/reward_models/reward_bus.pt, checkpoint_hash: REPLACE_WITH_FINAL_BUS_REWARD_HASH}
+        station: {enabled: true, lambda: 1.0, reward_clip: 2.0, checkpoint_path: results/formal/reward_models/reward_station.pt, checkpoint_hash: REPLACE_WITH_FINAL_STATION_REWARD_HASH}
+
+evaluation_protocol:
+  test_scenario_count: 100
+  deterministic_policy_evaluation: {key: evaluation.deterministic_policy_evaluation, value: true, category: scientific_fixed, source: configs/paper/benchmark.yaml, rationale: Final evaluation uses deterministic policy actions.}
+  one_episode_per_policy_seed_scenario: {key: evaluation.one_episode_per_policy_seed_scenario, value: true, category: scientific_fixed, source: configs/paper/benchmark.yaml, rationale: Each policy seed is paired with each test scenario once.}
+  paired_evaluation: {key: evaluation.paired_evaluation, value: true, category: scientific_fixed, source: configs/paper/benchmark.yaml, rationale: Methods share identical test scenarios.}
+  failure_rows_retained: {key: evaluation.failure_rows_retained, value: true, category: scientific_fixed, source: configs/paper/benchmark.yaml, rationale: Failed episodes remain auditable rows.}
+  missing_metrics_fail_closed: {key: evaluation.missing_metrics_fail_closed, value: true, category: scientific_fixed, source: configs/paper/benchmark.yaml, rationale: Missing final metrics invalidate benchmark readiness.}
+  fallback_disabled: {key: evaluation.fallback_disabled, value: true, category: scientific_fixed, source: configs/paper/benchmark.yaml, rationale: Formal benchmark cannot use fallback artifacts.}
+  method_matrix:
+    heuristics:
+      - {method_id: truck_direct_heuristic, enabled: true, requires_checkpoint: false}
+      - {method_id: integrated_rule_based, enabled: true, requires_checkpoint: false}
+    learned:
+      - {method_id: assignment_ppo, enabled: true, required: true, seeds: [1, 2, 3]}
+      - {method_id: mappo_env, enabled: true, required: true, seeds: [1, 2, 3]}
+      - {method_id: mappo_rlaif_assignment, enabled: true, required: true, seeds: [1, 2, 3]}
+      - {method_id: mappo_rlaif_all, enabled: true, required: false, seeds: [1, 2, 3]}
+
+ablation_protocol:
+  baseline_method: {key: ablation.baseline_method, value: mappo_rlaif_assignment, category: scientific_fixed, source: configs/paper/ablation_matrix.yaml, rationale: Required ablation baseline is assignment-only RLAIF-MAPPO.}
+  core_comparison: {key: ablation.core_comparison, value: [mappo_env, mappo_rlaif_assignment], category: scientific_fixed, source: configs/paper/ablation_matrix.yaml, rationale: Core ablation isolates assignment RLAIF reward.}
+  optional_extension: {key: ablation.optional_extension, value: mappo_rlaif_all, category: method_specific, source: configs/paper/ablation_matrix.yaml, rationale: Full RLAIF extension is separate.}
+  retraining_variants:
+    - {variant_id: no_rlaif, scientific_hypothesis: environment reward only, changed_parameter: rlaif.enabled, unchanged_parameters: [network_architecture, mappo_optimization, scenario_banks], training_seeds: [1,2,3], train_bank_hash: REPLACE_WITH_FINAL_TRAIN_BANK_HASH, validation_bank_hash: REPLACE_WITH_FINAL_VALIDATION_BANK_HASH, test_bank_hash: REPLACE_WITH_FINAL_TEST_BANK_HASH, checkpoint_separation_required: true}
+
+sensitivity_protocol:
+  fixed_policy_robustness:
+    - {factor_id: parcel_demand_multiplier, config_path: demand.parcel_multiplier, baseline_value: 1.0, tested_values: [0.8, 1.0, 1.2], protocol: fixed_policy_robustness, paired_master_seed_strategy: matched_master_seeds, retraining_required: false}
+  retrained_policy_sensitivity:
+    - {factor_id: assignment_rlaif_lambda, config_path: rlaif.agents.assignment.lambda, baseline_value: 1.0, tested_values: [0.0, 0.5, 1.0, 1.5], protocol: retrained_policy_sensitivity, paired_master_seed_strategy: matched_master_seeds, retraining_required: true}
+    - {factor_id: assignment_reward_clip, config_path: rlaif.agents.assignment.reward_clip, baseline_value: 2.0, tested_values: [1.0, 2.0, 3.0], protocol: retrained_policy_sensitivity, paired_master_seed_strategy: matched_master_seeds, retraining_required: true}
+
+artifact_contract:
+  output_path: {key: artifact_contract.output_path, value: results/formal/freeze/final_experiment_freeze.json, category: path_only, source: final freeze command, rationale: Runtime immutable freeze artifact path.}
+  policy_checkpoint_hashes_required: {key: artifact_contract.policy_checkpoint_hashes_required, value: true, category: estimated_and_frozen, source: final policy checkpoints, rationale: Formal launch requires trained policy hashes.}
+  source_config_hashes_required: {key: artifact_contract.source_config_hashes_required, value: true, category: runtime_derived, source: freeze command, rationale: Source config hashes are computed at freeze generation time.}
