@@ -377,3 +377,51 @@ runs may use explicit deterministic fallback data for engineering checks.
 ### Reward reference-scale estimation
 
 Reward reference scales are estimated from frozen training scenario banks with `python -m experiments.estimate_reward_reference_scales --scenario-bank <train-bank-manifest> --config <estimation-config> --output <runtime-output-path>`. Diagnostic runs should first prepare an ignored runtime fixture with `python -m experiments.prepare_diagnostic_reward_scale_estimation --output-root results/diagnostic/reward_scales --force`. Formal training intentionally keeps `REPLACE_WITH_REAL_SCALE_HASH` and `REPLACE_WITH_REAL_TRAIN_BANK_HASH` placeholders until the user runs the final formal estimation on the final frozen training bank.
+
+## Diagnostic pre-formal experiment gate
+
+The diagnostic pre-formal workflow has been executed to validate the integration path. It is a reduced, publication-ineligible integration run that prepares small diagnostic scenario banks, diagnostic reward-scale metadata, diagnostic reward checkpoints, resolved training/evaluation configs, and a pre-formal gate config under the ignored runtime root `results/diagnostic/preformal_gate/`.
+
+Prepare diagnostic inputs:
+
+```bash
+python -m experiments.prepare_diagnostic_preformal_gate \
+  --output-root results/diagnostic/preformal_gate \
+  --force
+```
+
+Validate the diagnostic gate without training or evaluation:
+
+```bash
+python -m experiments.run_preformal_gate \
+  --config results/diagnostic/preformal_gate/preformal_gate.resolved.yaml \
+  --output-root results/diagnostic/preformal_gate/run \
+  --validate-only
+```
+
+Execute and resume the diagnostic gate:
+
+```bash
+python -m experiments.run_preformal_gate \
+  --config results/diagnostic/preformal_gate/preformal_gate.resolved.yaml \
+  --output-root results/diagnostic/preformal_gate/run \
+  --continue-on-error
+
+python -m experiments.run_preformal_gate \
+  --config results/diagnostic/preformal_gate/preformal_gate.resolved.yaml \
+  --output-root results/diagnostic/preformal_gate/run \
+  --resume \
+  --continue-on-error
+```
+
+Strict report-only validation uses the formal template and is expected to remain blocked until real formal inputs exist:
+
+```bash
+python -m experiments.run_preformal_gate \
+  --config configs/preformal/preformal_gate.template.yaml \
+  --output-root results/preformal/gate \
+  --validate-only \
+  --strict
+```
+
+Final formal readiness still requires real formal scenario banks, reward-scale artifacts, validated reward checkpoints, and a passing strict pre-formal run. Do not treat diagnostic success as final paper-experiment completion.
