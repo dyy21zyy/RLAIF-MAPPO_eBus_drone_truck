@@ -1,0 +1,13 @@
+schema_version: 1
+methods: [assignment_ppo, mappo_env, mappo_rlaif_assignment, mappo_rlaif_all]
+comparisons:
+  mappo_env__vs__mappo_rlaif_assignment:
+    expected_differences: [mode, algorithm, rlaif.enabled, rlaif.scope, rlaif.agents.assignment, output]
+    allowed_differences: [mode, algorithm, rlaif, output, run_name]
+    forbidden_examples: [networks, training.lr_actor, training.lr_critic, training.gamma, training.gae_lambda, training.clip_eps, training.batch_size, training.total_episodes, scenario_banks.train, scenario_banks.validation, reward]
+  mappo_rlaif_assignment__vs__mappo_rlaif_all:
+    expected_differences: [algorithm, rlaif.scope, rlaif.agents.truck, rlaif.agents.bus, rlaif.agents.station, output]
+    allowed_differences: [algorithm, rlaif.scope, rlaif.agents.truck, rlaif.agents.bus, rlaif.agents.station, output, run_name]
+  mappo_env__vs__mappo_rlaif_all:
+    expected_differences: [mode, algorithm, rlaif.enabled, rlaif.scope, rlaif.agents, output]
+    allowed_differences: [mode, algorithm, rlaif, output, run_name]
