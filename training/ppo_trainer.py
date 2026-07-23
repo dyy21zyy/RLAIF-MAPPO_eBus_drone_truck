@@ -49,7 +49,13 @@ def create_environment(config: dict[str, Any], output_root: str | Path | None = 
             raise ValueError("Assignment PPO train bank hash mismatch")
         instance_path = bank.scenarios[0].instance_path
     if instance_path:
-        return DynamicDeliveryEnv(instance_path, env_config.get("config_path"))
+        # Frozen scenario-bank instances are self-contained and carry their
+        # resolved config_snapshot; passing the paper template here would
+        # discard derived runtime keys required by DynamicDeliveryEnv.
+        env = DynamicDeliveryEnv(instance_path)
+        if config.get("reward"):
+            env.config["reward"] = config["reward"]
+        return env
     instance = build_instance(
         env_config["config_path"],
         fallback=bool(env_config.get("fallback", True)),

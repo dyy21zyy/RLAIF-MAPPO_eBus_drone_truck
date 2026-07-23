@@ -7,26 +7,34 @@ env:
   expected_train_bank_hash: REPLACE_WITH_FINAL_TRAIN_BANK_HASH
   validation_scenario_bank_manifest: results/formal/scenarios/validation/scenario_bank_manifest.json
   expected_validation_bank_hash: REPLACE_WITH_FINAL_VALIDATION_BANK_HASH
+  test_scenario_bank_manifest: results/formal/scenarios/test/scenario_bank_manifest.json
+  expected_test_bank_hash: REPLACE_WITH_FINAL_TEST_BANK_HASH
 training:
   seed: 1
-  training_seeds: [1, 2, 3]
+  training_seeds:
+  - 1
+  - 2
+  - 3
   total_episodes: 3000
   rollout_episodes: 10
-  ppo_epochs: 4
+  ppo_epochs: 5
   batch_size: 128
   gamma: 0.997
   gae_lambda: 0.95
   clip_eps: 0.2
-  lr: 0.0003
+  lr: 5.0e-05
   vf_coef: 0.5
   ent_coef: 0.01
   max_grad_norm: 0.5
 policy:
-  hidden_dims: [256, 256]
+  hidden_dims:
+  - 256
+  - 256
+  - 128
 fixed_baseline_policies:
-  truck: first_feasible
+  truck: first_feasible_formal_baseline
   bus: uniform_30
-  station: first_feasible
+  station: first_feasible_formal_baseline
 bus_baseline:
   name: uniform_30
   battery_threshold_soc: 0.3
@@ -34,10 +42,28 @@ bus_baseline:
 rlaif:
   enabled: false
   lambda_rlaif: 1.0
-  fallback_to_env_reward: false
   reward_model_checkpoint: null
 output:
   output_root: results/formal/assignment_ppo
   checkpoint_name_template: assignment_ppo_seed_{seed}.pt
   training_log_name_template: assignment_ppo_seed_{seed}.csv
   eval_name_template: assignment_ppo_seed_{seed}_eval.json
+  checkpoint_path: results/formal/assignment_ppo/assignment_ppo_seed_1.pt
+  training_log_path: results/formal/assignment_ppo/assignment_ppo_seed_1.csv
+  eval_path: results/formal/assignment_ppo/assignment_ppo_seed_1_eval.json
+reward:
+  passenger_delay: 1.0
+  bus_operating_delay: 1.0
+  parcel_lateness: 1.0
+  energy_cost: 0.2
+  power_overload: 1.0
+  bus_battery_violation: 5.0
+  locker_overflow: 1.0
+  truck_cost: 0.0
+  undelivered: 10.0
+  battery_shortage: 1.0
+  infeasible_action: 5.0
+  apply_reference_scales: true
+  scale_artifact: results/formal/reward_scales/final_reward_reference_scales.json
+  expected_training_scenario_bank_hash: REPLACE_WITH_FINAL_TRAIN_BANK_HASH
+  scale_artifact_hash: REPLACE_WITH_REAL_SCALE_HASH

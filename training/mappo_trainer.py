@@ -600,6 +600,8 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
         sampler = ScenarioSampler(factory.scenario_ids, mode=env_cfg.get("scenario_sampling_mode", "shuffled_cycle"), seed=int(env_cfg.get("scenario_sampling_seed", seed)))
         probe_id = factory.scenario_ids[0]
         env = factory.create(probe_id)
+        if config.get("reward"):
+            env.config["reward"] = config["reward"]
         config["scenario_bank"] = {"bank_hash": factory.bank_hash, "split": factory.bank.split, "schema_version": __import__('evaluation.scenario_bank').scenario_bank.SCHEMA_VERSION, "scenario_count": len(factory.scenario_ids), "scenario_ids": list(factory.scenario_ids), "scenario_content_hashes": {sid: factory.metadata(sid).get("scenario_content_hash") for sid in factory.scenario_ids}}
     else:
         if config.get("run_classification", config.get("formal_or_smoke", "smoke")) == "formal":
@@ -632,6 +634,8 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
             if factory is not None and sampler is not None:
                 sid = sampler.next_scenario_id()
                 env = factory.create(sid)
+                if config.get("reward"):
+                    env.config["reward"] = config["reward"]
                 meta = factory.metadata(sid)
                 meta["scenario_sampling_position"] = sampler.position
                 meta["scenario_cycle"] = sampler.cycle
