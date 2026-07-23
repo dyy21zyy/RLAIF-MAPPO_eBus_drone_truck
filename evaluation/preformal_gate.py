@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 import yaml
+from evaluation.preformal_part3_gates import invoke_production_benchmark, invoke_production_ablation, invoke_production_sensitivity
+from evaluation.formal_launch_plan import generate_formal_launch_plan
 
 PREFORMAL_STAGES = (
     "repository_verification",
@@ -134,7 +136,30 @@ class PreformalGate:
 
     def _default_stage(self, rec: StageRecord) -> None:
         commands = self.config.get("commands", {}).get(rec.stage_id)
-        if commands:
+        if rec.stage_id == "benchmark_execution" and self.config.get("benchmark_config"):
+            out = self.output_root / "benchmark"
+            payload = invoke_production_benchmark(self.config["benchmark_config"], out, cwd=Path.cwd())
+            rec.invoked = payload["command_text"]
+            rec.input_artifact_hashes["resolved_benchmark_config_hash"] = payload.get("resolved_config_hash")
+            rec.output_artifact_hashes[str(out / "benchmark_gate_report.json")] = sha256_file(out / "benchmark_gate_report.json")
+        elif rec.stage_id == "ablation_execution" and self.config.get("ablation_config"):
+            out = self.output_root / "ablation"
+            payload = invoke_production_ablation(self.config["ablation_config"], out, cwd=Path.cwd())
+            rec.invoked = payload["command_text"]
+            rec.input_artifact_hashes["resolved_ablation_config_hash"] = payload.get("resolved_config_hash")
+        elif rec.stage_id == "sensitivity_execution" and self.config.get("sensitivity_config"):
+            out = self.output_root / "sensitivity"
+            payload = invoke_production_sensitivity(self.config["sensitivity_config"], out, cwd=Path.cwd())
+            rec.invoked = payload["command_text"]
+            rec.input_artifact_hashes["resolved_sensitivity_config_hash"] = payload.get("resolved_config_hash")
+        elif rec.stage_id == "formal_launch_plan":
+            plan = generate_formal_launch_plan(self.config.get("formal_launch", {}), self.output_root / "formal_launch_plan.json")
+            rec.invoked = "evaluation.formal_launch_plan.generate_formal_launch_plan"
+            rec.output_artifact_hashes[str(self.output_root / "formal_launch_plan.json")] = sha256_file(self.output_root / "formal_launch_plan.json")
+            if any(s.get("status") == "blocked_missing_artifact" for s in plan.get("stages", [])) and self.mode == "formal":
+                rec.set_status("blocked_missing_artifact")
+                rec.failure_reason = "formal launch plan has unresolved required artifacts"
+        elif commands:
             rec.invoked = " ".join(commands)
             _run_command([str(x) for x in commands], self.output_root / f"{rec.stage_id}.command.json")
         else:
@@ -173,8 +198,39 @@ class PreformalGate:
             finally:
                 rec.end_time = time.time(); rec.runtime = rec.end_time - rec.start_time
         status = self.overall_status()
-        report = {"overall_status": status, "run_classification": self.mode, "experiment_stage": self.stage, "publication_eligible": False, "note": NOTE, "stages": [asdict(self.records[s]) for s in PREFORMAL_STAGES]}
+        stage_dicts = [asdict(self.records[s]) for s in PREFORMAL_STAGES]
+        report = {
+            "overall_status": status, "overall_preformal_status": status,
+            "run_classification": self.mode, "experiment_stage": self.stage, "publication_eligible": False, "note": NOTE,
+            "code_commit": subprocess.check_output(["git","rev-parse","HEAD"], text=True).strip(),
+            "dirty_status": bool(subprocess.check_output(["git","status","--short"], text=True).strip()),
+            "stage_statuses": {s:self.records[s].status for s in PREFORMAL_STAGES},
+            "required_stage_failures": [asdict(r) for r in self.records.values() if r.required and r.status in {"failed","blocked_dependency","blocked_missing_artifact","blocked_invalid_artifact"}],
+            "optional_stage_failures": [asdict(r) for r in self.records.values() if not r.required and r.status == "failed"],
+            "blocked_stages": [asdict(r) for r in self.records.values() if r.status.startswith("blocked")],
+            "scenario_bank_hashes": self.config.get("scenario_bank_hashes", {}),
+            "reward_scale_hash": self.config.get("reward_scale_hash"),
+            "reward_model_hashes": self.config.get("reward_model_hashes", {}),
+            "policy_checkpoint_hashes": self.config.get("policy_checkpoint_hashes", {}),
+            "benchmark_row_counts": self.config.get("benchmark_row_counts", {}),
+            "ablation_job_counts": self.config.get("ablation_job_counts", {}),
+            "sensitivity_job_counts": self.config.get("sensitivity_job_counts", {}),
+            "paired_comparison_counts": self.config.get("paired_comparison_counts", {}),
+            "event_coverage_status": self.config.get("event_coverage_status"),
+            "metric_validation_status": self.config.get("metric_validation_status"),
+            "reward_reconciliation_status": self.config.get("reward_reconciliation_status"),
+            "fallback_count": self.config.get("fallback_count", 0),
+            "full_test_suite_status": self.config.get("full_test_suite_status"),
+            "remaining_blockers": [r.failure_reason for r in self.records.values() if r.failure_reason],
+            "stages": stage_dicts,
+        }
         (self.output_root/"preformal_gate_report.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        (self.output_root/"preformal_readiness_report.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        if self.mode == "formal" and self.stage == "preformal" and status == "PREFORMAL_ALL_REQUIRED_PATHS_PASSED":
+            cert_inputs = {k: report.get(k) for k in ("code_commit","scenario_bank_hashes","reward_scale_hash","reward_model_hashes","policy_checkpoint_hashes")}
+            cert_inputs.update({"benchmark_config_hash": self.config.get("benchmark_config_hash"), "ablation_config_hash": self.config.get("ablation_config_hash"), "sensitivity_config_hash": self.config.get("sensitivity_config_hash"), "formal_launch_plan_hash": sha256_file(self.output_root/"formal_launch_plan.json")})
+            cert = {"publication_eligible": False, "run_classification": self.mode, "experiment_stage": self.stage, "overall_status": status, "certificate_inputs": cert_inputs, "certificate_hash": hashlib.sha256(json.dumps(cert_inputs, sort_keys=True, default=str).encode()).hexdigest()}
+            (self.output_root/"formal_experiment_readiness_certificate.json").write_text(json.dumps(cert, indent=2, sort_keys=True), encoding="utf-8")
         return report
 
     def overall_status(self) -> str:

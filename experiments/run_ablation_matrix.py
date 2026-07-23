@@ -77,7 +77,10 @@ def run_matrix(config, *, validate_only=False, variant_filter=None, seed_filter=
             rows.append(row)
     aggs=aggregate_compatible(rows); (root/'aggregation'/'aggregate_results.json').write_text(json.dumps(aggs,indent=2,sort_keys=True,default=str))
     base=matrix.get('baseline_variant_id','assignment_rlaif_baseline'); pairs=paired_differences(rows, baseline_selector=lambda r:r.get('variant_id')==base, comparison_selector=lambda r:r.get('variant_id')!=base); (root/'aggregation'/'paired_results.json').write_text(json.dumps(pairs,indent=2,sort_keys=True,default=str))
-    (root/'experiment_manifest.json').write_text(json.dumps({'run_classification':matrix.get('run_classification'),'publication_eligible':matrix.get('run_classification')=='formal' and not any(r['status'].endswith('failed') for r in rows),'job_count':len(rows)},indent=2))
+    checkpoint_hashes={r.get('variant_id'):r.get('policy_checkpoint_hash') for r in rows if r.get('policy_checkpoint_hash')}
+    gate={'baseline_variant':base,'comparison_variants':[v.get('variant_id') for v in matrix.get('variants',[]) if v.get('variant_id')!=base],'training_seeds':matrix.get('training_seeds',[None]),'checkpoint_hashes':checkpoint_hashes,'test_bank_hash':paths.get('test_hash'),'expected_jobs':len(matrix.get('variants',[]))*len(matrix.get('training_seeds',[None])),'successful_jobs':sum(1 for r in rows if r.get('status')=='evaluation_success'),'failed_jobs':[r for r in rows if r.get('status','').endswith('failed')],'paired_scenario_count':pairs.get('summary',{}).get('paired_sample_count',0),'publication_eligible':False}
+    (root/'ablation_gate_report.json').write_text(json.dumps(gate,indent=2,sort_keys=True,default=str))
+    (root/'experiment_manifest.json').write_text(json.dumps({'run_classification':matrix.get('run_classification'),'publication_eligible':False,'job_count':len(rows)},indent=2))
     write_job_outputs(root,rows); return rows
 
 def main(argv=None):
