@@ -22,7 +22,9 @@ python -m experiments.prepare_formal_experiment_inputs \
   --resume
 ```
 
-Expected outputs include the frozen train/validation/test scenario-bank manifests and the final reward-scale artifact under `results/formal/`. These hashes are later injected into runtime training and benchmark configs.
+Expected outputs include the frozen train/validation/test scenario-bank manifests and the final reward-scale artifact under `results/formal/`. On a first run, use normal creation or `--force` to intentionally rebuild all requested formal inputs. On interrupted runs, use `--resume` to reuse only validated compatible scenario banks and the reward-scale estimator progress. `--resume` and `--force` are mutually exclusive.
+
+All scenario identities in formal configs and lineage use the scenario-bank manifest internal canonical `bank_hash`. The manifest-file SHA is recorded separately as `manifest_file_hash` for file-integrity metadata only and must not substitute for `bank_hash`.
 
 ## Step 3: generate preferences and train four reward models
 

@@ -41,7 +41,7 @@ def test_missing_credential_failure_creates_no_dataset(tmp_path, monkeypatch):
     cfg=tmp_path/'cfg.yaml'; manifest=tmp_path/'bank.json'; manifest.write_text(json.dumps({'decision_states':[]}))
     cfg.write_text(f"""
 run_classification: formal
-scenario_bank: {{final_train_manifest: {manifest}}}
+scenario_bank: {{final_train_manifest: {manifest}, source_mode: injected_states}}
 evaluator: {{api_key_env: OPENAI_API_KEY, base_url_env: OPENAI_BASE_URL, model_env: OPENAI_MODEL}}
 preference_split: {{train_fraction: 0.7, validation_fraction: 0.15, test_fraction: 0.15, seed: 1}}
 agents:
@@ -64,7 +64,7 @@ def test_generation_collects_all_agents_splits_and_failure_recording(tmp_path, m
     manifest=tmp_path/'bank.json'; manifest.write_text(json.dumps({'decision_states':states}))
     cfg=tmp_path/'cfg.yaml'; cfg.write_text(f"""
 run_classification: formal
-scenario_bank: {{final_train_manifest: {manifest}}}
+scenario_bank: {{final_train_manifest: {manifest}, source_mode: injected_states}}
 evaluator: {{api_key_env: OPENAI_API_KEY, base_url_env: OPENAI_BASE_URL, model_env: OPENAI_MODEL, max_retries: 2, temperature: 0.0}}
 preference_split: {{train_fraction: 0.5, validation_fraction: 0.25, test_fraction: 0.25, seed: 1}}
 agents:
@@ -83,3 +83,14 @@ agents:
     bus=[json.loads(l) for l in (tmp_path/'pb.jsonl').read_text().splitlines()]
     assert {r['event_type'] for r in bus} == {'BUS_TERMINAL_DEPARTURE','BUS_STATION_ARRIVAL'}
     assert (tmp_path/'out'/'failed'/'assignment_failed.jsonl').exists()
+
+def test_real_frozen_scenario_rollout_collects_four_agents(tmp_path, monkeypatch):
+    from experiments.build_scenario_bank import build_bank
+    from experiments.generate_formal_multiagent_preferences import collect_decision_states
+    build_bank('configs/shanghai_small.yaml','train',2,123,tmp_path/'train',fallback=False,run_classification='diagnostic',force=True)
+    cfg={'scenario_bank':{'final_train_manifest':str(tmp_path/'train'/'scenario_bank_manifest.json')},'collection':{'seed':7}}
+    states=collect_decision_states(cfg, output_root=tmp_path/'out')
+    assert {s['agent_type'] for s in states} == {'assignment','truck','bus','station'}
+    assert {'BUS_TERMINAL_DEPARTURE','BUS_STATION_ARRIVAL'} <= {s['event_type'] for s in states}
+    assert all(s['scenario_split']=='train' and s['scenario_bank_hash'] for s in states)
+    assert any(feasible_pairs(s) for s in states)

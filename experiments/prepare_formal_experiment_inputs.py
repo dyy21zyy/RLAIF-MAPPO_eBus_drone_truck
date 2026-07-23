@@ -104,15 +104,22 @@ def _write_resolved_configs(output_root: Path, manifests: dict[str, dict[str, An
             resolved[name] = str(_resolve_config(src, output_root / "configs" / (name + ".resolved.yaml"), manifests, scale, output_root, reward_models))
     return resolved
 
-def prepare(output_root: Path, *, force: bool=False, counts: dict[str,int]|None=None, scale_scenario_limit: int|None=None) -> dict[str, Any]:
+def prepare(output_root: Path, *, force: bool=False, resume: bool=False, counts: dict[str,int]|None=None, scale_scenario_limit: int|None=None) -> dict[str, Any]:
+    if force and resume: raise ValueError('--resume and --force are mutually exclusive')
     output_root = Path(output_root); counts = counts or {'train':300,'validation':60,'test':100}
     freeze = yaml.safe_load(Path('configs/paper/final_experiment_freeze.template.yaml').read_text()) or {}
     base = 'configs/paper/base_medium.yaml'; ns = _namespace(freeze)
     starts = {'train': ns, 'validation': ns + 100000, 'test': ns + 200000}
     paths = {s: output_root/'scenarios'/s for s in counts}
-    for split in ('train','validation','test'):
-        build_bank(base, split, counts[split], starts[split], paths[split], fallback=False, run_classification='formal', force=force)
-    manifests = _validate_banks(paths, counts)
+    if resume and all((paths[s]/'scenario_bank_manifest.json').is_file() for s in counts):
+        manifests = _validate_banks(paths, counts)
+    elif resume:
+        missing=[s for s in counts if not (paths[s]/'scenario_bank_manifest.json').is_file()]
+        raise RuntimeError('stale/incompatible formal input artifacts: missing scenario bank manifest for '+', '.join(missing))
+    else:
+        for split in ('train','validation','test'):
+            build_bank(base, split, counts[split], starts[split], paths[split], fallback=False, run_classification='formal', force=force)
+        manifests = _validate_banks(paths, counts)
     scale_path = output_root/'reward_scales/final_reward_reference_scales.json'
     scale_cfg = copy.deepcopy(yaml.safe_load(Path('configs/paper/reward_scale_estimation.yaml').read_text()) or {})
     scale_cfg.setdefault('scenario_bank', {})['expected_bank_hash'] = manifests['train']['bank_hash']
@@ -133,8 +140,8 @@ def prepare(output_root: Path, *, force: bool=False, counts: dict[str,int]|None=
     return manifest
 
 def main(argv=None):
-    ap=argparse.ArgumentParser(); ap.add_argument('--output-root', type=Path, default=Path('results/formal')); ap.add_argument('--force', action='store_true'); ap.add_argument('--train-count', type=int, default=300); ap.add_argument('--validation-count', type=int, default=60); ap.add_argument('--test-count', type=int, default=100); ap.add_argument('--scale-scenario-limit', type=int)
+    ap=argparse.ArgumentParser(); ap.add_argument('--output-root', type=Path, default=Path('results/formal')); ap.add_argument('--force', action='store_true', help='rebuild all formal inputs'); ap.add_argument('--resume', action='store_true', help='reuse validated compatible scenario banks and reward-scale progress; mutually exclusive with --force'); ap.add_argument('--train-count', type=int, default=300); ap.add_argument('--validation-count', type=int, default=60); ap.add_argument('--test-count', type=int, default=100); ap.add_argument('--scale-scenario-limit', type=int)
     a=ap.parse_args(argv)
-    m=prepare(a.output_root, force=a.force, counts={'train':a.train_count,'validation':a.validation_count,'test':a.test_count}, scale_scenario_limit=a.scale_scenario_limit)
+    m=prepare(a.output_root, force=a.force, resume=a.resume, counts={'train':a.train_count,'validation':a.validation_count,'test':a.test_count}, scale_scenario_limit=a.scale_scenario_limit)
     print(json.dumps(m, indent=2, sort_keys=True)); return 0
 if __name__ == '__main__': raise SystemExit(main())

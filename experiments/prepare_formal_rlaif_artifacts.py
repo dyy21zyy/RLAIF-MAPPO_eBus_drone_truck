@@ -9,7 +9,7 @@ import argparse, hashlib, json, os, subprocess, sys
 from pathlib import Path
 from typing import Any
 import yaml
-from evaluation.scenario_bank import sha256_file
+from evaluation.scenario_bank import sha256_file, load_bank_manifest
 from experiments.generate_formal_multiagent_preferences import generate as generate_preferences
 from training.config_resolver import resolve_mappo_training_config
 from experiments.train_multi_agent_reward_models import main as train_reward_main
@@ -106,14 +106,20 @@ def _validate_preference_file(agent: str, path: Path, target: int) -> dict[str, 
 def _inject_artifacts(template_path: Path, output_path: Path, manifest: dict[str, Any], scope_agents: tuple[str, ...], cfg: dict[str, Any]) -> None:
     tpl = _load_yaml(template_path)
     train_manifest = Path(cfg["scenario_bank"]["final_train_manifest"])
-    bank_hash = sha256_file(train_manifest) if train_manifest.exists() else manifest.get("scenario_bank_hash", "")
+    train_bank_manifest = load_bank_manifest(train_manifest)
+    bank_hash = train_bank_manifest.get("bank_hash") or manifest.get("scenario_bank",{}).get("bank_hash") or manifest.get("scenario_bank_hash")
+    if not bank_hash: raise RuntimeError("formal train bank manifest missing canonical bank_hash")
+    manifest_file_hash = sha256_file(train_manifest)
     scale = Path(tpl.get("reward", {}).get("scale_artifact", "results/formal/reward_scales/final_reward_reference_scales.json"))
     tpl.setdefault("env", {})["scenario_bank_manifest"] = str(train_manifest)
     tpl["env"]["expected_split"] = "train"
     tpl["env"]["expected_bank_hash"] = bank_hash
+    tpl["env"]["scenario_bank_manifest_file_hash"] = manifest_file_hash
     tpl.setdefault("reward", {})["expected_training_scenario_bank_hash"] = bank_hash
     if scale.exists():
-        tpl["reward"]["scale_artifact_hash"] = _hash_json(scale)
+        scale_payload=json.loads(scale.read_text())
+        if scale_payload.get("training_scenario_bank_hash") != bank_hash: raise RuntimeError("reward scale train-bank lineage mismatch")
+        tpl["reward"]["scale_artifact_hash"] = scale_payload.get("artifact_hash") or _hash_json(scale)
     else:
         tpl["reward"]["scale_artifact_hash"] = manifest.get("reward_scale_hash", bank_hash)
     tpl.setdefault("rlaif", {})["fallback_to_env_reward"] = False
@@ -182,6 +188,10 @@ def prepare(config_path: Path, output_root: Path, *, resume: bool) -> dict[str, 
     train_manifest = Path(cfg["scenario_bank"]["final_train_manifest"])
     if not train_manifest.is_file():
         raise RuntimeError(f"missing formal train bank manifest: {train_manifest}")
+    train_bank_manifest = load_bank_manifest(train_manifest)
+    canonical_train_bank_hash = train_bank_manifest.get("bank_hash") or manifest.get("scenario_bank",{}).get("bank_hash") or manifest.get("scenario_bank_hash")
+    if not bank_hash: raise RuntimeError("formal train bank manifest missing canonical bank_hash")
+    manifest_file_hash = sha256_file(train_manifest)
     evaluator = verify_evaluator_config(cfg)
     pref_manifest = output_root / "preference_manifest.json"
     need_generate = not pref_manifest.is_file()
@@ -195,7 +205,7 @@ def prepare(config_path: Path, output_root: Path, *, resume: bool) -> dict[str, 
             need_generate = True
     if need_generate:
         generate_preferences(config_path, output_root, resume=resume)
-    manifest: dict[str, Any] = {"status": "incomplete", "code_commit": _git_sha(), "evaluator_model": evaluator["model"], "prompt_version": cfg["evaluator"]["prompt_version"], "scenario_bank_hash": sha256_file(train_manifest), "agents": {}}
+    manifest: dict[str, Any] = {"status": "incomplete", "code_commit": _git_sha(), "evaluator_model": evaluator["model"], "prompt_version": cfg["evaluator"]["prompt_version"], "scenario_bank_hash": canonical_train_bank_hash, "scenario_bank": {"path": str(train_manifest), "bank_hash": canonical_train_bank_hash, "manifest_file_hash": manifest_file_hash, "split": train_bank_manifest.get("split"), "scenario_count": train_bank_manifest.get("scenario_count")}, "agents": {}}
     model_cfg_base = cfg["reward_model"]["config_template"]
     for agent in AGENT_TYPES:
         acfg = cfg["agents"][agent]
