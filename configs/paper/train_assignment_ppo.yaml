@@ -1,0 +1,43 @@
+run_classification: formal
+algorithm: assignment_ppo
+env:
+  config_path: configs/paper/base_medium.yaml
+  fallback: false
+  train_scenario_bank_manifest: results/formal/scenarios/train/scenario_bank_manifest.json
+  expected_train_bank_hash: REPLACE_WITH_FINAL_TRAIN_BANK_HASH
+  validation_scenario_bank_manifest: results/formal/scenarios/validation/scenario_bank_manifest.json
+  expected_validation_bank_hash: REPLACE_WITH_FINAL_VALIDATION_BANK_HASH
+training:
+  seed: 1
+  training_seeds: [1, 2, 3]
+  total_episodes: 3000
+  rollout_episodes: 10
+  ppo_epochs: 4
+  batch_size: 128
+  gamma: 0.997
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  lr: 0.0003
+  vf_coef: 0.5
+  ent_coef: 0.01
+  max_grad_norm: 0.5
+policy:
+  hidden_dims: [256, 256]
+fixed_baseline_policies:
+  truck: first_feasible
+  bus: uniform_30
+  station: first_feasible
+bus_baseline:
+  name: uniform_30
+  battery_threshold_soc: 0.3
+  max_charge_seconds: 120
+rlaif:
+  enabled: false
+  lambda_rlaif: 1.0
+  fallback_to_env_reward: false
+  reward_model_checkpoint: null
+output:
+  output_root: results/formal/assignment_ppo
+  checkpoint_name_template: assignment_ppo_seed_{seed}.pt
+  training_log_name_template: assignment_ppo_seed_{seed}.csv
+  eval_name_template: assignment_ppo_seed_{seed}_eval.json
