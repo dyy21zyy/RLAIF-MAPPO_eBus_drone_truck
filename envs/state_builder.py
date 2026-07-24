@@ -70,49 +70,39 @@ TRUCK_FEATURE_NAMES = (
 
 BUS_LOADING_FEATURE_NAMES = (
     "time_norm",
-    "ready_parcel_count_norm",
     "freight_load_norm",
     "capacity_remaining_norm",
+    "terminal_ready_parcel_count_norm",
+    "onboard_passengers_norm",
+    "soc_norm",
+    "target_station_profile_norm",
 )
 
 BUS_CHARGING_FEATURE_NAMES = (
     "time_norm",
     "soc_norm",
-    "delay_norm",
-    "locker_load_norm",
-    "full_batteries_norm",
-    "freight_load_norm",
-    "total_onboard_passengers_norm",
-    "remaining_passenger_capacity_norm",
-    "current_stop_waiting_passengers_norm",
-    "downstream_waiting_summary_norm",
-    "boarding_count_norm",
-    "alighting_count_norm",
-    "current_waiting_passenger_minutes_norm",
-    "current_onboard_additional_delay_passenger_minutes_norm",
-    "expected_boarding_time_norm",
-    "expected_alighting_time_norm",
+    "safety_energy_margin_norm",
+    "current_delay_norm",
+    "unloading_time_norm",
+    "passenger_load_norm",
+    "stop_queue_norm",
+    "station_power_margin_norm",
 )
 
 CANONICAL_BUS_REWARD_STATE_FEATURE_NAMES = (
     "time_norm",
-    "ready_parcel_count_norm",
     "freight_load_norm",
     "capacity_remaining_norm",
+    "terminal_ready_parcel_count_norm",
+    "onboard_passengers_norm",
     "soc_norm",
-    "delay_norm",
-    "locker_load_norm",
-    "full_batteries_norm",
-    "total_onboard_passengers_norm",
-    "remaining_passenger_capacity_norm",
-    "current_stop_waiting_passengers_norm",
-    "downstream_waiting_summary_norm",
-    "boarding_count_norm",
-    "alighting_count_norm",
-    "current_waiting_passenger_minutes_norm",
-    "current_onboard_additional_delay_passenger_minutes_norm",
-    "expected_boarding_time_norm",
-    "expected_alighting_time_norm",
+    "target_station_profile_norm",
+    "safety_energy_margin_norm",
+    "current_delay_norm",
+    "unloading_time_norm",
+    "passenger_load_norm",
+    "stop_queue_norm",
+    "station_power_margin_norm",
 )
 
 BUS_EVENT_STATE_FEATURE_NAMES = {
@@ -492,7 +482,7 @@ def build_bus_loading_decision_surface(env: Any, trip_id: str) -> DecisionSurfac
     return DecisionSurface(
         agent_id="bus", event_type="BUS_TERMINAL_DEPARTURE", entity_id=trip_id,
         features=[env.now_min / horizon, current_load / capacity, max(0.0, capacity-current_load)/capacity, terminal_ready / max(len(env.parcels), 1), float(getattr(getattr(bus, "passenger_manifest", None), "total_onboard_passengers", 0)) / max(float(env.config["bus"].get("bus_capacity_passenger",80)),1.0), float(getattr(bus, "soc_kwh", 0.0)) / max(float(env.config["bus"].get("bus_battery_kwh",160.0)),1.0), target_profile / max(len(env.station_ids),1)],
-        feature_names=("time_norm","freight_load_norm","capacity_remaining_norm","terminal_ready_parcel_count_norm","onboard_passengers_norm","soc_norm","target_station_profile_norm"),
+        feature_names=BUS_LOADING_FEATURE_NAMES,
         candidates=candidates,
     )
 
@@ -507,7 +497,7 @@ def build_bus_charging_decision_surface(env: Any, event: Any) -> DecisionSurface
     return DecisionSurface(
         agent_id="bus", event_type="BUS_STATION_ARRIVAL", entity_id=f"{trip_id}:{station_id}",
         features=[env.now_min/horizon, bus.soc_kwh/battery, max(0.0,bus.soc_kwh-bus.minimum_safe_energy_kwh)/battery, bus.schedule_delay_min/horizon, float(event.payload.get("unloading_delay_min",0.0))/horizon, float(bus.passenger_manifest.total_onboard_passengers)/max(float(env.config["bus"].get("bus_capacity_passenger",80)),1.0), float(waiting)/max(float(env.config["bus"].get("bus_capacity_passenger",80)),1.0), (station.power_capacity_kw-env._station_load_kw(station,env.now_min))/max(station.power_capacity_kw,1.0)],
-        feature_names=("time_norm","soc_norm","safety_energy_margin_norm","current_delay_norm","unloading_time_norm","passenger_load_norm","stop_queue_norm","station_power_margin_norm"),
+        feature_names=BUS_CHARGING_FEATURE_NAMES,
         candidates=candidates,
     )
 
