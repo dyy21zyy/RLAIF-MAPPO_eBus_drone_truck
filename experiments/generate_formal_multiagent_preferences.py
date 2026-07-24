@@ -214,44 +214,125 @@ def validate_split_isolation(rows:list[dict[str,Any]])->None:
             if v in m and m[v]!=sp: raise ValueError(f'split leakage detected for {k}={v}')
             m[v]=sp
 
-def generate(config_path:Path, output_root:Path, *, resume:bool=False, api_call:Callable[[str,APISettings],str]|None=None) -> dict[str,Any]:
-    cfg=load_yaml(config_path); settings=evaluator_settings(cfg)
+
+def _pair_identity(state:dict[str,Any], a:dict[str,Any], b:dict[str,Any]) -> str:
+    return sha_json([state['scenario_hash'], state['state_id'], sorted([_candidate_id(a), _candidate_id(b)])])
+
+def _stratum_key(state:dict[str,Any], split:str) -> tuple[str,str,str]:
+    return (state['agent_type'], state['event_type'], split)
+
+def _required_strata(agent:str, cfg:dict[str,Any]) -> set[tuple[str,str,str]]:
+    events=set(cfg.get('agents',{}).get(agent,{}).get('supported_event_types') or REQUIRED_EVENT_COVERAGE[agent])
+    return {(agent,e,s) for e in events for s in ('train','validation','test')}
+
+def _build_pair_pool(states:list[dict[str,Any]], split_by_state:dict[str,str], seed:int) -> tuple[list[dict[str,Any]], dict[str,Any]]:
+    pool=[]; counts={}
+    for idx,st in enumerate(states):
+        split=split_by_state[st['state_id']]
+        pairs=feasible_pairs(st)
+        key=_stratum_key(st,split); counts[key]=counts.get(key,0)+len(pairs)
+        for pi,(a,b) in enumerate(pairs):
+            ident=_pair_identity(st,a,b)
+            pool.append({'state':st,'a':a,'b':b,'state_index':idx,'pair_index':pi,'pair_identity':ident,'stratum':key,
+                         'order_key':sha_json([seed, st['agent_type'], st['event_type'], split, st['scenario_hash'], st['state_id'], ident])})
+    return pool, counts
+
+def _select_agent_pairs(agent:str, pool:list[dict[str,Any]], budget:int, seed:int) -> list[dict[str,Any]]:
+    agent_pool=[p for p in pool if p['state']['agent_type']==agent]
+    by_stratum={}
+    for p in sorted(agent_pool, key=lambda x:x['order_key']): by_stratum.setdefault(p['stratum'],[]).append(p)
+    strata=sorted(by_stratum, key=lambda k: sha_json([seed,*k]))
+    chosen=[]; chosen_ids=set(); used_states=set()
+    def rounds(first_pass:bool):
+        made=True
+        while made and len(chosen)<budget:
+            made=False
+            for sk in strata:
+                for p in by_stratum[sk]:
+                    if p['pair_identity'] in chosen_ids: continue
+                    sid=p['state']['state_id']
+                    if first_pass and sid in used_states: continue
+                    chosen.append(p); chosen_ids.add(p['pair_identity']); used_states.add(sid); made=True; break
+                if len(chosen)>=budget: break
+    rounds(True); rounds(False)
+    return chosen[:budget]
+
+def _count_records(rows:list[dict[str,Any]]) -> dict[str,Any]:
+    return {'by_event':{e:sum(r['event_type']==e for r in rows) for e in sorted({r['event_type'] for r in rows})},
+            'by_split':{s:sum(r.get('dataset_split')==s for r in rows) for s in ('train','validation','test')},
+            'by_event_and_split':{f'{e}|{s}':sum(r['event_type']==e and r.get('dataset_split')==s for r in rows) for e in sorted({r['event_type'] for r in rows}) for s in ('train','validation','test')}}
+
+def _coverage_satisfied(agent:str, rows:list[dict[str,Any]], cfg:dict[str,Any]) -> bool:
+    binary=[r for r in rows if r.get('original_outcome') in {'candidate_a','candidate_b'}]
+    have={(r['agent_type'],r['event_type'],r.get('dataset_split')) for r in binary}
+    return _required_strata(agent,cfg) <= have
+
+def generate(config_path:Path, output_root:Path, *, resume:bool=False, dry_run:bool=False, api_call:Callable[[str,APISettings],str]|None=None) -> dict[str,Any]:
+    cfg=load_yaml(config_path); settings=None if dry_run else evaluator_settings(cfg)
     states=collect_decision_states(cfg, output_root=output_root, resume=resume)
     split_cfg=cfg.get('preference_split',{}); split=grouped_split(states, split_cfg.get('train_fraction',.7), split_cfg.get('validation_fraction',.15), split_cfg.get('test_fraction',.15), split_cfg.get('seed',1), 'scenario')
     split_by_state={s['state_id']:name for name,rs in split['records'].items() for s in rs}
+    seed=int(split_cfg.get('seed',1))
+    pool, pool_counts=_build_pair_pool(states, split_by_state, seed)
     prefs_dir=output_root/'preferences'; failed_dir=output_root/'failed'; cache_dir=Path(cfg.get('evaluator',{}).get('cache_dir') or output_root/'evaluator_cache')
-    failed_dir.mkdir(parents=True,exist_ok=True); cache_dir.mkdir(parents=True,exist_ok=True)
-    call=api_call or _default_api_call; by_agent={a:[] for a in AGENT_TYPES}; failures={a:[] for a in AGENT_TYPES}
-    for st in states:
-        for a,b in feasible_pairs(st):
+    if not dry_run:
+        failed_dir.mkdir(parents=True,exist_ok=True); cache_dir.mkdir(parents=True,exist_ok=True)
+    manifest={'status':'dry_run' if dry_run else 'complete','agents':{},'split_hash':split['hash'],'scenario_bank_manifest':str(cfg['scenario_bank']['final_train_manifest']),'scenario_bank':cfg.get('_scenario_bank_manifest_data',{}),'collection':cfg.get('_collection',{})}
+    default_budget={'assignment':600,'truck':480,'bus':600,'station':480}
+    report_lines=[]
+    call=api_call or _default_api_call
+    for agent in AGENT_TYPES:
+        acfg=cfg.get('agents',{}).get(agent,{})
+        target=int(acfg.get('target_valid_pair_count',0)); budget=int(acfg.get('max_api_attempts', default_budget[agent]))
+        selected=_select_agent_pairs(agent,pool,budget,seed)
+        agent_pool=[p for p in pool if p['state']['agent_type']==agent]
+        selected_counts={}
+        for p in selected: selected_counts[p['stratum']]=selected_counts.get(p['stratum'],0)+1
+        pool_total=len(agent_pool)
+        if dry_run:
+            manifest['agents'][agent]={'candidate_pair_pool_count':pool_total,'selected_pair_count':len(selected),'external_api_call_count':0,'cache_hit_count':0,'valid_binary_label_count':0,'tie_count':0,'failure_count':0,'target_valid_pair_count':target,'max_api_attempts':budget,'pool_counts_by_event_split':{f'{a}|{e}|{s}':c for (a,e,s),c in sorted(pool_counts.items()) if a==agent},'selected_counts_by_event_split':{f'{a}|{e}|{s}':c for (a,e,s),c in sorted(selected_counts.items()) if a==agent}}
+            report_lines.append(f"{agent}: pool={pool_total} selected_budget={len(selected)} target={target} max_api_attempts={budget}")
+            continue
+        out=Path(acfg['output_preferences']);
+        if not out.is_absolute(): out=prefs_dir/f'preference_{agent}.jsonl'
+        existing=read_jsonl(out) if resume and out.is_file() else []
+        rows=list(existing); seen={r.get('preference_id') for r in rows}; failures=[]; external_calls=0; cache_hits=0
+        for p in selected:
+            if len([r for r in rows if r.get('original_outcome') in {'candidate_a','candidate_b'}]) >= target and _coverage_satisfied(agent,rows,cfg): break
+            st,a,b=p['state'],p['a'],p['b']
             ck=cache_key(st,a,b,settings,cfg); cp=cache_dir/f'{ck}.json'; raw=''; err=''
             try:
-                if resume and cp.is_file(): resp=validate_structured_response(json.loads(cp.read_text())['raw_response'])
+                if cp.is_file():
+                    resp=validate_structured_response(json.loads(cp.read_text())['raw_response']); cache_hits+=1
                 else:
+                    if external_calls >= budget: raise RuntimeError(f'{agent} maximum API-attempt budget exhausted ({budget}) before target was met')
                     for attempt in range(settings.max_retries):
-                        try: raw=call(build_prompt(st,a,b,cfg),settings); resp=validate_structured_response(raw); cp.write_text(json.dumps({'identity':ck,'raw_response':raw},sort_keys=True)); break
+                        if external_calls >= budget: raise RuntimeError(f'{agent} maximum API-attempt budget exhausted ({budget}) before target was met')
+                        try:
+                            raw=call(build_prompt(st,a,b,cfg),settings); external_calls+=1
+                            resp=validate_structured_response(raw); cp.write_text(json.dumps({'identity':ck,'raw_response':raw},sort_keys=True)); break
                         except Exception as exc:
                             err=str(exc); time.sleep(0.01*(attempt+1))
                     else: raise ValueError(err)
-                by_agent[st['agent_type']].append(make_preference_record(st,a,b,resp,split_by_state[st['state_id']],settings,cfg))
+                rec=make_preference_record(st,a,b,resp,split_by_state[st['state_id']],settings,cfg)
+                if rec['preference_id'] not in seen: rows.append(rec); seen.add(rec['preference_id'])
             except Exception as exc:
-                failures[st['agent_type']].append({'agent_type':st['agent_type'],'event_type':st['event_type'],'state_id':st['state_id'],'error':str(exc),'raw_response':raw})
-    manifest={'status':'complete','agents':{},'split_hash':split['hash'],'scenario_bank_manifest':str(cfg['scenario_bank']['final_train_manifest']),'scenario_bank':cfg.get('_scenario_bank_manifest_data',{}),'collection':cfg.get('_collection',{})}
-    for agent,rows in by_agent.items():
+                failures.append({'agent_type':agent,'event_type':st['event_type'],'state_id':st['state_id'],'candidate_pair_hash':p['pair_identity'],'error':str(exc),'raw_response':raw})
         validate_split_isolation(rows)
-        if REQUIRED_EVENT_COVERAGE[agent] - {r['event_type'] for r in rows}: raise RuntimeError(f'{agent} missing event coverage')
-        target=int(cfg['agents'][agent].get('target_valid_pair_count',0))
-        if len([r for r in rows if r['original_outcome'] in {'candidate_a','candidate_b'}]) < target: raise RuntimeError(f'{agent} usable-label target not met')
-        out=Path(cfg['agents'][agent]['output_preferences']);
-        if not out.is_absolute(): out=prefs_dir/f'preference_{agent}.jsonl'
-        write_jsonl(out,rows); write_jsonl(failed_dir/f'{agent}_failed.jsonl', failures[agent])
-        manifest['agents'][agent]={'path':str(out),'count':len(rows),'counts_by_split':{s:sum(r['dataset_split']==s for r in rows) for s in ('train','validation','test')},'hash':sha_file(out),'events':sorted({r['event_type'] for r in rows})}
+        valid_binary=len([r for r in rows if r['original_outcome'] in {'candidate_a','candidate_b'}])
+        if valid_binary < target: raise RuntimeError(f'{agent} usable-label target {target} not met within API-attempt budget {budget}; valid_binary={valid_binary}')
+        if not _coverage_satisfied(agent,rows,cfg): raise RuntimeError(f'{agent} missing required event/split coverage after selection')
+        write_jsonl(out,rows); write_jsonl(failed_dir/f'{agent}_failed.jsonl', failures)
+        counts=_count_records(rows)
+        manifest['agents'][agent]={'path':str(out),'count':len(rows),'counts_by_split':counts['by_split'],'hash':sha_file(out),'events':sorted({r['event_type'] for r in rows}),'candidate_pair_pool_count':pool_total,'selected_pair_count':len(selected),'external_api_call_count':external_calls,'cache_hit_count':cache_hits,'valid_binary_label_count':valid_binary,'tie_count':sum(r['original_outcome']=='tie' for r in rows),'failure_count':len(failures),'target_valid_pair_count':target,'max_api_attempts':budget,'counts_by_event':counts['by_event'],'counts_by_event_and_split':counts['by_event_and_split'],'pool_counts_by_event_split':{f'{a}|{e}|{s}':c for (a,e,s),c in sorted(pool_counts.items()) if a==agent},'selected_counts_by_event_split':{f'{a}|{e}|{s}':c for (a,e,s),c in sorted(selected_counts.items()) if a==agent}}
+    (output_root/'preference_manifest.json').parent.mkdir(parents=True,exist_ok=True)
     (output_root/'preference_manifest.json').write_text(json.dumps(manifest,indent=2,sort_keys=True))
+    if dry_run: print('\n'.join(report_lines))
     return manifest
 
 def main(argv=None)->int:
-    ap=argparse.ArgumentParser(); ap.add_argument('--config',type=Path,required=True); ap.add_argument('--output-root',type=Path,default=Path('results/formal/rlaif')); ap.add_argument('--resume',action='store_true')
+    ap=argparse.ArgumentParser(); ap.add_argument('--config',type=Path,required=True); ap.add_argument('--output-root',type=Path,default=Path('results/formal/rlaif')); ap.add_argument('--resume',action='store_true'); ap.add_argument('--dry-run',action='store_true')
     ns=ap.parse_args(argv)
-    try: print(json.dumps(generate(ns.config,ns.output_root,resume=ns.resume),indent=2,sort_keys=True)); return 0
+    try: print(json.dumps(generate(ns.config,ns.output_root,resume=ns.resume,dry_run=ns.dry_run),indent=2,sort_keys=True)); return 0
     except Exception as exc: print(f'formal preference generation failed: {exc}',file=sys.stderr); return 2
 if __name__=='__main__': raise SystemExit(main())
