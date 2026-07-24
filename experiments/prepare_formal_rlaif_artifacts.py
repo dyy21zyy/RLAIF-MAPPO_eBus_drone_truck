@@ -101,6 +101,12 @@ def _validate_preference_file(agent: str, path: Path, target: int) -> dict[str, 
         raise RuntimeError(f"{agent} missing train/validation/test preference splits")
     if splits["train"] & splits["validation"] or splits["train"] & splits["test"] or splits["validation"] & splits["test"]:
         raise RuntimeError(f"{agent} preference split leakage detected")
+    if agent == "bus":
+        for split_name in ("train", "validation", "test"):
+            events = {r.get("event_type") for r in rows if r.get("dataset_split") == split_name}
+            missing = REQUIRED_EVENT_COVERAGE["bus"] - events
+            if missing:
+                raise RuntimeError(f"bus preference split {split_name} missing required events: {sorted(missing)}")
     return {"rows": len(rows), "usable_binary": len(ds.examples), "counts_by_event": dict(ds.report.counts_by_event)}
 
 def _inject_artifacts(template_path: Path, output_path: Path, manifest: dict[str, Any], scope_agents: tuple[str, ...], cfg: dict[str, Any]) -> None:

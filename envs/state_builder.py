@@ -94,6 +94,32 @@ BUS_CHARGING_FEATURE_NAMES = (
     "expected_alighting_time_norm",
 )
 
+CANONICAL_BUS_REWARD_STATE_FEATURE_NAMES = (
+    "time_norm",
+    "ready_parcel_count_norm",
+    "freight_load_norm",
+    "capacity_remaining_norm",
+    "soc_norm",
+    "delay_norm",
+    "locker_load_norm",
+    "full_batteries_norm",
+    "total_onboard_passengers_norm",
+    "remaining_passenger_capacity_norm",
+    "current_stop_waiting_passengers_norm",
+    "downstream_waiting_summary_norm",
+    "boarding_count_norm",
+    "alighting_count_norm",
+    "current_waiting_passenger_minutes_norm",
+    "current_onboard_additional_delay_passenger_minutes_norm",
+    "expected_boarding_time_norm",
+    "expected_alighting_time_norm",
+)
+
+BUS_EVENT_STATE_FEATURE_NAMES = {
+    "BUS_TERMINAL_DEPARTURE": BUS_LOADING_FEATURE_NAMES,
+    "BUS_STATION_ARRIVAL": BUS_CHARGING_FEATURE_NAMES,
+}
+
 STATION_OPERATION_FEATURE_NAMES = (
     "time_norm", "waiting_parcels", "earliest_deadline_slack",
     "available_drones", "busy_drones", "full_batteries", "depleted_batteries",
