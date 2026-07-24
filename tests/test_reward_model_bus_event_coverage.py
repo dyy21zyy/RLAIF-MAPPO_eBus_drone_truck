@@ -1,8 +1,11 @@
 import pytest
+from envs.state_builder import BUS_LOADING_FEATURE_NAMES, BUS_CHARGING_FEATURE_NAMES
 from rlaif.reward_model_dataset import build_reward_pair_dataset
 from tests.preference_v3_fixtures import rec
 
-def bus(event,p): return rec(preference_id=p,agent_type='bus',event_type=event,original_candidate_a_id='a'+p,original_candidate_b_id='b'+p,displayed_first_candidate_id='a'+p,displayed_second_candidate_id='b'+p)
+def bus(event,p):
+    names = BUS_LOADING_FEATURE_NAMES if event == 'BUS_TERMINAL_DEPARTURE' else BUS_CHARGING_FEATURE_NAMES
+    return rec(preference_id=p,agent_type='bus',event_type=event,state_feature_names=list(names),state_features=[0.1]*len(names),original_candidate_a_id='a'+p,original_candidate_b_id='b'+p,displayed_first_candidate_id='a'+p,displayed_second_candidate_id='b'+p)
 def test_bus_accepts_terminal_loading_rows(): assert len(build_reward_pair_dataset([bus('BUS_TERMINAL_DEPARTURE','1')],agent_type='bus'))==1
 def test_bus_accepts_station_charging_rows(): assert len(build_reward_pair_dataset([bus('BUS_STATION_ARRIVAL','1')],agent_type='bus'))==1
 def test_bus_rejects_unrelated_events():

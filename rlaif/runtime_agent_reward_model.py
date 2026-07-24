@@ -9,6 +9,8 @@ import math
 
 import torch
 
+from envs.state_builder import CANONICAL_BUS_REWARD_STATE_FEATURE_NAMES, BUS_EVENT_STATE_FEATURE_NAMES
+from rlaif.feature_alignment import align_named_features
 from training.event_schema import EVENT_NAME_TO_ID, validate_agent_event
 from training.reward_model_wrapper import (
     RewardCheckpointCompatibilityError,
@@ -97,7 +99,15 @@ class RuntimeAgentRewardModel:
             raise RewardCheckpointCompatibilityError(f"event {event_type} is not compatible with checkpoint for {self.agent_type}")
         if self.checkpoint.get("event_name_to_id") != dict(EVENT_NAME_TO_ID):
             raise RewardCheckpointCompatibilityError("checkpoint event_name_to_id does not match runtime event schema")
-        state = self._vector("state_features", state_features, int(self.checkpoint["state_feature_dim"]))
+        runtime_state_features = state_features
+        if self.agent_type == "bus" and self.state_feature_names == CANONICAL_BUS_REWARD_STATE_FEATURE_NAMES:
+            source_names = BUS_EVENT_STATE_FEATURE_NAMES[event_type]
+            if len(state_features) != len(source_names):
+                raise RewardCheckpointCompatibilityError(
+                    f"state_features dimension mismatch for raw {event_type}: expected {len(source_names)}, actual {len(state_features)}"
+                )
+            runtime_state_features = align_named_features(source_names, state_features, self.state_feature_names)
+        state = self._vector("state_features", runtime_state_features, int(self.checkpoint["state_feature_dim"]))
         cand = self._vector("candidate_features", candidate_features, int(self.checkpoint["candidate_feature_dim"]))
         state = self._norm(state, "state_normalization_mean", "state_normalization_std")
         cand = self._norm(cand, "candidate_normalization_mean", "candidate_normalization_std")

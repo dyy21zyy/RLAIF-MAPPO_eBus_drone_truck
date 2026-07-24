@@ -4,6 +4,8 @@ from collections import Counter, defaultdict
 from typing import Any, Sequence
 import hashlib, json
 import torch
+from envs.state_builder import CANONICAL_BUS_REWARD_STATE_FEATURE_NAMES, BUS_EVENT_STATE_FEATURE_NAMES
+from rlaif.feature_alignment import align_named_features
 from training.event_schema import decision_event_id, REQUIRED_EVENT_COVERAGE
 from rlaif.preference_schema_v3 import PreferenceRecord, parse_preference_record, resolve_original_binary_target, validate_label_source
 
@@ -30,6 +32,26 @@ class RewardPairDataset(torch.utils.data.Dataset):
 
 def _pair_key(r: PreferenceRecord): return (r.scenario_id,r.episode_id,r.state_id,r.agent_type,r.event_type,frozenset({r.original_candidate_a_id,r.original_candidate_b_id}))
 def _cand_key(r: PreferenceRecord, cid: str): return (r.scenario_id,r.episode_id,r.state_id,r.agent_type,r.event_type,cid)
+
+
+def _canonicalize_record_features(r: PreferenceRecord) -> tuple[tuple[str, ...], tuple[float, ...], tuple[str, ...], tuple[float, ...], tuple[float, ...]]:
+    state_names = r.state_feature_names
+    state_features = r.state_features
+    cand_names = r.candidate_a_feature_names
+    cand_a = r.candidate_a_features
+    cand_b = r.candidate_b_features
+    if r.agent_type == 'bus':
+        source_state_names = BUS_EVENT_STATE_FEATURE_NAMES.get(r.event_type)
+        if source_state_names is None:
+            raise ValueError(f'unsupported bus event type {r.event_type}')
+        if state_names != source_state_names and state_names != CANONICAL_BUS_REWARD_STATE_FEATURE_NAMES:
+            raise ValueError('state feature order mismatch')
+        state_features = align_named_features(
+            state_names, state_features, CANONICAL_BUS_REWARD_STATE_FEATURE_NAMES
+        )
+        state_names = CANONICAL_BUS_REWARD_STATE_FEATURE_NAMES
+    return state_names, state_features, cand_names, cand_a, cand_b
+
 def build_reward_pair_dataset(rows: Sequence[dict[str,Any]|PreferenceRecord], *, agent_type:str, formal_mode:bool=True, expected_state_feature_names:tuple[str,...]|None=None, expected_candidate_feature_names:tuple[str,...]|None=None, require_bus_event_coverage:bool=False) -> RewardPairDataset:
     report=DatasetIntegrityReport(total_records=len(rows)); records=[]; ids=set()
     for row in rows:
@@ -41,9 +63,10 @@ def build_reward_pair_dataset(rows: Sequence[dict[str,Any]|PreferenceRecord], *,
             report.counts_by_agent[r.agent_type]+=1; report.counts_by_event[r.event_type]+=1; report.counts_by_label_source[r.label_source]+=1; report.counts_by_outcome[r.original_outcome]+=1
             if r.agent_type != agent_type: continue
             if r.original_candidate_a_id == r.original_candidate_b_id: report.self_comparisons += 1; raise ValueError('self-comparison')
-            if expected_state_feature_names and r.state_feature_names != expected_state_feature_names: report.feature_schema_mismatches += 1; raise ValueError('state feature order mismatch')
-            if expected_candidate_feature_names and r.candidate_a_feature_names != expected_candidate_feature_names: report.feature_schema_mismatches += 1; raise ValueError('candidate feature order mismatch')
-            records.append(r)
+            state_names, state_features, cand_names, cand_a, cand_b = _canonicalize_record_features(r)
+            if expected_state_feature_names and state_names != expected_state_feature_names: report.feature_schema_mismatches += 1; raise ValueError('state feature order mismatch')
+            if expected_candidate_feature_names and cand_names != expected_candidate_feature_names: report.feature_schema_mismatches += 1; raise ValueError('candidate feature order mismatch')
+            records.append((r, state_names, state_features, cand_names, cand_a, cand_b))
         except KeyError as e: report.missing_fields+=1; raise ValueError(f"missing field {e}") from e
         except ValueError as e:
             msg=str(e)
@@ -51,28 +74,28 @@ def build_reward_pair_dataset(rows: Sequence[dict[str,Any]|PreferenceRecord], *,
             if 'feature' in msg and 'mismatch' in msg: report.feature_schema_mismatches += 1
             raise
     if require_bus_event_coverage and agent_type=='bus':
-        missing=REQUIRED_EVENT_COVERAGE['bus'] - {r.event_type for r in records}
+        missing=REQUIRED_EVENT_COVERAGE['bus'] - {r.event_type for r, *_ in records}
         if missing: raise ValueError(f"formal bus validation missing required events: {sorted(missing)}")
     if not records: return RewardPairDataset([],agent_type=agent_type,state_feature_names=(),candidate_feature_names=(),report=report)
-    state_names=records[0].state_feature_names; cand_names=records[0].candidate_a_feature_names
+    state_names=records[0][1]; cand_names=records[0][3]
     cand_features={}; grouped=defaultdict(list)
-    for r in records:
-        if r.state_feature_names!=state_names or r.candidate_a_feature_names!=cand_names or r.candidate_b_feature_names!=cand_names:
+    for r, rec_state_names, rec_state_features, rec_cand_names, rec_cand_a, rec_cand_b in records:
+        if rec_state_names!=state_names or rec_cand_names!=cand_names or r.candidate_b_feature_names!=cand_names:
             report.feature_schema_mismatches += 1; raise ValueError('feature schemas conflict')
-        for cid, feats in ((r.original_candidate_a_id,r.candidate_a_features),(r.original_candidate_b_id,r.candidate_b_features)):
+        for cid, feats in ((r.original_candidate_a_id,rec_cand_a),(r.original_candidate_b_id,rec_cand_b)):
             k=_cand_key(r,cid)
             if k in cand_features and cand_features[k] != feats: raise ValueError('same candidate ID has inconsistent features in the same state')
             cand_features[k]=feats
         target=resolve_original_binary_target(r)
         if target is None: report.excluded_outcomes[r.original_outcome]+=1; continue
-        grouped[_pair_key(r)].append((r,target))
+        grouped[_pair_key(r)].append((r,target,rec_state_features,rec_cand_a,rec_cand_b))
     examples=[]
     for vals in grouped.values():
-        targets={t for _,t in vals}
+        targets={t for _,t,_,_,_ in vals}
         if len(targets)>1: report.contradiction_count += len(vals); continue
         if len(vals)>1: report.duplicate_count += len(vals)-1
-        r,t=vals[0]
-        examples.append(RewardPairExample(r.preference_id,r.scenario_id,r.episode_id,r.state_id,r.agent_type,decision_event_id(r.event_type),torch.tensor(r.state_features,dtype=torch.float32),torch.tensor(r.candidate_a_features,dtype=torch.float32),torch.tensor(r.candidate_b_features,dtype=torch.float32),torch.tensor(float(t),dtype=torch.float32),r.label_source))
+        r,t,state_features,cand_a,cand_b=vals[0]
+        examples.append(RewardPairExample(r.preference_id,r.scenario_id,r.episode_id,r.state_id,r.agent_type,decision_event_id(r.event_type),torch.tensor(state_features,dtype=torch.float32),torch.tensor(cand_a,dtype=torch.float32),torch.tensor(cand_b,dtype=torch.float32),torch.tensor(float(t),dtype=torch.float32),r.label_source))
     report.usable_binary_records=len(examples)
     return RewardPairDataset(examples,agent_type=agent_type,state_feature_names=state_names,candidate_feature_names=cand_names,report=report)
 
