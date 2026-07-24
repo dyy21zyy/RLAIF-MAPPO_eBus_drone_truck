@@ -153,7 +153,8 @@ def collect_episode(
         candidate_features, candidate_feature_names = _candidate_feature_payload(observation)
         global_state = [float(value) for value in env.get_entity_critic_state()]
         actor = actors[agent_id]
-        local_obs = _pad_vector(observation["features"], actor.obs_dim)
+        raw_state_features = [float(value) for value in observation["features"]]
+        local_obs = _pad_vector(raw_state_features, actor.obs_dim)
         action, log_prob = actor.act(
             local_obs, event_type_id, candidate_features, mask, deterministic=deterministic
         )
@@ -169,7 +170,7 @@ def collect_episode(
         next_observation, env_reward, terminated, truncated, info = env.step(action)
         done = bool(terminated or truncated)
         if isinstance(reward_wrapper, RewardRegistry):
-            contribution = reward_wrapper.score_transition(agent_type=agent_id, event_type=event_type, environment_reward=float(env_reward), state_features=local_obs, candidate_features=action_features, selected_action_index=action, formal_mode=False)
+            contribution = reward_wrapper.score_transition(agent_type=agent_id, event_type=event_type, environment_reward=float(env_reward), state_features=raw_state_features, candidate_features=action_features, selected_action_index=action, formal_mode=False)
             total_reward, learned_reward = contribution.total_reward, contribution.weighted_learned_contribution
         else:
             total_reward, learned_reward = transition_reward(
@@ -177,7 +178,7 @@ def collect_episode(
                 float(env_reward),
                 reward_wrapper,
                 lambda_rlaif=lambda_rlaif,
-                state_features=local_obs,
+                state_features=raw_state_features,
                 action_features=action_features,
                 action_id=action,
                 event_type=event_type,
