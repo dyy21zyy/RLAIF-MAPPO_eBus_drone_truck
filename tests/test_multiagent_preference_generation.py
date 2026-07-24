@@ -94,3 +94,70 @@ def test_real_frozen_scenario_rollout_collects_four_agents(tmp_path, monkeypatch
     assert {'BUS_TERMINAL_DEPARTURE','BUS_STATION_ARRIVAL'} <= {s['event_type'] for s in states}
     assert all(s['scenario_split']=='train' and s['scenario_bank_hash'] for s in states)
     assert any(feasible_pairs(s) for s in states)
+
+
+def _state(ev, scenario, idx, cand=3):
+    return {'event_type':ev,'scenario_id':scenario,'scenario_hash':scenario,'state_id':f'{ev}-{scenario}-{idx}','decision_id':f'{ev}-{scenario}-{idx}','episode_id':scenario,'state_features':[float(idx)], 'state_feature_names':['x'], 'candidate_actions':[{'candidate_id':f'c{j}','features':[float(j)], 'feature_names':['c']} for j in range(cand)], 'action_mask':[True]*cand}
+
+
+def _formal_cfg(tmp_path, states, targets=None, budgets=None, seed=11):
+    targets=targets or {'assignment':3,'truck':3,'bus':6,'station':3}; budgets=budgets or {'assignment':9,'truck':9,'bus':18,'station':9}
+    manifest=tmp_path/'bank.json'; manifest.write_text(json.dumps({'decision_states':states}))
+    cfg=tmp_path/'cfg.yaml'
+    cfg.write_text(f"""
+run_classification: formal
+scenario_bank: {{final_train_manifest: {manifest}, source_mode: injected_states}}
+evaluator: {{api_key_env: OPENAI_API_KEY, base_url_env: OPENAI_BASE_URL, model_env: OPENAI_MODEL, max_retries: 1, temperature: 0.0, cache_dir: {tmp_path}/cache}}
+preference_split: {{train_fraction: 0.5, validation_fraction: 0.25, test_fraction: 0.25, seed: {seed}}}
+agents:
+  assignment: {{target_valid_pair_count: {targets['assignment']}, max_api_attempts: {budgets['assignment']}, supported_event_types: [PARCEL_RELEASE], output_preferences: {tmp_path}/pa.jsonl}}
+  truck: {{target_valid_pair_count: {targets['truck']}, max_api_attempts: {budgets['truck']}, supported_event_types: [TRUCK_AVAILABLE], output_preferences: {tmp_path}/pt.jsonl}}
+  bus: {{target_valid_pair_count: {targets['bus']}, max_api_attempts: {budgets['bus']}, supported_event_types: [BUS_TERMINAL_DEPARTURE, BUS_STATION_ARRIVAL], output_preferences: {tmp_path}/pb.jsonl}}
+  station: {{target_valid_pair_count: {targets['station']}, max_api_attempts: {budgets['station']}, supported_event_types: [STATION_OPERATION], output_preferences: {tmp_path}/ps.jsonl}}
+""")
+    return cfg
+
+
+def _coverage_states():
+    states=[]
+    for ev in ['PARCEL_RELEASE','TRUCK_AVAILABLE','BUS_TERMINAL_DEPARTURE','BUS_STATION_ARRIVAL','STATION_OPERATION']:
+        for i in range(8): states.append(_state(ev, f's{i}', i))
+    return states
+
+
+def test_bounded_stops_deterministic_covers_splits_and_bus_events(tmp_path, monkeypatch):
+    monkeypatch.setenv('OPENAI_API_KEY','k'); monkeypatch.setenv('OPENAI_BASE_URL','u'); monkeypatch.setenv('OPENAI_MODEL','m')
+    cfg=_formal_cfg(tmp_path, _coverage_states())
+    calls=[]
+    def fake(prompt, settings): calls.append(prompt); return json.dumps({'preferred':'A','confidence':0.8,'reason':'better service'})
+    m1=generate(cfg,tmp_path/'out1',api_call=fake)
+    assert all(a['external_api_call_count'] <= a['max_api_attempts'] for a in m1['agents'].values())
+    assert m1['agents']['assignment']['valid_binary_label_count'] == 3
+    assert {'BUS_TERMINAL_DEPARTURE','BUS_STATION_ARRIVAL'} == set(m1['agents']['bus']['events'])
+    for a in m1['agents'].values(): assert all(a['counts_by_split'][s] > 0 for s in ('train','validation','test'))
+    calls.clear(); m2=generate(cfg,tmp_path/'out2',api_call=fake)
+    assert m1['agents']['bus']['selected_counts_by_event_split'] == m2['agents']['bus']['selected_counts_by_event_split']
+
+
+def test_ties_failures_budget_exhaustion_and_cache_resume_dry_run(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv('OPENAI_API_KEY','k'); monkeypatch.setenv('OPENAI_BASE_URL','u'); monkeypatch.setenv('OPENAI_MODEL','m')
+    cfg=_formal_cfg(tmp_path, _coverage_states(), targets={'assignment':3,'truck':3,'bus':6,'station':3}, budgets={'assignment':9,'truck':9,'bus':18,'station':9})
+    n={'c':0}
+    def mixed(prompt, settings):
+        n['c']+=1
+        if n['c'] in (1,2): return json.dumps({'preferred':'equal','confidence':0.5,'reason':'similar'})
+        return json.dumps({'preferred':'B','confidence':0.9,'reason':'better feasible option'})
+    m=generate(cfg,tmp_path/'out',api_call=mixed)
+    assert m['agents']['assignment']['tie_count'] == 2
+    assert m['agents']['assignment']['valid_binary_label_count'] == 3
+    (tmp_path/'pa.jsonl').unlink(); (tmp_path/'pt.jsonl').unlink(); (tmp_path/'pb.jsonl').unlink(); (tmp_path/'ps.jsonl').unlink()
+    before=n['c']; m_resume=generate(cfg,tmp_path/'out_cached',resume=True,api_call=mixed)
+    assert n['c'] == before
+    assert m_resume['agents']['assignment']['cache_hit_count'] > 0
+    dry=generate(cfg,tmp_path/'dry',dry_run=True,api_call=lambda *_: (_ for _ in ()).throw(AssertionError('api called')))
+    out=capsys.readouterr().out
+    assert 'assignment: pool=' in out and all(a['external_api_call_count'] == 0 for a in dry['agents'].values())
+    (tmp_path/'bad').mkdir(exist_ok=True)
+    bad=_formal_cfg(tmp_path/'bad', _coverage_states(), budgets={'assignment':1,'truck':1,'bus':1,'station':1})
+    with pytest.raises(RuntimeError, match='usable-label target|budget exhausted'):
+        generate(bad,tmp_path/'badout',api_call=lambda *_: json.dumps({'preferred':'A','confidence':0.9,'reason':'ok'}))

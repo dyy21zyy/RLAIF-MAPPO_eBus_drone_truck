@@ -43,6 +43,7 @@ agents:
     agent_type: assignment
     supported_event_types: [PARCEL_RELEASE]
     target_valid_pair_count: 200
+    max_api_attempts: 600
     scenario_allocation: proportional_final_train_bank
     output_preferences: results/formal/rlaif/preferences/preference_assignment.jsonl
     failed_requests: results/formal/rlaif/failed/assignment_failed.jsonl
@@ -51,6 +52,7 @@ agents:
     agent_type: truck
     supported_event_types: [TRUCK_AVAILABLE]
     target_valid_pair_count: 160
+    max_api_attempts: 480
     scenario_allocation: proportional_final_train_bank
     output_preferences: results/formal/rlaif/preferences/preference_truck.jsonl
     failed_requests: results/formal/rlaif/failed/truck_failed.jsonl
@@ -59,6 +61,7 @@ agents:
     agent_type: bus
     supported_event_types: [BUS_TERMINAL_DEPARTURE, BUS_STATION_ARRIVAL]
     target_valid_pair_count: 200
+    max_api_attempts: 600
     scenario_allocation: balanced_across_bus_event_types
     output_preferences: results/formal/rlaif/preferences/preference_bus.jsonl
     failed_requests: results/formal/rlaif/failed/bus_failed.jsonl
@@ -67,6 +70,7 @@ agents:
     agent_type: station
     supported_event_types: [STATION_OPERATION]
     target_valid_pair_count: 160
+    max_api_attempts: 480
     scenario_allocation: proportional_final_train_bank
     output_preferences: results/formal/rlaif/preferences/preference_station.jsonl
     failed_requests: results/formal/rlaif/failed/station_failed.jsonl
