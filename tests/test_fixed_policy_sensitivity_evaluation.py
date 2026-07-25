@@ -4,7 +4,7 @@ import pytest
 
 import evaluation.formal_metrics
 from evaluation.metrics import FormalMetricError
-from experiments.run_fixed_policy_sensitivity import AGENTS, IDENTITY_FIELDS, _flat_metrics, evaluation_identity, reject_duplicate_identities, should_skip
+from experiments.run_fixed_policy_sensitivity import AGENTS, IDENTITY_FIELDS, _audit_selected_action, _flat_metrics, _validate_episode_audit, evaluation_identity, reject_duplicate_identities, should_skip
 
 def row(**updates):
     r={k:f"x-{k}" for k in IDENTITY_FIELDS}; r.update(status="success",fallback_count=0); r.update(updates); return r
@@ -55,7 +55,12 @@ def formal_env():
 def audit(**updates):
     values={f"rlaif_reward_{agent}": 2.0 for agent in AGENTS}
     values.update({f"{agent}_decision_count": 2 for agent in AGENTS})
-    values.update(fallback_count=0, total_reward_clipping_count=0)
+    values.update(fallback_count=0, total_reward_clipping_count=0,
+                  selected_station_dispatches=2, station_dispatch_action_count=1,
+                  station_decisions_with_dispatch_option=1,
+                  station_decisions_without_dispatch_option=1,
+                  assignment_td_count=2, assignment_tbd_count=0,
+                  assignment_tld_count=0)
     values.update(updates)
     return values
 
@@ -87,7 +92,8 @@ def test_missing_canonical_source_fails_closed():
 
 
 def test_passenger_denominators_and_reward_decision_conventions():
-    metrics=_flat_metrics(formal_env(), audit(assignment_decision_count=0))
+    metrics=_flat_metrics(formal_env(), audit(assignment_decision_count=0,
+                                              assignment_td_count=0))
     assert metrics["total_boarded_passengers"] == 2
     assert metrics["waiting_minutes_per_passenger"] == 6
     assert metrics["onboard_delay_minutes_per_passenger"] == 3
@@ -100,3 +106,54 @@ def test_runner_calls_strict_canonical_collector():
     source=open("experiments/run_fixed_policy_sensitivity.py").read()
     assert "evaluation.metrics.collect_formal_runtime_metrics(env)" in source
     assert "evaluation.formal_metrics.collect_formal_metrics" not in source
+
+
+def candidate(agent, *, dispatch_count=0, payload=(), feasible=True, mode=None,
+              action_type="idle"):
+    features={"dispatch_count":float(dispatch_count), "dispatch_payload":list(payload),
+              "action_type_TD":0.0, "action_type_TBD":0.0, "action_type_TLD":0.0}
+    if mode:
+        features[f"action_type_{mode}"]=1.0
+    return {"agent_id":agent, "event_type":"STATION_OPERATION" if agent=="station" else "PARCEL_RELEASE",
+            "candidate_actions":[{"action_type":action_type, "entity_id":"entity-1",
+                                  "feasible":feasible, "features":features}]}
+
+
+def test_evaluator_audit_accepts_consistent_drone_mission_counter():
+    values=audit()
+    _validate_episode_audit({"drone_missions":2}, values)
+    assert values["drone_mission_counter_consistent"] == 1
+
+
+def test_evaluator_audit_fails_on_mission_counter_mismatch():
+    with pytest.raises(RuntimeError, match="drone_mission_count"):
+        _validate_episode_audit({"drone_missions":1}, audit())
+
+
+def test_evaluator_audit_fails_on_dispatch_payload_mismatch():
+    obs=candidate("station", dispatch_count=2, payload=(("d","p","b"),))
+    with pytest.raises(RuntimeError, match="dispatch_count"):
+        _audit_selected_action(obs, 0, audit())
+
+
+def test_assignment_modes_are_counted_from_explicit_candidate_features():
+    values=audit(assignment_td_count=0, assignment_decision_count=0,
+                 selected_station_dispatches=0)
+    for mode in ("TD", "TBD", "TLD"):
+        _audit_selected_action(candidate("assignment", mode=mode), 0, values)
+        values["assignment_decision_count"]+=1
+    _validate_episode_audit({"drone_missions":0}, values)
+    assert [values[f"assignment_{mode}_count"] for mode in ("td","tbd","tld")] == [1,1,1]
+
+
+def test_dispatch_option_is_counted_even_when_idle_selected():
+    obs=candidate("station")
+    dispatch=candidate("station", dispatch_count=1, payload=(("d","p","b"),),
+                       action_type="dispatch_drone")["candidate_actions"][0]
+    obs["candidate_actions"].append(dispatch)
+    values=audit(selected_station_dispatches=0, station_dispatch_action_count=0,
+                 station_decisions_with_dispatch_option=0,
+                 station_decisions_without_dispatch_option=0)
+    _audit_selected_action(obs, 0, values)
+    assert values["station_decisions_with_dispatch_option"] == 1
+    assert values["station_decisions_without_dispatch_option"] == 0

@@ -30,6 +30,64 @@ def _registry(cfg, manifest):
     agents={a:{"enabled":True,"checkpoint":manifest["reward_models"][a]["path"],"checkpoint_hash":manifest["reward_models"][a]["hash"]} for a in AGENTS}
     return RewardRegistry({"run_classification":manifest["run_classification"],"rlaif":{"enabled":True,"scope":"all","fallback_to_env_reward":False,"fail_on_invalid_reward_model":True,"agents":agents}})
 
+def _initial_audit():
+    return ({f"rlaif_reward_{a}":0.0 for a in AGENTS}
+            | {f"{a}_decision_count":0 for a in AGENTS}
+            | {"fallback_count":0,"total_reward_clipping_count":0,
+               "selected_station_dispatches":0,"station_dispatch_action_count":0,
+               "station_decisions_with_dispatch_option":0,
+               "station_decisions_without_dispatch_option":0,
+               "assignment_td_count":0,"assignment_tbd_count":0,
+               "assignment_tld_count":0})
+
+def _audit_selected_action(obs, action, audit):
+    """Audit explicit candidate semantics before the environment mutates state."""
+    candidates=obs["candidate_actions"]
+    selected=candidates[action]
+    agent=str(obs["agent_id"])
+    selected_mode=None
+    selected_dispatch_count=None
+    if agent=="station":
+        features=selected["features"]
+        selected_dispatch_count=int(features["dispatch_count"])
+        payload=features["dispatch_payload"]
+        if selected_dispatch_count != len(payload):
+            raise RuntimeError("selected station dispatch_count differs from dispatch_payload length")
+        audit["selected_station_dispatches"]+=selected_dispatch_count
+        audit["station_dispatch_action_count"]+=int(selected_dispatch_count>0)
+        has_option=any(
+            bool(candidate["feasible"])
+            and int(candidate["features"]["dispatch_count"])>0
+            for candidate in candidates
+        )
+        audit["station_decisions_with_dispatch_option"]+=int(has_option)
+        audit["station_decisions_without_dispatch_option"]+=int(not has_option)
+    elif agent=="assignment":
+        features=selected["features"]
+        modes=[]
+        for mode,key in (("TD","action_type_TD"),("TBD","action_type_TBD"),("TLD","action_type_TLD")):
+            if int(features[key]) != 0:
+                audit[f"assignment_{mode.lower()}_count"]+=1
+                modes.append(mode)
+        selected_mode=modes[0] if len(modes)==1 else None
+    return {
+        "agent":agent,
+        "event_type":str(obs["event_type"]),
+        "selected_action_index":int(action),
+        "selected_action_type":str(selected["action_type"]),
+        "entity_id":str(selected["entity_id"]),
+        "selected_station_dispatch_count":selected_dispatch_count,
+        "selected_assignment_mode":selected_mode,
+    }
+
+def _validate_episode_audit(metrics, audit):
+    if int(metrics["drone_missions"]) != audit["selected_station_dispatches"]:
+        raise RuntimeError("drone_mission_count differs from selected station dispatches")
+    assignment_modes=sum(audit[f"assignment_{mode}_count"] for mode in ("td","tbd","tld"))
+    if assignment_modes != audit["assignment_decision_count"]:
+        raise RuntimeError("assignment mode counts differ from assignment decision count")
+    audit["drone_mission_counter_consistent"]=1
+
 def _flat_metrics(env, audit):
     # This strict collector is the single source of physical publication metrics.
     # FormalMetricError deliberately propagates so a row cannot be marked successful
@@ -40,6 +98,7 @@ def _flat_metrics(env, audit):
     boarded=env.passenger_boardings_at_ordinary_stops
     capacity=float(env.config["station"]["power_capacity_kw"])
     if capacity <= 0: raise ValueError("configured station power capacity must be positive")
+    _validate_episode_audit(canonical,audit)
     out={**canonical,"released_parcels":released,"delivered_parcels":delivered,"undelivered_rate":canonical["undelivered_parcels"]/released if released else 0.0,"truck_distance_per_released_parcel":canonical["truck_distance"]/released if released else 0.0,"drone_missions_per_released_parcel":canonical["drone_missions"]/released if released else 0.0,"total_boarded_passengers":boarded,"waiting_minutes_per_passenger":canonical["waiting_passenger_minutes"]/boarded if boarded else 0.0,"onboard_delay_minutes_per_passenger":canonical["onboard_additional_delay_passenger_minutes"]/boarded if boarded else 0.0,"configured_station_power_capacity_kw":capacity,"peak_load_to_capacity_ratio":canonical["station_peak_power"]/capacity,"overload_episode_indicator":int(canonical["overload_kw_min"]>0),**audit}
     for agent in AGENTS:
         count=audit[f"{agent}_decision_count"]
@@ -52,7 +111,7 @@ def evaluate_scenario(scenario, actors, registry, *, policy_seed, configured_par
     cur=snap
     for part in configured_parameter.split("."): cur=cur[part]
     if float(cur)!=float(configured_value): raise ValueError("inconsistent configured sensitivity parameter")
-    env=DynamicDeliveryEnv(Path(scenario.instance_path)); obs,_=env.reset(seed=policy_seed); before=_hash_parameters(actors); trace=[]; audit={f"rlaif_reward_{a}":0.0 for a in AGENTS}|{f"{a}_decision_count":0 for a in AGENTS}|{"fallback_count":0,"total_reward_clipping_count":0}
+    env=DynamicDeliveryEnv(Path(scenario.instance_path)); obs,_=env.reset(seed=policy_seed); before=_hash_parameters(actors); trace=[]; audit=_initial_audit()
     terminal=False
     with __import__("torch").inference_mode():
         for _ in range(10000):
@@ -61,9 +120,10 @@ def evaluate_scenario(scenario, actors, registry, *, policy_seed, configured_par
             raw=[float(x) for x in obs["features"]]; candidates,names=_candidate_feature_payload(obs); mask=[bool(x) for x in obs["action_mask"]]; actor=actors[agent]
             action,_=actor.act(_pad_vector(raw,actor.obs_dim),decision_event_id(event),candidates,mask,deterministic=True)
             if not mask[action]: raise RuntimeError("deterministic masked action infeasible")
+            trace.append(_audit_selected_action(obs,action,audit))
             nxt,reward,terminated,truncated,_=env.step(action)
             contribution=registry.score_transition(agent_type=agent,event_type=event,environment_reward=float(reward),state_features=raw,candidate_features=candidates[action],selected_action_index=action,formal_mode=True)
-            audit[f"rlaif_reward_{agent}"]+=float(contribution.weighted_learned_contribution); audit[f"{agent}_decision_count"]+=1; audit["fallback_count"]+=int(contribution.used_fallback); trace.append(action); obs=nxt
+            audit[f"rlaif_reward_{agent}"]+=float(contribution.weighted_learned_contribution); audit[f"{agent}_decision_count"]+=1; audit["fallback_count"]+=int(contribution.used_fallback); obs=nxt
             if terminated or truncated: terminal=bool(terminated); break
     if not terminal: raise RuntimeError("non-terminal or incomplete episode")
     if audit["fallback_count"]: raise RuntimeError("reward-model fallback")
@@ -106,7 +166,7 @@ def run(config_path, output_root, *, family=None, value=None, policy_seed=None, 
             ident=evaluation_identity(base)
             if resume and should_skip(existing,ident): continue
             t=time.perf_counter()
-            try: metrics,trace=evaluate_scenario(sc,actors,registry,policy_seed=seed,configured_parameter=spec["parameter"],configured_value=val); base.update(metrics,status="success",error_message="",action_trace_hash=hashlib.sha256(json.dumps(trace).encode()).hexdigest())
+            try: metrics,trace=evaluate_scenario(sc,actors,registry,policy_seed=seed,configured_parameter=spec["parameter"],configured_value=val); base.update(metrics,status="success",error_message="",action_trace_hash=hashlib.sha256(json.dumps(trace,sort_keys=True,separators=(",",":")).encode()).hexdigest())
             except Exception as exc:
                 base.update(status="failed",error_message=str(exc))
                 if not continue_on_error: raise
