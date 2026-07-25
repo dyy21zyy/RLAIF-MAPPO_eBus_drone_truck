@@ -1572,12 +1572,19 @@ class DynamicDeliveryEnv:
             "ordinary_stops_visited": self.ordinary_stops_visited,
             "integrated_stations_visited": self.integrated_stations_visited,
             "passenger_boardings_at_ordinary_stops": self.passenger_boardings_at_ordinary_stops,
+            # Explicit served-passenger denominator for publication metrics.  This is
+            # intentionally a boarding count, never a parcel-derived surrogate.
+            "total_boarded_passengers": self.passenger_boardings_at_ordinary_stops,
             "passenger_alightings_at_ordinary_stops": self.passenger_alightings_at_ordinary_stops,
+            "passenger_waiting_minutes": self.passenger_waiting_minutes,
+            "passenger_additional_delay_minutes": self.passenger_onboard_delay_minutes,
             "bus_segment_count": self.bus_segment_count,
             "bus_propulsion_energy_kwh": self.bus_propulsion_energy_kwh,
             "bus_relocation_energy_kwh": self.bus_relocation_energy_kwh,
             "bus_charging_energy_kwh": self.bus_charging_energy_kwh,
             "minimum_physical_bus_soc": min((b.soc_kwh for b in self.physical_buses.values()), default=0.0),
+            "station_peak_power_kw": self.peak_station_load_kw,
+            "configured_station_power_capacity_kw": float(self.config["station"]["power_capacity_kw"]),
             "missed_or_severely_delayed_trip_count": 0,
         }
         return {
