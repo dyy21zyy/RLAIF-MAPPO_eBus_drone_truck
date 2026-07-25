@@ -1,0 +1,52 @@
+run_classification: formal
+sensitivity_mode: fixed_policy_robustness
+publication_role: fixed_policy_robustness
+base_environment_config: configs/paper/base_medium.yaml
+formal_artifacts:
+  policy_checkpoints:
+    1: results/formal/mappo_rlaif_all/seed_1/mappo_rlaif_all_seed_1.pt
+    2: results/formal/mappo_rlaif_all/seed_2/mappo_rlaif_all_seed_2.pt
+    3: results/formal/mappo_rlaif_all/seed_3/mappo_rlaif_all_seed_3.pt
+  reward_models:
+    assignment: results/formal/reward_models/reward_assignment.pt
+    truck: results/formal/reward_models/reward_truck.pt
+    bus: results/formal/reward_models/reward_bus.pt
+    station: results/formal/reward_models/reward_station.pt
+  reward_reference_scale: results/formal/reward_scales/final_reward_reference_scales.json
+paired_scenarios: {seed_start: 310000, count: 100}
+evaluation:
+  deterministic: true
+  fallback_to_env_reward: false
+  fail_on_invalid_reward_model: true
+  scenario_limit: null
+aggregation:
+  bootstrap_seed: 20260725
+  bootstrap_resamples: 10000
+  confidence_level: 0.95
+  paired_test: wilcoxon
+  multiple_testing_correction: holm
+families:
+  passenger:
+    parameter: passenger.demand_intensity
+    base_value: 1.0
+    baseline_value: 1.0
+    values: [0.75, 1.0, 1.25, 1.5]
+    labels: [value_075, value_100, value_125, value_150]
+    expected_scenario_count: 100
+    primary_metrics: [fulfillment_rate, waiting_minutes_per_passenger, onboard_delay_minutes_per_passenger]
+  parcel:
+    parameter: scenario.num_parcels
+    base_value: 60
+    baseline_value: 60
+    values: [45, 60, 75, 90]
+    labels: [value_045, value_060, value_075, value_090]
+    expected_scenario_count: 100
+    primary_metrics: [fulfillment_rate, truck_distance, drone_missions]
+  power:
+    parameter: station.power_capacity_kw
+    base_value: 1100.0
+    baseline_value: 1100.0
+    values: [880.0, 1100.0, 1320.0]
+    labels: [value_0880, value_1100, value_1320]
+    expected_scenario_count: 100
+    primary_metrics: [station_peak_power, peak_load_to_capacity_ratio, overload_kw_min]
