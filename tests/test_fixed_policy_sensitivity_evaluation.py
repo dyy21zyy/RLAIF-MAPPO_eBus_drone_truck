@@ -44,6 +44,7 @@ def formal_env():
         bus_charging_energy_kwh=4, bus_soc_kwh={"bus": 5},
         battery_safety_violation_count=1, passenger_waiting_minutes=12,
         passenger_onboard_delay_minutes=6,
+        total_passenger_arrivals=4, total_passenger_boardings_all_stops=3,
         raw_cost_components={"bus_operating_delay": 7}, drone_mission_count=2,
         charging_slot_busy_minutes=5, charging_slot_available_minutes=10,
         locker_occupancy_kg_minutes=9, peak_station_load_kw=80,
@@ -94,12 +95,35 @@ def test_missing_canonical_source_fails_closed():
 def test_passenger_denominators_and_reward_decision_conventions():
     metrics=_flat_metrics(formal_env(), audit(assignment_decision_count=0,
                                               assignment_td_count=0))
-    assert metrics["total_boarded_passengers"] == 2
-    assert metrics["waiting_minutes_per_passenger"] == 6
-    assert metrics["onboard_delay_minutes_per_passenger"] == 3
+    assert metrics["total_passenger_arrivals"] == 4
+    assert metrics["total_passenger_boardings_all_stops"] == 3
+    assert metrics["total_boarded_passengers"] == 3
+    assert metrics["waiting_minutes_per_passenger"] == 3
+    assert metrics["onboard_delay_minutes_per_passenger"] == 2
+    assert metrics["passenger_waiting_denominator_consistent"] == 1
+    assert metrics["passenger_onboard_denominator_consistent"] == 1
     assert metrics["assignment_reward_per_decision"] is None
     assert metrics["truck_reward_per_decision"] == 1
     assert metrics["fallback_count"] == 0
+
+
+@pytest.mark.parametrize(("field", "message"), (
+    ("total_passenger_arrivals", "total_passenger_arrivals"),
+    ("total_passenger_boardings_all_stops", "total_passenger_boardings_all_stops"),
+))
+def test_passenger_denominator_must_be_positive(field, message):
+    env=formal_env()
+    setattr(env, field, 0)
+    with pytest.raises(ValueError, match=message):
+        _flat_metrics(env, audit())
+
+
+def test_ordinary_stop_boardings_are_not_used_as_a_denominator():
+    env=formal_env()
+    env.passenger_boardings_at_ordinary_stops=999
+    metrics=_flat_metrics(env, audit())
+    assert metrics["waiting_minutes_per_passenger"] == 3
+    assert metrics["onboard_delay_minutes_per_passenger"] == 2
 
 
 def test_runner_calls_strict_canonical_collector():

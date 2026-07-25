@@ -355,6 +355,7 @@ class DynamicDeliveryEnv:
         self.ordinary_stops_visited = 0
         self.integrated_stations_visited = 0
         self.passenger_boardings_at_ordinary_stops = 0
+        self.total_passenger_boardings_all_stops = 0
         self.passenger_alightings_at_ordinary_stops = 0
         self.bus_segment_count = 0
         self.bus_relocation_energy_kwh = 0.0
@@ -367,7 +368,11 @@ class DynamicDeliveryEnv:
         self.bus_terminal_ready: dict[str, list[str]] = {}
         stop_ids = [row["stop_id"] for rows in self.trip_stop_times.values() for row in rows]
         self.passenger_stops = {sid: PassengerStopRuntimeState(sid) for sid in dict.fromkeys(stop_ids)}
-        passenger_events = [PassengerArrivalEvent(row["passenger_event_id"], row["origin_stop_id"], row["destination_stop_id"], float(row["arrival_time_min"]), int(row.get("passenger_count", 1)), row.get("block_id", ""), float(row.get("baseline_rate_per_min", 0.0) or 0.0), float(row.get("demand_intensity", 1.0) or 1.0), float(row.get("temporal_multiplier", 1.0) or 1.0), float(row.get("effective_rate_per_min", 0.0) or 0.0), int(float(row.get("passenger_seed", 0) or 0))) for row in self.passenger_rows]
+        self.total_passenger_arrivals = sum(
+            int(float(row.get("passenger_count", 1) or 1))
+            for row in self.passenger_rows
+        )
+        passenger_events = [PassengerArrivalEvent(row["passenger_event_id"], row["origin_stop_id"], row["destination_stop_id"], float(row["arrival_time_min"]), int(float(row.get("passenger_count", 1) or 1)), row.get("block_id", ""), float(row.get("baseline_rate_per_min", 0.0) or 0.0), float(row.get("demand_intensity", 1.0) or 1.0), float(row.get("temporal_multiplier", 1.0) or 1.0), float(row.get("effective_rate_per_min", 0.0) or 0.0), int(float(row.get("passenger_seed", 0) or 0))) for row in self.passenger_rows]
         self.passenger_arrivals = PassengerArrivalIndex(passenger_events)
         self.passenger_runtime = PassengerSystemRuntime(self.passenger_stops, self.passenger_arrivals)
         self.passenger_waiting_minutes = 0.0
@@ -1189,6 +1194,7 @@ class DynamicDeliveryEnv:
             presult.alighting_count += bus.passenger_manifest.total_onboard_passengers
             bus.passenger_manifest.onboard_passengers_by_destination.clear(); bus.passenger_manifest.total_onboard_passengers = 0
             presult.onboard_after_departure = 0
+        self.total_passenger_boardings_all_stops += presult.boarding_count
         if stop_id in self.stop_to_station: self.integrated_stations_visited += 1
         else:
             self.ordinary_stops_visited += 1; self.passenger_boardings_at_ordinary_stops += presult.boarding_count; self.passenger_alightings_at_ordinary_stops += presult.alighting_count

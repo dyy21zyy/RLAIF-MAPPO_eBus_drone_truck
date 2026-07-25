@@ -27,6 +27,8 @@ class FormalRuntimeMetrics:
     battery_safety_violations: int
     waiting_passenger_minutes: float
     onboard_additional_delay_passenger_minutes: float
+    total_passenger_arrivals: int
+    total_passenger_boardings_all_stops: int
     bus_operating_delay: float
     drone_missions: int
     charging_slot_utilization: float
@@ -72,7 +74,7 @@ def collect_formal_runtime_metrics(env) -> FormalRuntimeMetrics:
         fmean(lateness) if lateness else 0.0, max(lateness) if lateness else 0.0, len(released)-len(delivered), sum(float(getattr(t,'total_distance',0.0)) for t in _require(env,'trucks')),
         _ratio(_require(env,'truck_weight_utilization_sum'), dispatch), _ratio(_require(env,'truck_volume_utilization_sum'), dispatch), _ratio(_require(env,'truck_parcels_routed'), dispatch), float(_require(env,'bus_freight_utilization')),
         float(_require(env,'bus_propulsion_energy_kwh')), float(_require(env,'bus_charging_energy_kwh')), min(float(v) for v in bus_soc.values()), int(_require(env,'battery_safety_violation_count')),
-        float(_require(env,'passenger_waiting_minutes')), float(_require(env,'passenger_onboard_delay_minutes')), float(_require(env,'raw_cost_components').get('bus_operating_delay',0.0)), int(_require(env,'drone_mission_count')),
+        float(_require(env,'passenger_waiting_minutes')), float(_require(env,'passenger_onboard_delay_minutes')), int(_require(env,'total_passenger_arrivals')), int(_require(env,'total_passenger_boardings_all_stops')), float(_require(env,'raw_cost_components').get('bus_operating_delay',0.0)), int(_require(env,'drone_mission_count')),
         _ratio(busy, avail), float(_require(env,'locker_occupancy_kg_minutes')), float(_require(env,'peak_station_load_kw')), float(_require(env,'accumulated_power_overload')))
 
 def collect_formal_metrics(env, *, env_reward=0.0, rlaif_rewards_by_agent=None, runtime=0.0):
