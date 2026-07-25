@@ -5,6 +5,54 @@ import pytest
 from envs.dynamics.station_dynamics import dispatch_drone, start_battery_charging
 from tests.test_station_dispatch_matching import env
 from tests.test_four_agent_environment import make_env
+from envs.delivery_env import DynamicDeliveryEnv
+
+
+def _passenger_service_env(stop_ids):
+    manifest=SimpleNamespace(
+        total_onboard_passengers=0,
+        onboard_passengers_by_destination={},
+        onboard_additional_delay_passenger_minutes=0.0,
+    )
+    return SimpleNamespace(
+        trip_stop_times={"trip": [{"stop_id": stop_id} for stop_id in stop_ids]},
+        physical_buses={"bus": SimpleNamespace(passenger_manifest=manifest)},
+        trip_to_bus={"trip": "bus"}, passenger_stops={}, passenger_arrivals=object(),
+        now_min=0.0, config={"passenger": {}}, stop_to_station={"station": "s"},
+        integrated_stations_visited=0, ordinary_stops_visited=0,
+        passenger_boardings_at_ordinary_stops=0,
+        passenger_alightings_at_ordinary_stops=0,
+        total_passenger_boardings_all_stops=0,
+    )
+
+
+def _stop_result(boardings=0, alightings=0):
+    return SimpleNamespace(boarding_count=boardings, alighting_count=alightings,
+                           onboard_after_departure=0)
+
+
+def test_all_stop_boarding_counter_distinguishes_station_and_ordinary(monkeypatch):
+    results=iter((_stop_result(2), _stop_result(3), _stop_result(0, 4),
+                  _stop_result(0)))
+    monkeypatch.setattr("envs.delivery_env.process_bus_stop",
+                        lambda *args, **kwargs: next(results))
+    test_env=_passenger_service_env(("ordinary", "station", "ordinary", "station"))
+    for index in range(4):
+        DynamicDeliveryEnv._process_stop_service(
+            test_env, "trip", index, incoming_energy=0.0, soc_before=0.0)
+    assert test_env.total_passenger_boardings_all_stops == 5
+    assert test_env.passenger_boardings_at_ordinary_stops == 2
+
+
+def test_reset_counts_arrivals_and_clears_all_stop_boardings(tmp_path):
+    test_env=make_env(tmp_path)
+    for index,row in enumerate(test_env.passenger_rows):
+        row["passenger_count"]=f"{index + 1}.0"
+    expected=sum(range(1, len(test_env.passenger_rows) + 1))
+    test_env.total_passenger_boardings_all_stops=99
+    test_env.reset(seed=7)
+    assert test_env.total_passenger_arrivals == expected
+    assert test_env.total_passenger_boardings_all_stops == 0
 
 
 def dispatch_parts(test_env, index=0):

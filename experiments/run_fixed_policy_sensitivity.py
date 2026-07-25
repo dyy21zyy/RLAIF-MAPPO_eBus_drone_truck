@@ -95,11 +95,24 @@ def _flat_metrics(env, audit):
     canonical=asdict(evaluation.metrics.collect_formal_runtime_metrics(env))
     released=sum(getattr(p,"release_time_min",None) is not None for p in env.parcels.values())
     delivered=released-canonical["undelivered_parcels"]
-    boarded=env.passenger_boardings_at_ordinary_stops
+    arrivals=canonical["total_passenger_arrivals"]
+    boarded=canonical["total_passenger_boardings_all_stops"]
+    if arrivals <= 0: raise ValueError("total_passenger_arrivals must be positive")
+    if boarded <= 0: raise ValueError("total_passenger_boardings_all_stops must be positive")
+    waiting_per_passenger=canonical["waiting_passenger_minutes"]/arrivals
+    onboard_delay_per_passenger=canonical["onboard_additional_delay_passenger_minutes"]/boarded
+    if not math.isfinite(waiting_per_passenger) or not math.isfinite(onboard_delay_per_passenger):
+        raise ValueError("non-finite passenger per-passenger metric")
+    if not math.isclose(waiting_per_passenger, canonical["waiting_passenger_minutes"]/arrivals, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError("inconsistent passenger waiting denominator")
+    if not math.isclose(onboard_delay_per_passenger, canonical["onboard_additional_delay_passenger_minutes"]/boarded, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError("inconsistent passenger onboard denominator")
+    audit["passenger_waiting_denominator_consistent"]=1
+    audit["passenger_onboard_denominator_consistent"]=1
     capacity=float(env.config["station"]["power_capacity_kw"])
     if capacity <= 0: raise ValueError("configured station power capacity must be positive")
     _validate_episode_audit(canonical,audit)
-    out={**canonical,"released_parcels":released,"delivered_parcels":delivered,"undelivered_rate":canonical["undelivered_parcels"]/released if released else 0.0,"truck_distance_per_released_parcel":canonical["truck_distance"]/released if released else 0.0,"drone_missions_per_released_parcel":canonical["drone_missions"]/released if released else 0.0,"total_boarded_passengers":boarded,"waiting_minutes_per_passenger":canonical["waiting_passenger_minutes"]/boarded if boarded else 0.0,"onboard_delay_minutes_per_passenger":canonical["onboard_additional_delay_passenger_minutes"]/boarded if boarded else 0.0,"configured_station_power_capacity_kw":capacity,"peak_load_to_capacity_ratio":canonical["station_peak_power"]/capacity,"overload_episode_indicator":int(canonical["overload_kw_min"]>0),**audit}
+    out={**canonical,"released_parcels":released,"delivered_parcels":delivered,"undelivered_rate":canonical["undelivered_parcels"]/released if released else 0.0,"truck_distance_per_released_parcel":canonical["truck_distance"]/released if released else 0.0,"drone_missions_per_released_parcel":canonical["drone_missions"]/released if released else 0.0,"total_boarded_passengers":boarded,"waiting_minutes_per_passenger":waiting_per_passenger,"onboard_delay_minutes_per_passenger":onboard_delay_per_passenger,"configured_station_power_capacity_kw":capacity,"peak_load_to_capacity_ratio":canonical["station_peak_power"]/capacity,"overload_episode_indicator":int(canonical["overload_kw_min"]>0),**audit}
     for agent in AGENTS:
         count=audit[f"{agent}_decision_count"]
         out[f"{agent}_reward_per_decision"]=audit[f"rlaif_reward_{agent}"]/count if count else None

@@ -15,3 +15,8 @@ def test_urgent_metrics_use_explicit_urgent_status_not_priority():
 
 def test_formal_runtime_metrics_returns_corrected_drone_mission_count():
     assert collect_formal_runtime_metrics(formal_env()).drone_missions == 2
+
+def test_formal_runtime_metrics_exposes_passenger_denominators():
+    metrics=collect_formal_runtime_metrics(formal_env())
+    assert metrics.total_passenger_arrivals == 4
+    assert metrics.total_passenger_boardings_all_stops == 3
