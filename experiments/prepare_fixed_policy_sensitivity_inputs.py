@@ -56,6 +56,20 @@ def dotted_value(source: dict[str, Any], dotted: str) -> Any:
     for p in dotted.split("."): cur=cur[p]
     return cur
 
+def _parameter_values_equal(left: Any, right: Any) -> bool:
+    """Compare YAML values while allowing equivalent integer/float numerics."""
+    numeric = (int, float)
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, numeric) and isinstance(right, numeric):
+        return left == right
+    return type(left) is type(right) and left == right
+
+def expected_oat_differences(base_config: dict[str, Any], parameter: str, value: Any) -> set[str]:
+    """Return the only valid difference set for an OAT sensitivity level."""
+    base_value = dotted_value(base_config, parameter)
+    return set() if _parameter_values_equal(value, base_value) else {parameter}
+
 def differing_paths(a: Any, b: Any, prefix="") -> set[str]:
     if isinstance(a,dict) and isinstance(b,dict):
         return set().union(*(differing_paths(a.get(k),b.get(k),f"{prefix}.{k}".strip(".")) for k in a.keys()|b.keys()))
@@ -80,15 +94,18 @@ def _artifacts(cfg):
     if any(any(x in str(p) for x in BAD) for p in items.values()): raise ValueError("placeholder or stale artifact path")
     return items,hashes
 
-def validate_bank(path, *, base_config, parameter, value, expected_count, expected_seeds):
+def validate_bank(path, *, base_config, parameter, value, base_value, expected_count, expected_seeds):
     m=load_bank_manifest(path)
     if m.get("sensitivity_mode")!=MODE or m.get("is_final_test_bank") is not False: raise ValueError("bank is not a fixed-policy sensitivity bank")
     if int(m.get("scenario_count",-1)) != expected_count: raise ValueError("scenario count mismatch")
     if not m.get("bank_hash") or any(x in str(m["bank_hash"]) for x in BAD): raise ValueError("invalid bank hash")
     expected_lineage={k:base_config["reward"][k] for k in ("scale_artifact","scale_artifact_hash","expected_training_scenario_bank_hash")}
     _assert_reward_lineage(m.get("resolved_environment_config",{}), expected_lineage, "bank manifest")
-    if dotted_value(m["resolved_environment_config"],parameter)!=value: raise ValueError("target parameter mismatch")
-    if differing_paths(base_config,m["resolved_environment_config"]) != {parameter}: raise ValueError("non-target configuration difference")
+    actual_base_value=dotted_value(base_config,parameter)
+    if not _parameter_values_equal(base_value,actual_base_value): raise ValueError("configured base_value does not match hydrated runtime base")
+    if not _parameter_values_equal(dotted_value(m["resolved_environment_config"],parameter),value): raise ValueError("target parameter mismatch")
+    expected_differences=expected_oat_differences(base_config,parameter,value)
+    if differing_paths(base_config,m["resolved_environment_config"]) != expected_differences: raise ValueError("non-target configuration difference")
     scenarios=m.get("scenarios",[])
     if [s.get("paired_scenario_index") for s in scenarios] != list(range(expected_count)): raise ValueError("paired scenario index mismatch")
     if [s.get("base_seed") for s in scenarios] != expected_seeds: raise ValueError("paired seed mismatch")
@@ -125,18 +142,21 @@ def prepare(config_path, output_root, *, resume=False, force=False, validate_onl
         runtime_base_path.write_text(runtime_base_text)
     records={}
     for family,spec in cfg["families"].items():
+        actual_base_value=dotted_value(base,spec["parameter"])
+        if not _parameter_values_equal(spec["base_value"],actual_base_value):
+            raise ValueError(f"configured base_value does not match hydrated runtime base for {spec['parameter']}")
         for value,label in zip(spec["values"],spec["labels"]):
             if diagnostic_scenario_count is not None and value not in (spec["values"][0], spec["values"][-1]):
                 continue
             resolved=patch_dotted(base,spec["parameter"],value)
-            if differing_paths(base,resolved)!={spec["parameter"]}: raise AssertionError("OAT patch failed")
+            if differing_paths(base,resolved)!=expected_oat_differences(base,spec["parameter"],value): raise AssertionError("OAT patch failed")
             bank_dir=root/"scenarios"/family/label; config_out=root/"configs"/family/f"{label}.yaml"
             if validate_only:
-                if bank_dir.exists(): validate_bank(bank_dir,base_config=base,parameter=spec["parameter"],value=value,expected_count=count,expected_seeds=seeds)
+                if bank_dir.exists(): validate_bank(bank_dir,base_config=base,parameter=spec["parameter"],value=value,base_value=spec["base_value"],expected_count=count,expected_seeds=seeds)
                 continue
             if resume:
                 if not (bank_dir/"scenario_bank_manifest.json").is_file(): raise RuntimeError(f"stale or partial bank: {bank_dir}")
-                m=validate_bank(bank_dir,base_config=base,parameter=spec["parameter"],value=value,expected_count=count,expected_seeds=seeds)
+                m=validate_bank(bank_dir,base_config=base,parameter=spec["parameter"],value=value,base_value=spec["base_value"],expected_count=count,expected_seeds=seeds)
             else:
                 config_out.parent.mkdir(parents=True,exist_ok=True); config_out.write_text(yaml.safe_dump(resolved,sort_keys=False))
                 m=build_bank(config_out,f"sensitivity_{family}_{label}",count,start,bank_dir,explicit_seeds=",".join(map(str,seeds)),fallback=False,run_classification=classification,force=False)
@@ -144,7 +164,7 @@ def prepare(config_path, output_root, *, resume=False, force=False, validate_onl
                 m.update(sensitivity_mode=MODE,publication_role=MODE,is_final_test_bank=False,publication_eligible=classification=="formal",sensitivity_family=family,parameter_name=spec["parameter"],parameter_value=value,base_parameter_value=spec["base_value"],resolved_environment_config=resolved,resolved_config_path=str(config_out),resolved_config_hash=sha256_file(config_out))
                 m["bank_hash"]=sha256_json({k:v for k,v in m.items() if k not in {"bank_hash","generation_commit"}})
                 for name in ("scenario_bank_manifest.json","manifest.json"): (bank_dir/name).write_text(json.dumps(m,indent=2,sort_keys=True)+"\n")
-                m=validate_bank(bank_dir,base_config=base,parameter=spec["parameter"],value=value,expected_count=count,expected_seeds=seeds)
+                m=validate_bank(bank_dir,base_config=base,parameter=spec["parameter"],value=value,base_value=spec["base_value"],expected_count=count,expected_seeds=seeds)
             records[f"{family}/{label}"]={"path":str(bank_dir/"scenario_bank_manifest.json"),"hash":m["bank_hash"],"resolved_config_path":str(config_out),"resolved_config_hash":m.get("resolved_config_hash")}
     if validate_only: return {"status":"valid","artifacts":hashes}
     try: torch_version=__import__("torch").__version__
