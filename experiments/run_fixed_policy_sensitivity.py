@@ -1,10 +1,12 @@
 """Deterministically evaluate immutable four-agent MAPPO policies on sensitivity banks."""
 from __future__ import annotations
 import argparse, csv, hashlib, json, math, platform, subprocess, sys, time
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 import yaml
 from envs import DynamicDeliveryEnv
+import evaluation.metrics
 from evaluation.scenario_bank import load_scenario_bank, load_frozen_instance, sha256_file, verify_scenario_hashes
 from rlaif.reward_registry import RewardRegistry
 from training.event_schema import decision_event_id, normalize_decision_event_type, validate_agent_event
@@ -29,11 +31,19 @@ def _registry(cfg, manifest):
     return RewardRegistry({"run_classification":manifest["run_classification"],"rlaif":{"enabled":True,"scope":"all","fallback_to_env_reward":False,"fail_on_invalid_reward_model":True,"agents":agents}})
 
 def _flat_metrics(env, audit):
-    m=env.get_formal_runtime_metrics(); released=m.get("released_parcels",m.get("delivered_parcels",0)+m.get("undelivered_parcels",0)); delivered=m.get("delivered_parcels"); boarded=m.get("total_boarded_passengers",m.get("passenger_boardings_at_ordinary_stops"))
-    required={"released_parcels":released,"delivered_parcels":delivered,"undelivered_parcels":m.get("undelivered_parcels"),"total_boarded_passengers":boarded,"waiting_passenger_minutes":m.get("passenger_waiting_minutes"),"onboard_additional_delay_passenger_minutes":m.get("passenger_additional_delay_minutes"),"truck_distance":m.get("truck_total_distance"),"bus_propulsion_energy_kwh":m.get("bus_propulsion_energy_kwh"),"bus_charging_energy_kwh":m.get("bus_charging_energy_kwh"),"minimum_bus_soc":m.get("minimum_physical_bus_soc"),"drone_missions":m.get("drone_deliveries"),"station_peak_power":m.get("station_peak_power_kw"),"configured_station_power_capacity_kw":m.get("configured_station_power_capacity_kw"),"overload_kw_min":m.get("power_overload_amount")}
-    missing=[k for k,v in required.items() if v is None]
-    if missing: raise ValueError("missing required formal metric source: "+", ".join(missing))
-    out={**required,"fulfillment_rate":delivered/released if released else math.nan,"undelivered_rate":required["undelivered_parcels"]/released if released else math.nan,"truck_distance_per_released_parcel":required["truck_distance"]/released if released else math.nan,"drone_missions_per_released_parcel":required["drone_missions"]/released if released else math.nan,"waiting_minutes_per_passenger":required["waiting_passenger_minutes"]/boarded if boarded else math.nan,"onboard_delay_minutes_per_passenger":required["onboard_additional_delay_passenger_minutes"]/boarded if boarded else math.nan,"peak_load_to_capacity_ratio":required["station_peak_power"]/required["configured_station_power_capacity_kw"],"overload_episode_indicator":int(required["overload_kw_min"]>0),**audit}
+    # This strict collector is the single source of physical publication metrics.
+    # FormalMetricError deliberately propagates so a row cannot be marked successful
+    # after missing instrumentation has been replaced by a fabricated zero.
+    canonical=asdict(evaluation.metrics.collect_formal_runtime_metrics(env))
+    released=sum(getattr(p,"release_time_min",None) is not None for p in env.parcels.values())
+    delivered=released-canonical["undelivered_parcels"]
+    boarded=env.passenger_boardings_at_ordinary_stops
+    capacity=float(env.config["station"]["power_capacity_kw"])
+    if capacity <= 0: raise ValueError("configured station power capacity must be positive")
+    out={**canonical,"released_parcels":released,"delivered_parcels":delivered,"undelivered_rate":canonical["undelivered_parcels"]/released if released else 0.0,"truck_distance_per_released_parcel":canonical["truck_distance"]/released if released else 0.0,"drone_missions_per_released_parcel":canonical["drone_missions"]/released if released else 0.0,"total_boarded_passengers":boarded,"waiting_minutes_per_passenger":canonical["waiting_passenger_minutes"]/boarded if boarded else 0.0,"onboard_delay_minutes_per_passenger":canonical["onboard_additional_delay_passenger_minutes"]/boarded if boarded else 0.0,"configured_station_power_capacity_kw":capacity,"peak_load_to_capacity_ratio":canonical["station_peak_power"]/capacity,"overload_episode_indicator":int(canonical["overload_kw_min"]>0),**audit}
+    for agent in AGENTS:
+        count=audit[f"{agent}_decision_count"]
+        out[f"{agent}_reward_per_decision"]=audit[f"rlaif_reward_{agent}"]/count if count else None
     if any(isinstance(v,float) and not math.isfinite(v) for v in out.values()): raise ValueError("non-finite required metric")
     return out
 
