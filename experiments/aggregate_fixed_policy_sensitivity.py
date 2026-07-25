@@ -95,7 +95,9 @@ def aggregate_rows(rows, config, *, formal=True):
     return paired,summaries,tests
 
 def _write_csv(path,rows):
-    fields=list(rows[0]) if rows else []; path.parent.mkdir(parents=True,exist_ok=True)
+    lineage=("sensitivity_family","parameter_value","paired_scenario_index","raw_successful_run_count")
+    keys=set().union(*(row.keys() for row in rows)) if rows else set()
+    fields=[field for field in lineage if field in keys]+sorted(keys-set(lineage)); path.parent.mkdir(parents=True,exist_ok=True)
     with path.open("w",newline="") as f: w=csv.DictWriter(f,fieldnames=fields); w.writeheader(); w.writerows(rows)
 
 def run(config_path, output_root, *, validate_only=False):
