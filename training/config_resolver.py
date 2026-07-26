@@ -28,6 +28,34 @@ def _canonical_json_hash(path: Path) -> str:
     return hashlib.sha256(json.dumps(clean, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+
+def resolved_training_config_hash(config: dict[str, Any]) -> str:
+    """Hash the exact resolved training config, excluding the hash itself."""
+    clean = deepcopy(config)
+    clean.pop("resolved_training_config_hash", None)
+
+    payload = json.dumps(
+        clean,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _sha256_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+
+    with Path(path).open("rb") as stream:
+        for chunk in iter(
+            lambda: stream.read(1024 * 1024),
+            b"",
+        ):
+            digest.update(chunk)
+
+    return digest.hexdigest()
+
 def _load_env_config(config: dict[str, Any]) -> dict[str, Any]:
     env_path = config.get("env", {}).get("config_path")
     if not env_path:
@@ -193,12 +221,50 @@ def resolve_mappo_training_config(config: dict[str, Any], *, seed_override: int 
     validate_run_classification(resolved, config_only=True)
     return resolved
 
-def validate_reward_artifacts(config: dict[str, Any], *, config_only: bool) -> None:
-    validate_run_classification(config, config_only=config_only)
-    write_resolved_environment_parameter_report(config)
-    if config_only: return
-    r=config.get("rlaif", {})
-    if r.get("enabled"):
-        for name, agent in r.get("agents", {}).items():
-            if agent.get("enabled", True) and not Path(agent.get("checkpoint", "")).exists():
-                raise TrainingConfigError(f"missing RLAIF reward checkpoint for {name}: {agent.get('checkpoint')}")
+def validate_reward_artifacts(
+    config: dict[str, Any],
+    *,
+    config_only: bool,
+) -> None:
+    validate_run_classification(
+        config,
+        config_only=config_only,
+    )
+
+    write_resolved_environment_parameter_report(
+        config
+    )
+
+    rlaif = config.get("rlaif", {})
+
+    if rlaif.get("enabled") and not config_only:
+        reward_hashes = {}
+
+        for name, agent in (
+            rlaif.get("agents", {}).items()
+        ):
+            if not agent.get("enabled", True):
+                continue
+
+            checkpoint = Path(
+                agent.get("checkpoint", "")
+            )
+
+            if not checkpoint.is_file():
+                raise TrainingConfigError(
+                    "missing RLAIF reward checkpoint "
+                    f"for {name}: {checkpoint}"
+                )
+
+            reward_hashes[name] = _sha256_file(
+                checkpoint
+            )
+
+        rlaif["reward_checkpoint_hashes"] = (
+            reward_hashes
+        )
+
+    config["resolved_training_config_hash"] = (
+        resolved_training_config_hash(config)
+    )
+
