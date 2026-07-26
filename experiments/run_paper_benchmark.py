@@ -1,12 +1,14 @@
 """Formal/smoke paper benchmark runner over frozen scenario banks."""
 from __future__ import annotations
 import argparse, csv, json, time, hashlib
+import torch
 from pathlib import Path
 from utils.config import load_config
 from evaluation.scenario_bank import load_scenario_bank, load_frozen_instance, sha256_file, sha256_json, git_commit
 from evaluation.formal_policy_registry import get_formal_policy_spec
 
 from evaluation.formal_episode_runner import evaluate_policy_on_frozen_scenario
+from rlaif.reward_registry import RewardRegistry
 from evaluation.policies import TruckDirectHeuristicPolicy, IntegratedRuleBasedPolicy, AssignmentPPOPolicy, MAPPOPolicy
 from evaluation.formal_policy_registry import validate_policy_checkpoint, validate_unique_learned_checkpoints, PolicyCheckpointValidationError
 from evaluation.paired_evaluation import validate_paired_scenarios
@@ -51,12 +53,221 @@ def _policy_for(mid, ck, spec):
     if mid in {'mappo_env','mappo_rlaif_assignment','mappo_rlaif_all'}: return MAPPOPolicy(ck, spec=spec)
     raise ValueError(f'unknown method {mid}')
 
-def _reward_registry(enabled, checkpoints):
-    if not enabled: return None
-    class ConstantRegistry:
-        def score_transition(self, *, agent, event_type, observation, action, environment_reward, info):
-            return {'raw':0.1,'normalized':0.1,'clipped':0.1,'weighted':0.1,'fallback':False}
-    return ConstantRegistry()
+_REWARD_REGISTRY_CACHE = {}
+
+
+def _reward_registry(
+    method,
+    checkpoint,
+    spec,
+    formal_mode,
+):
+    """Build and cache the real runtime reward-model registry."""
+
+    enabled_agents = tuple(
+        spec.enabled_reward_agents
+    )
+
+    if not enabled_agents:
+        return None
+
+    if not checkpoint:
+        raise ValueError(
+            f"RLAIF method {spec.method_id} "
+            "has no policy checkpoint"
+        )
+
+    reward_paths = dict(
+        method.get("reward_checkpoints")
+        or {}
+    )
+
+    missing = [
+        agent
+        for agent in enabled_agents
+        if not reward_paths.get(agent)
+        or not Path(
+            reward_paths[agent]
+        ).is_file()
+    ]
+
+    if missing:
+        raise FileNotFoundError(
+            "Missing runtime reward checkpoints: "
+            + ", ".join(missing)
+        )
+
+    checkpoint_path = Path(checkpoint)
+
+    payload = torch.load(
+        checkpoint_path,
+        map_location="cpu",
+        weights_only=False,
+    )
+
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "MAPPO policy checkpoint is not "
+            f"a dictionary: {checkpoint_path}"
+        )
+
+    embedded_config = payload.get(
+        "config",
+        {},
+    )
+
+    if not isinstance(
+        embedded_config,
+        dict,
+    ):
+        embedded_config = {}
+
+    training_rlaif = embedded_config.get(
+        "rlaif",
+        {},
+    )
+
+    if not isinstance(
+        training_rlaif,
+        dict,
+    ):
+        training_rlaif = {}
+
+    training_agents = training_rlaif.get(
+        "agents",
+        {},
+    )
+
+    if not isinstance(training_agents, dict):
+        training_agents = {}
+
+    recorded_hashes = dict(
+        payload.get(
+            "reward_checkpoint_hashes",
+            {},
+        )
+        or {}
+    )
+
+    cache_key = (
+        str(checkpoint_path.resolve()),
+        tuple(
+            sorted(
+                (
+                    agent,
+                    str(
+                        Path(
+                            reward_paths[agent]
+                        ).resolve()
+                    ),
+                )
+                for agent in enabled_agents
+            )
+        ),
+        bool(formal_mode),
+    )
+
+    cached = _REWARD_REGISTRY_CACHE.get(
+        cache_key
+    )
+
+    if cached is not None:
+        return cached
+
+    runtime_agents = {}
+
+    for agent in enabled_agents:
+        reward_path = Path(
+            reward_paths[agent]
+        ).resolve()
+
+        actual_hash = sha256_file(
+            reward_path
+        )
+
+        recorded_hash = recorded_hashes.get(
+            agent
+        )
+
+        if formal_mode and (
+            not recorded_hash
+            or recorded_hash != actual_hash
+        ):
+            raise ValueError(
+                "Policy/reward checkpoint lineage "
+                f"mismatch for {agent}: "
+                f"recorded={recorded_hash}, "
+                f"actual={actual_hash}"
+            )
+
+        trained_agent = dict(
+            training_agents.get(
+                agent,
+                {},
+            )
+            or {}
+        )
+
+        lambda_value = trained_agent.get(
+            "lambda",
+            training_rlaif.get("lambda"),
+        )
+
+        reward_clip = trained_agent.get(
+            "reward_clip",
+            training_rlaif.get(
+                "reward_clip"
+            ),
+        )
+
+        if lambda_value is None:
+            raise ValueError(
+                "Policy checkpoint has no recorded "
+                f"RLAIF lambda for {agent}"
+            )
+
+        if reward_clip is None:
+            raise ValueError(
+                "Policy checkpoint has no recorded "
+                f"reward_clip for {agent}"
+            )
+
+        runtime_agents[agent] = {
+            "enabled": True,
+            "lambda": float(lambda_value),
+            "reward_clip": float(
+                reward_clip
+            ),
+            "checkpoint": str(
+                reward_path
+            ),
+            "checkpoint_hash": actual_hash,
+        }
+
+    registry = RewardRegistry(
+        {
+            "run_classification": (
+                "formal"
+                if formal_mode
+                else "diagnostic"
+            ),
+            "rlaif": {
+                "enabled": True,
+                "scope": (
+                    spec.expected_rlaif_scope
+                ),
+                "fallback_to_env_reward": False,
+                "fail_on_invalid_reward_model": True,
+                "agents": runtime_agents,
+            },
+        }
+    )
+
+    _REWARD_REGISTRY_CACHE[
+        cache_key
+    ] = registry
+
+    return registry
 
 def _method_specs(cfg, formal_mode):
     specs=[]
@@ -104,7 +315,7 @@ def run_benchmark(config_path, *, validate_only=False, resume=False, method=None
                     spec=dataclasses.replace(spec, formal_mode=formal)
                     if ck: validate_policy_checkpoint(spec, ck)
                     policy=_policy_for(mid, ck, spec)
-                    result=evaluate_policy_on_frozen_scenario(scenario=sc, method_spec=spec, policy=policy, reward_registry=_reward_registry(base.enabled_reward_agents, reward_paths), evaluation_config=cfg.get('evaluation',{}), training_seed=seed)
+                    result=evaluate_policy_on_frozen_scenario(scenario=sc, method_spec=spec, policy=policy, reward_registry=_reward_registry(m, ck, spec, formal), evaluation_config=cfg.get('evaluation',{}), training_seed=seed)
                     row.update({'formal_metrics':result.metrics,'metric_source_metadata':result.metric_sources,'rlaif_decomposition':result.rlaif_decomposition,'transition_count':result.transition_count,'runtime':result.runtime_seconds,'runtime_seconds':result.runtime_seconds,'status':result.status,'failure_reason':result.failure_reason or '', 'exception_type':result.exception_type, 'env_constructed': result.status == 'success', 'env_reset_called': result.status == 'success', 'env_step_called': result.transition_count > 0, 'terminal_reached': result.status == 'success', 'action_masks_respected': result.status == 'success', 'runtime_metrics_collected': bool(result.metrics)})
                     if row['status'] == 'success' and row.get('transition_count', 0) <= 0:
                         raise BenchmarkIntegrityError('successful benchmark row has no env.step transitions')

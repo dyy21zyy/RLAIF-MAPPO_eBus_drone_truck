@@ -9,6 +9,7 @@ from envs import DynamicDeliveryEnv
 from evaluation.scenario_bank import load_frozen_instance
 from evaluation.formal_metrics import collect_formal_metrics
 from evaluation.formal_metric_validation import validate_formal_metrics
+from rlaif.reward_registry import RewardRegistry
 
 @dataclass(frozen=True)
 class FormalEpisodeResult:
@@ -29,20 +30,189 @@ def _zero_rlaif() -> dict[str, float]:
     d.update(rlaif_total_weighted=0.0, rlaif_fallback_count=0.0)
     return d
 
-def _score_selected(reward_registry, observation, action, reward, info, rlaif):
-    if reward_registry is None: return
-    agent=str(observation.get("agent_id"))
-    if agent not in ("assignment","truck","bus","station"): return
-    if hasattr(reward_registry, "score_transition"):
-        out=reward_registry.score_transition(agent=agent,event_type=observation.get("event_type"),observation=observation,action=action,environment_reward=reward,info=info)
-    elif hasattr(reward_registry, "score"):
-        out=reward_registry.score(agent, observation, action, info)
+def _score_selected(
+    reward_registry,
+    observation,
+    action,
+    reward,
+    info,
+    rlaif,
+):
+    if reward_registry is None:
+        return
+
+    agent = str(
+        observation.get("agent_id")
+    )
+
+    if agent not in (
+        "assignment",
+        "truck",
+        "bus",
+        "station",
+    ):
+        return
+
+    if isinstance(
+        reward_registry,
+        RewardRegistry,
+    ):
+        candidate_rows = (
+            observation.get(
+                "candidate_features"
+            )
+            or []
+        )
+
+        selected_action = int(action)
+
+        if (
+            selected_action < 0
+            or selected_action
+            >= len(candidate_rows)
+        ):
+            raise ValueError(
+                "Selected action has no matching "
+                "candidate feature row"
+            )
+
+        event_type = (
+            observation.get(
+                "event_type_detail"
+            )
+            or observation.get(
+                "event_type"
+            )
+        )
+
+        contribution = (
+            reward_registry.score_transition(
+                agent_type=agent,
+                event_type=event_type,
+                environment_reward=float(
+                    reward
+                ),
+                state_features=[
+                    float(value)
+                    for value in (
+                        observation.get(
+                            "features"
+                        )
+                        or []
+                    )
+                ],
+                candidate_features=[
+                    float(value)
+                    for value in (
+                        candidate_rows[
+                            selected_action
+                        ]
+                    )
+                ],
+                selected_action_index=(
+                    selected_action
+                ),
+                formal_mode=(
+                    reward_registry.formal_mode
+                ),
+            )
+        )
+
+        out = {
+            "raw": (
+                contribution
+                .raw_learned_reward
+            ),
+            "normalized": (
+                contribution
+                .normalized_learned_reward
+            ),
+            "clipped": (
+                contribution
+                .clipped_learned_reward
+            ),
+            "weighted": (
+                contribution
+                .weighted_learned_contribution
+            ),
+            "fallback": (
+                contribution.used_fallback
+            ),
+        }
+
+    elif hasattr(
+        reward_registry,
+        "score_transition",
+    ):
+        # Compatibility path for lightweight
+        # diagnostic registries used by tests.
+        out = reward_registry.score_transition(
+            agent=agent,
+            event_type=observation.get(
+                "event_type"
+            ),
+            observation=observation,
+            action=action,
+            environment_reward=reward,
+            info=info,
+        )
+
+    elif hasattr(
+        reward_registry,
+        "score",
+    ):
+        out = reward_registry.score(
+            agent,
+            observation,
+            action,
+            info,
+        )
+
     else:
-        out={"raw":0.0,"normalized":0.0,"clipped":0.0,"weighted":0.0,"fallback":False}
-    for k in ("raw","normalized","clipped","weighted"):
-        rlaif[f"rlaif_{agent}_{k}"] += float(out.get(k, out.get(f"{k}_reward", 0.0)))
-    if out.get("fallback"): rlaif["rlaif_fallback_count"] += 1.0
-    rlaif["rlaif_total_weighted"] = sum(rlaif[f"rlaif_{a}_weighted"] for a in ("assignment","truck","bus","station"))
+        out = {
+            "raw": 0.0,
+            "normalized": 0.0,
+            "clipped": 0.0,
+            "weighted": 0.0,
+            "fallback": False,
+        }
+
+    for key in (
+        "raw",
+        "normalized",
+        "clipped",
+        "weighted",
+    ):
+        rlaif[
+            f"rlaif_{agent}_{key}"
+        ] += float(
+            out.get(
+                key,
+                out.get(
+                    f"{key}_reward",
+                    0.0,
+                ),
+            )
+        )
+
+    if out.get("fallback"):
+        rlaif[
+            "rlaif_fallback_count"
+        ] += 1.0
+
+    rlaif[
+        "rlaif_total_weighted"
+    ] = sum(
+        rlaif[
+            f"rlaif_{name}_weighted"
+        ]
+        for name in (
+            "assignment",
+            "truck",
+            "bus",
+            "station",
+        )
+    )
 
 def evaluate_policy_on_frozen_scenario(*, scenario, method_spec, policy, reward_registry, evaluation_config, training_seed) -> FormalEpisodeResult:
     started=time.perf_counter(); rlaif=_zero_rlaif(); transitions=0

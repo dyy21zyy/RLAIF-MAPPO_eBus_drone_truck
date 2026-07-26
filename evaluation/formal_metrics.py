@@ -25,7 +25,29 @@ def collect_formal_metrics(env, *, runtime_seconds: float, transition_count: int
         "waiting_passenger_minutes": 0.0, "onboard_additional_delay_passenger_minutes": 0.0, "passengers_boarded": m.get("passenger_boardings_at_ordinary_stops", 0), "passengers_alighted": m.get("passenger_alightings_at_ordinary_stops", 0), "remaining_passenger_queues": 0,
         "drone_missions": m.get("drone_deliveries", 0), "full_battery_availability": 0, "depleted_battery_inventory": 0, "charging_batteries": 0, "charging_slot_utilization": 0.0, "locker_occupancy": 0.0,
         "station_peak_load": m.get("power_overload_amount", 0.0), "overload_kw_min": m.get("power_overload_amount", 0.0), "overload_duration": m.get("power_overload_duration", 0.0), "battery_charging_energy": 0.0,
-        "environment_reward": env_reward, "combined_reward_total": env_reward + rtot,
+        # Legacy Stage-9 metric names retained for compatibility.
+        "environment_reward": env_reward,
+        "combined_reward_total": env_reward + rtot,
+
+        # Canonical publication/preformal reconciliation names.
+        "assignment_rlaif_contribution": float(
+            rlaif.get("rlaif_assignment_weighted", 0.0)
+        ),
+        "truck_rlaif_contribution": float(
+            rlaif.get("rlaif_truck_weighted", 0.0)
+        ),
+        "bus_rlaif_contribution": float(
+            rlaif.get("rlaif_bus_weighted", 0.0)
+        ),
+        "station_rlaif_contribution": float(
+            rlaif.get("rlaif_station_weighted", 0.0)
+        ),
+        "total_weighted_rlaif_reward": rtot,
+        "combined_reward": env_reward + rtot,
+        "reward_fallback_count": float(
+            rlaif.get("rlaif_fallback_count", 0.0)
+        ),
+
         "decision_counts": m.get("decision_events", transition_count), "infeasible_action_count": m.get("infeasible_action_corrections", 0), "fallback_count": m.get("fallback_feasibility_events", 0), "transition_count": transition_count, "runtime": runtime_seconds,
         **rlaif,
     }
