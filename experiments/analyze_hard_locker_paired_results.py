@@ -31,6 +31,17 @@ def sha256_file(path: Path) -> str:
 
 
 def _metric(row: dict[str,Any], name: str) -> float:
+ formal=row.get("formal_metrics")
+ if formal is not None:
+  if not isinstance(formal,dict): raise ValueError("formal_metrics must be a mapping")
+  for alias in ALIASES.get(name,(name,)):
+   if alias in formal:
+    record=formal[alias]
+    if not isinstance(record,dict) or record.get("available") is not True or "value" not in record: raise ValueError(f"malformed or unavailable formal metric {name}")
+    value=float(record["value"])
+    if not math.isfinite(value): raise ValueError(f"non-finite {name}")
+    return value
+  raise ValueError(f"required formal metric {name} is missing")
  sources=(row,row.get("metrics",{}),row.get("episode_metrics",{}),row.get("summary",{}))
  for alias in ALIASES.get(name,(name,)):
   for source in sources:
@@ -71,7 +82,7 @@ def load_and_validate(path: Path) -> tuple[list[dict[str,Any]], list[str]]:
   if not _is_hash(row.get('policy_checkpoint_hash')): raise ValueError(f"invalid checkpoint hash for {key}")
   artifacts=row.get('artifact_hashes',{})
   reward_hashes=row.get('reward_checkpoint_hashes',{})
-  scale_hash=row.get('reward_scale_hash') or artifacts.get('reward_scale') or artifacts.get('reward_scale_hash')
+  scale_hash=row.get('reward_scale_artifact_hash')
   if not _is_hash(scale_hash): raise ValueError(f"invalid reward-scale artifact hash for {key}")
   if row['method_id']=='mappo_rlaif_assignment' and not _is_hash(reward_hashes.get('assignment') or artifacts.get('assignment_reward_model')):
    raise ValueError(f"invalid assignment reward artifact hash for {key}")

@@ -28,3 +28,7 @@ minimum_scale_overrides:
   infeasible_action:
     value: 1.0
     reason: "Instrumented-zero in reduced/formal reference rollouts when canonical policies avoid invalid actions; explicit denominator preserves validation without adding a reward component."
+structural_zero_components:
+  locker_overflow:
+    positive_denominator: 1.0
+    reason: "Hard locker capacity makes locker overflow structurally zero in every valid reference rollout; this explicit denominator is a schema fallback, not an empirical percentile."

@@ -52,6 +52,7 @@ def percentile_scale(samples, *, method="percentile", percentile=95, minimum=0.0
 def classify_and_estimate(rows, cfg):
     est=cfg.get("estimator", {"method":"percentile", "percentile":95})
     overrides=cfg.get("minimum_scale_overrides", {}) or {}
+    structural=cfg.get("structural_zero_components", {}) or {}
     components={}; scales={}; stats=[]
     valid=[r for r in rows if r.get("episode_status") == "success"]
     for c in REWARD_COMPONENTS:
@@ -65,7 +66,12 @@ def classify_and_estimate(rows, cfg):
         elif pos: status="observed_positive"
         elif valid: status="instrumented_zero"
         else: status="unexercised"
+        declaration=structural.get(c)
+        if declaration and pos:
+            raise RewardScaleEstimationError(f"structural-zero component {c} contained positive samples")
         override=overrides.get(c)
+        if declaration:
+            override={"value": declaration.get("positive_denominator"), "reason": declaration.get("reason")}
         selected=None; reason=None; oval=None
         if status == "observed_positive": selected=percentile_scale(vals, method=est.get("method","percentile"), percentile=est.get("percentile",95), minimum=cfg.get("minimum_positive_scale",{}).get(c,0.0) if isinstance(cfg.get("minimum_positive_scale"),dict) else 0.0)
         elif status == "instrumented_zero" and override:
@@ -77,7 +83,7 @@ def classify_and_estimate(rows, cfg):
         arr=np.asarray(vals, dtype=float) if vals else np.asarray([], dtype=float)
         def q(p): return float(np.percentile(arr, p)) if arr.size else None
         rec={"component":c,"status":status,"episode_count":len(rows),"valid_count":len(valid),"missing_count":missing,"zero_count":len(zeros),"positive_count":len(pos),"minimum":float(np.min(arr)) if arr.size else None,"maximum":float(np.max(arr)) if arr.size else None,"mean":float(np.mean(arr)) if arr.size else None,"standard_deviation":float(np.std(arr)) if arr.size else None,"median":q(50),"p75":q(75),"p90":q(90),"p95":q(95),"p99":q(99),"estimator":est.get("method","percentile"),"selected_scale":selected,"minimum_override_value":oval,"minimum_override_reason":reason}
-        stats.append(rec); components[c]={"scale":selected,"status":status,"positive_count":len(pos),"minimum_override":({"value":oval,"reason":reason} if oval is not None else None)}
+        stats.append(rec); components[c]={"scale":selected,"denominator":selected,"status":("structural_zero_fallback" if declaration and status == "instrumented_zero" else status),"positive_count":len(pos),"structural_zero":bool(declaration),"structural_zero_reason":reason if declaration else None,"denominator_source":"explicit_structural_fallback" if declaration else "empirical_or_minimum_override","minimum_override":({"value":oval,"reason":reason} if oval is not None else None)}
         if selected is not None: scales[c]=selected
     return components, scales, stats
 
@@ -189,7 +195,7 @@ def run_estimation(scenario_bank, config, output, *, run_classification=None, sc
     artifact={"artifact_type":"reward_reference_scales","artifact_version":1,"run_classification":classification,"validation_status":"passed" if passed else "blocked","component_order":list(REWARD_COMPONENTS),"training_scenario_bank_path":str(scenario_bank),"training_scenario_bank_hash":bank.bank_hash,"training_scenario_count":len(bank.scenarios),"reference_policy_suite":[p.metadata() for p in pols],"estimator":cfg.get("estimator", {"method":"percentile","percentile":95}),"components":components,"scales":scales,"source_episode_file_hash":sha256_file(ep_jsonl),"statistics_file_hash":sha256_file(stat_json),"resolved_config_hash":resolved_hash,"code_commit":_git(),"creation_timestamp":time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     artifact["artifact_hash"]=canonical_payload_hash(artifact)
     out.write_text(json.dumps(artifact, indent=2, sort_keys=True)+"\n")
-    (outdir/"reward_scale_manifest.json").write_text(json.dumps({"artifact":out.name,"artifact_hash":artifact["artifact_hash"],"validation_status":artifact["validation_status"],"runtime_files":[ep_csv.name,ep_jsonl.name,stat_csv.name,stat_json.name,"reward_scale_failures.json"]}, indent=2, sort_keys=True))
+    (outdir/"reward_scale_manifest.json").write_text(json.dumps({"artifact":out.name,"artifact_hash":artifact["artifact_hash"],"file_sha256":sha256_file(out),"validation_status":artifact["validation_status"],"runtime_files":[ep_csv.name,ep_jsonl.name,stat_csv.name,stat_json.name,"reward_scale_failures.json"]}, indent=2, sort_keys=True))
     load_reward_scale_artifact(out, expected_hash=artifact["artifact_hash"], expected_training_bank_hash=bank.bank_hash, formal_mode=(classification=="formal"))
     return artifact
 

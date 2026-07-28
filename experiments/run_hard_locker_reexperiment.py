@@ -161,24 +161,40 @@ def validate_reward_scale(path: Path, train_bank_hash: str) -> dict[str, Any]:
     denominator = locker.get("denominator") or locker.get("reference_scale") or locker.get("scale")
     if locker.get("structural_zero") is not True or not isinstance(denominator, (int, float)) or denominator <= 0:
         raise ValueError("locker_overflow must be structural zero with an explicit positive denominator")
-    return {"path": str(path), "hash": sha256_file(path), "training_bank_hash": train_bank_hash,
+    from envs.reward_scales import canonical_payload_hash
+    canonical = canonical_payload_hash(data)
+    if data.get("artifact_hash") != canonical:
+        raise ValueError("reward scale canonical artifact_hash mismatch")
+    return {"path": str(path), "artifact_hash": canonical, "hash": canonical, "file_sha256": sha256_file(path), "training_bank_hash": train_bank_hash,
             "validation_status": data["validation_status"]}
 
 
-def materialize_initial_configs(root: Path) -> Path:
+def materialize_initial_configs(root: Path, device: str = "cuda") -> Path:
     """Materialize only the reward-model config, whose inputs are already known."""
     destination = root / "resolved_configs" / "train_reward_assignment.yaml"
     config = _load_data(Path("configs/paper/train_reward_assignment.yaml"))
+    config.setdefault("training", {}).update({"device": device, "require_cuda": True})
     _dump_yaml(destination, config)
     return destination
 
+def gpu_readiness(path: Path, requested: str) -> dict[str, Any]:
+    import torch
+    from training.device import resolve_torch_device
+    device=resolve_torch_device(requested, require_cuda=True)
+    index=device.index; props=torch.cuda.get_device_properties(device)
+    a=torch.ones((8,8),device=device); smoke=float((a@a).sum().item())
+    record={"marker":"FORMAL_CUDA_READY","requested_device":requested,"resolved_device":str(device),"torch_version":torch.__version__,"cuda_runtime_version":torch.version.cuda,"cuda_available":torch.cuda.is_available(),"cuda_device_count":torch.cuda.device_count(),"selected_cuda_device_index":index,"cuda_device_name":props.name,"compute_capability":list(torch.cuda.get_device_capability(device)),"total_device_memory":props.total_memory,"tensor_smoke_result":smoke}
+    path.write_text(json.dumps(record,indent=2,sort_keys=True)+"\n"); return record
 
-def resolve_training_configs(root: Path, banks: dict[str, dict[str, Any]], reward_model: dict[str, Any], scale: dict[str, Any]) -> tuple[Path, Path]:
+
+def resolve_training_configs(root: Path, banks: dict[str, dict[str, Any]], reward_model: dict[str, Any], scale: dict[str, Any], device: str = "cuda") -> tuple[Path, Path]:
     resolved = root / "resolved_configs"
     outputs = []
     for method, template in (("mappo_env", "train_mappo_env.yaml"), ("mappo_rlaif_assignment", "train_mappo_rlaif_assignment.yaml")):
         cfg = _load_data(Path("configs/paper") / template)
+        cfg.setdefault("training", {}).update({"device":device,"require_cuda":True})
         cfg["scenario_bank"] = {"manifest": banks["train"]["path"], "bank_hash": banks["train"]["bank_hash"]}
+        cfg.setdefault("env", {}).update({"scenario_bank_manifest": banks["train"]["path"], "expected_split":"train", "expected_bank_hash":banks["train"]["bank_hash"], "scenario_sampling_mode":"shuffled_cycle"})
         cfg["reward"]["scale_artifact"] = scale["path"]
         cfg["reward"]["scale_artifact_hash"] = scale["hash"]
         cfg["reward"]["expected_training_scenario_bank_hash"] = banks["train"]["bank_hash"]
@@ -192,6 +208,9 @@ def resolve_training_configs(root: Path, banks: dict[str, dict[str, Any]], rewar
                 raise ValueError("RLAIF-MAPPO must be assignment-only with fallback disabled")
             rlaif["agents"]["assignment"]["checkpoint"] = reward_model["path"]
             rlaif["agents"]["assignment"]["checkpoint_hash"] = reward_model["hash"]
+            rlaif["reward_checkpoint_paths"] = {"assignment": reward_model["path"]}
+            rlaif["reward_checkpoint_hashes"] = {"assignment": reward_model["hash"]}
+            rlaif["reward_model_schema_versions"] = {"assignment": SCHEMA_VERSION}
             if any(v.get("enabled", False) for k, v in rlaif["agents"].items() if k != "assignment"):
                 raise ValueError("non-assignment learned rewards must be disabled")
         assert_no_placeholders(cfg, label=template)
@@ -213,7 +232,7 @@ def validate_policy_checkpoint(path: Path, *, method: str, seed: int, commit: st
         raise ValueError("policy checkpoint seed mismatch")
     if ck.get("training_scenario_bank_hash") != banks["train"]["bank_hash"]:
         raise ValueError("policy checkpoint scenario lineage mismatch")
-    if ck.get("reward_scale_hash") != scale["hash"]:
+    if ck.get("reward_scale_artifact_hash") != scale["hash"]:
         raise ValueError("policy checkpoint reward-scale lineage mismatch")
     if method == "mappo_rlaif_assignment":
         hashes = ck.get("reward_checkpoint_hashes", {})
@@ -232,17 +251,11 @@ def discover_policy_checkpoints(root: Path, commit: str, banks: dict[str, dict[s
         found[method] = {}
         for seed in (1, 2, 3):
             run = root / method / f"seed_{seed}"
-            manifests = list(run.glob("**/*manifest*.json"))
-            candidates: list[Path] = []
-            for manifest in manifests:
-                data = json.loads(manifest.read_text())
-                raw = data.get("checkpoint_path") or data.get("final_checkpoint")
-                if raw: candidates.append(Path(raw))
-            if not candidates:
-                candidates = list(run.glob("**/*.pt"))
-            if len(candidates) != 1:
-                raise ValueError(f"expected exactly one final checkpoint for {method} seed {seed}, found {len(candidates)}")
-            found[method][seed] = validate_policy_checkpoint(candidates[0], method=method, seed=seed,
+            manifest = run / "training_run_manifest.json"
+            if not manifest.is_file(): raise ValueError(f"formal training manifest missing: {manifest}")
+            data = json.loads(manifest.read_text()); candidate=Path(data.get("checkpoint_path", ""))
+            if data.get("status") != "complete" or not candidate.is_file() or data.get("checkpoint_file_sha256") != sha256_file(candidate): raise ValueError(f"invalid training manifest: {manifest}")
+            found[method][seed] = validate_policy_checkpoint(candidate, method=method, seed=seed,
                 commit=commit, banks=banks, reward_model=reward_model, scale=scale)
     return found
 
@@ -251,6 +264,9 @@ def resolve_benchmark_config(root: Path, banks: dict[str, dict[str, Any]], rewar
     cfg = _load_data(Path("configs/paper/benchmark.yaml"))
     cfg["scenario_bank"]["manifest"] = banks["test"]["path"]
     cfg["scenario_bank"]["expected_bank_hash"] = banks["test"]["bank_hash"]
+    first_checkpoint = _load_checkpoint(Path(checkpoints["mappo_env"][1]["path"]))
+    cfg["reward_scale_artifact_path"] = first_checkpoint.get("reward_scale_artifact_path")
+    cfg["reward_scale_artifact_hash"] = first_checkpoint.get("reward_scale_artifact_hash")
     cfg["methods"] = [m for m in cfg["methods"] if m.get("method_id") in checkpoints]
     for method in cfg["methods"]:
         mid = method["method_id"]
@@ -304,7 +320,7 @@ class PhaseSpec:
     capture: Path | None = None
 
 
-def build_plan(*, output_root: Path, commit: str) -> list[PhaseSpec]:
+def build_plan(*, output_root: Path, commit: str, train_manifest: Path | None = None, device: str = "cuda") -> list[PhaseSpec]:
     py, root = sys.executable, output_root
     pref_root = root / "preferences"; pref_file = assignment_preference_path(pref_root)
     reward = root / "reward_models" / "reward_assignment.pt"
@@ -313,13 +329,13 @@ def build_plan(*, output_root: Path, commit: str) -> list[PhaseSpec]:
     env_roots = tuple(root / "mappo_env" / f"seed_{seed}" for seed in (1,2,3))
     rlaif_roots = tuple(root / "mappo_rlaif_assignment" / f"seed_{seed}" for seed in (1,2,3))
     return [
-      PhaseSpec(0,"initial_artifact_resolution",tuple(),(resolved/"train_reward_assignment.yaml",)),
+      PhaseSpec(0,"initial_artifact_resolution",tuple(),(resolved/"train_reward_assignment.yaml",root/"gpu_readiness.json")),
       PhaseSpec(1,"verification",((py,"-m","pytest","-q","tests/test_hard_locker_capacity.py"),), (root/"verification.json",)),
       PhaseSpec(2,"assignment_preferences_and_reward_model",(
         (py,"-m","experiments.generate_formal_multiagent_preferences","--config","configs/paper/rlaif_preference_generation.yaml","--output-root",str(pref_root),"--agents","assignment","--cache-dir",str(pref_root/"evaluator_cache")),
-        (py,"-m","experiments.train_multi_agent_reward_models","--preferences",str(pref_file),"--config",str(resolved/"train_reward_assignment.yaml"),"--agent","assignment","--output",str(reward))),
+        (py,"-m","experiments.train_multi_agent_reward_models","--preferences",str(pref_file),"--config",str(resolved/"train_reward_assignment.yaml"),"--agent","assignment","--output",str(reward),"--device",device)),
         (pref_file,pref_root/"preference_manifest.json",reward), validation="assignment_preference_and_reward"),
-      PhaseSpec(3,"reward_scales_and_training_config_resolution",((py,"-m","experiments.estimate_reward_reference_scales","--scenario-bank","results/formal/scenario_banks/train/manifest.json","--config","configs/paper/reward_scale_estimation.yaml","--output",str(scale)),), (scale,resolved/"train_mappo_env.yaml",resolved/"train_mappo_rlaif_assignment.yaml")),
+      PhaseSpec(3,"reward_scales_and_training_config_resolution",((py,"-m","experiments.estimate_reward_reference_scales","--scenario-bank",str(train_manifest or _scenario_banks()["train"]),"--config","configs/paper/reward_scale_estimation.yaml","--output",str(scale)),), (scale,resolved/"train_mappo_env.yaml",resolved/"train_mappo_rlaif_assignment.yaml"), inputs=(reward,pref_file)),
       PhaseSpec(4,"placeholder_free_pretraining_gate",tuple(),(resolved/"train_mappo_env.yaml",resolved/"train_mappo_rlaif_assignment.yaml")),
       PhaseSpec(5,"mappo_env_training",tuple((py,"-m","experiments.train_mappo_async","--config",str(resolved/"train_mappo_env.yaml"),"--seed",str(seed),"--output-root",str(env_roots[seed-1])) for seed in (1,2,3)),env_roots),
       PhaseSpec(6,"rlaif_mappo_training",tuple((py,"-m","experiments.train_mappo_async","--config",str(resolved/"train_mappo_rlaif_assignment.yaml"),"--seed",str(seed),"--output-root",str(rlaif_roots[seed-1])) for seed in (1,2,3)),rlaif_roots),
@@ -387,7 +403,8 @@ def _scenario_banks() -> dict[str, Path]:
 
 def _run_execute_phase(phase: PhaseSpec, root: Path, commit: str, digest: str, context: dict[str,Any]) -> None:
     if phase.phase == 0:
-        materialize_initial_configs(root)
+        materialize_initial_configs(root, context["device"])
+        gpu_readiness(root/"gpu_readiness.json", context["device"])
     elif phase.phase == 1:
         subprocess.run(phase.commands[0],check=True)
         (root/"verification.json").write_text(json.dumps({"status":"pass"})+"\n")
@@ -399,7 +416,7 @@ def _run_execute_phase(phase: PhaseSpec, root: Path, commit: str, digest: str, c
     elif phase.phase == 3:
         subprocess.run(phase.commands[0],check=True)
         context["scale"] = validate_reward_scale(root/"reward_scales"/"final_reward_reference_scales.json",context["banks"]["train"]["bank_hash"])
-        resolve_training_configs(root,context["banks"],context["reward_model"],context["scale"])
+        resolve_training_configs(root,context["banks"],context["reward_model"],context["scale"],context["device"])
     elif phase.phase == 4:
         for path in phase.outputs: assert_no_placeholders(_load_data(path),label=str(path))
     elif phase.phase in (5,6,8,9):
@@ -411,33 +428,47 @@ def _run_execute_phase(phase: PhaseSpec, root: Path, commit: str, digest: str, c
         for command in phase.commands: subprocess.run(command,check=True)
     write_phase_marker(root/"phase_manifests"/f"phase_{phase.phase}.json",phase,commit=commit,plan_digest=digest)
 
+def restore_context_through_phase(root: Path, phase: int, context: dict[str,Any], commit: str) -> None:
+    """Deterministically reload validated artifacts when resume skips phases."""
+    if phase >= 2:
+        context["preference"]=validate_assignment_preferences(root/"preferences")
+        context["reward_model"]=validate_reward_checkpoint(root/"reward_models"/"reward_assignment.pt",context["preference"])
+    if phase >= 3:
+        context["scale"]=validate_reward_scale(root/"reward_scales"/"final_reward_reference_scales.json",context["banks"]["train"]["bank_hash"])
+        for name in ("train_mappo_env.yaml","train_mappo_rlaif_assignment.yaml"):
+            assert_no_placeholders(_load_data(root/"resolved_configs"/name),label=name)
+    if phase >= 6:
+        context["checkpoints"]=discover_policy_checkpoints(root,commit,context["banks"],context["reward_model"],context["scale"])
+
 
 def main(argv: Sequence[str] | None = None) -> None:
-    parser=argparse.ArgumentParser(); parser.add_argument("--through",type=int,choices=range(0,10),default=1); parser.add_argument("--resume",action="store_true"); parser.add_argument("--execute",action="store_true")
+    parser=argparse.ArgumentParser(); parser.add_argument("--through",type=int,choices=range(0,10),default=1); parser.add_argument("--resume",action="store_true"); parser.add_argument("--execute",action="store_true"); parser.add_argument("--device",default="cuda")
     args=parser.parse_args(argv)
-    if _git("status","--porcelain"): raise SystemExit("hard-locker rerun requires a clean repository")
+    if args.execute and _git("status","--porcelain"): raise SystemExit("hard-locker rerun requires a clean repository")
     commit=_git("rev-parse","HEAD"); root=Path("results/formal")/f"hard_locker_rerun_{commit[:12]}"
-    plan=build_plan(output_root=root,commit=commit); validate_plan(plan,root); digest=plan_hash(plan)
+    bank_paths=_scenario_banks(); plan=build_plan(output_root=root,commit=commit,train_manifest=bank_paths["train"],device=args.device); validate_plan(plan,root); digest=plan_hash(plan)
     provenance={"commit":commit,"plan_hash":digest,"python":sys.version,"platform":platform.platform(),"selected_agents":["assignment"],"reward_model_lineage":"regenerate: assignment schema v4"}
     selected=[phase for phase in plan if phase.phase<=args.through]
     pref=assignment_preference_path(root/"preferences")
     summary={"output_root":str(root),"provenance":provenance,"plan":[asdict(p) for p in selected],"training_jobs":6,"benchmark_rows":600,
-      "assignment_preference_jsonl":str(pref),"reward_model_checkpoint":str(root/"reward_models"/"reward_assignment.pt"),"reward_scale":str(root/"reward_scales"/"final_reward_reference_scales.json"),
+      "requested_device":args.device,"resolved_device_policy":args.device,"gpu_readiness_output":str(root/"gpu_readiness.json"),"assignment_preference_jsonl":str(pref),"reward_model_checkpoint":str(root/"reward_models"/"reward_assignment.pt"),"reward_scale_artifact":str(root/"reward_scales"/"final_reward_reference_scales.json"),
       "policy_checkpoint_roots":[str(root/m/f"seed_{s}") for m in ("mappo_env","mappo_rlaif_assignment") for s in (1,2,3)],"benchmark_output":str(root/"benchmark"/"episode_results.jsonl"),"paired_analysis_output":str(root/"paired_analysis"),
-      "markers":["HARD_LOCKER_RERUN_PLAN_ISOLATED","ASSIGNMENT_PREFERENCE_PATH_VALID","ARTIFACT_AWARE_CONFIG_RESOLUTION_ENABLED","PAIRED_STATISTICS_PHASE_CONFIGURED"]}
+      "markers":["HARD_LOCKER_RERUN_PLAN_ISOLATED","ASSIGNMENT_PREFERENCE_PATH_VALID","ARTIFACT_AWARE_CONFIG_RESOLUTION_ENABLED","PAIRED_STATISTICS_PHASE_CONFIGURED","GPU_BACKED_FORMAL_TRAINING_CONFIGURED"]}
     print(json.dumps(summary,indent=2,default=str))
     if not args.execute: return
-    bank_paths=_scenario_banks(); banks={split:validate_scenario_manifest(path,split) for split,path in bank_paths.items()}
+    banks={split:validate_scenario_manifest(path,split) for split,path in bank_paths.items()}
     if root.exists():
         if not args.resume: raise SystemExit(f"refusing to overwrite {root}; use --resume")
         stored=json.loads((root/"provenance.json").read_text())
         if stored != provenance: raise SystemExit("resume provenance (commit, plan, or selected-agent scope) does not match")
     else:
         root.mkdir(parents=True); (root/"provenance.json").write_text(json.dumps(provenance,indent=2)+"\n")
-    context: dict[str,Any]={"banks":banks}
+    context: dict[str,Any]={"banks":banks,"device":args.device}
     for phase in selected:
         marker=root/"phase_manifests"/f"phase_{phase.phase}.json"
-        if args.resume and marker_is_valid(marker,phase,commit=commit,plan_digest=digest): continue
+        if args.resume and marker_is_valid(marker,phase,commit=commit,plan_digest=digest):
+            restore_context_through_phase(root,phase.phase,context,commit)
+            continue
         _run_execute_phase(phase,root,commit,digest,context)
 
 if __name__=="__main__": main()

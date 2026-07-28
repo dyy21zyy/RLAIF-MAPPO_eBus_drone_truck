@@ -39,15 +39,18 @@ class RuntimeRewardScore:
 class RuntimeAgentRewardModel:
     """Load and score a canonical ``agent_reward_model`` checkpoint."""
 
-    def __init__(self, *, checkpoint_path: Path, checkpoint: dict[str, Any], model: torch.nn.Module, checkpoint_hash: str) -> None:
+    def __init__(self, *, checkpoint_path: Path, checkpoint: dict[str, Any], model: torch.nn.Module, checkpoint_hash: str, device: torch.device | str = "cpu") -> None:
         self.checkpoint_path = checkpoint_path
         self.checkpoint = checkpoint
-        self.model = model
+        self.device = torch.device(device)
+        self.model = model.to(self.device).eval()
         self.checkpoint_hash = checkpoint_hash
         self.agent_type = str(checkpoint["agent_type"])
         self.compatible_event_types = tuple(checkpoint["compatible_event_types"])
         self.state_feature_names = tuple(checkpoint["state_feature_names"])
         self.candidate_feature_names = tuple(checkpoint["candidate_feature_names"])
+        self._state_mean, self._state_std = self._normalizers("state_normalization_mean", "state_normalization_std")
+        self._candidate_mean, self._candidate_std = self._normalizers("candidate_normalization_mean", "candidate_normalization_std")
 
     @classmethod
     def from_checkpoint(
@@ -60,6 +63,7 @@ class RuntimeAgentRewardModel:
         expected_candidate_feature_names: Sequence[str] | None = None,
         expected_checkpoint_hash: str | None = None,
         formal_mode: bool,
+        device: torch.device | str = "cpu",
     ) -> "RuntimeAgentRewardModel":
         path = Path(checkpoint_path)
         digest = sha256_file(path)
@@ -75,7 +79,7 @@ class RuntimeAgentRewardModel:
             expected_candidate_feature_names=expected_candidate_feature_names,
             formal=formal_mode,
         )
-        return cls(checkpoint_path=path, checkpoint=ck, model=model, checkpoint_hash=digest)
+        return cls(checkpoint_path=path, checkpoint=ck, model=model, checkpoint_hash=digest, device=device)
 
     def _vector(self, name: str, values: Sequence[float], expected_dim: int) -> torch.Tensor:
         if len(values) != expected_dim:
@@ -83,14 +87,17 @@ class RuntimeAgentRewardModel:
         floats = [float(v) for v in values]
         if not all(math.isfinite(v) for v in floats):
             raise RewardCheckpointCompatibilityError(f"{name} contains nonfinite values")
-        return torch.tensor([floats], dtype=torch.float32)
+        return torch.tensor([floats], dtype=torch.float32, device=self.device)
 
-    def _norm(self, tensor: torch.Tensor, mean_key: str, std_key: str) -> torch.Tensor:
-        mean = torch.tensor([self.checkpoint[mean_key]], dtype=torch.float32)
+    def _normalizers(self, mean_key: str, std_key: str) -> tuple[torch.Tensor, torch.Tensor]:
         std_values = [float(x) for x in self.checkpoint[std_key]]
         if not all(math.isfinite(x) and x > 0 for x in std_values):
             raise RewardCheckpointCompatibilityError(f"{std_key} must be finite and positive")
-        std = torch.tensor([std_values], dtype=torch.float32)
+        return (torch.tensor([self.checkpoint[mean_key]], dtype=torch.float32, device=self.device),
+                torch.tensor([std_values], dtype=torch.float32, device=self.device))
+
+    def _norm(self, tensor: torch.Tensor, mean_key: str, std_key: str) -> torch.Tensor:
+        mean, std = ((self._state_mean, self._state_std) if mean_key.startswith("state_") else (self._candidate_mean, self._candidate_std))
         return (tensor - mean) / (std + EPSILON)
 
     def score(self, *, state_features: Sequence[float], candidate_features: Sequence[float], event_type: str) -> RuntimeRewardScore:
@@ -111,8 +118,8 @@ class RuntimeAgentRewardModel:
         cand = self._vector("candidate_features", candidate_features, int(self.checkpoint["candidate_feature_dim"]))
         state = self._norm(state, "state_normalization_mean", "state_normalization_std")
         cand = self._norm(cand, "candidate_normalization_mean", "candidate_normalization_std")
-        event_ids = torch.tensor([EVENT_NAME_TO_ID[event_type]], dtype=torch.long)
-        with torch.no_grad():
+        event_ids = torch.tensor([EVENT_NAME_TO_ID[event_type]], dtype=torch.long, device=self.device)
+        with torch.inference_mode():
             raw_tensor = self.model(state, event_ids, cand)
         raw = float(raw_tensor.reshape(-1)[0].item())
         mean = float(self.checkpoint["reward_output_training_mean"])

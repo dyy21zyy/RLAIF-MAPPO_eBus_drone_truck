@@ -7,6 +7,8 @@ project:
   seed: 1
 address: {}
 training:
+  device: cuda
+  require_cuda: true
   seed: 1
   training_seeds:
   - 1
