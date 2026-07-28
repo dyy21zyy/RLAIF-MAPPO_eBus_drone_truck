@@ -32,7 +32,7 @@ def encode_entity_critic_state(env: Any) -> list[float]:
     passenger_stats = _stats([getattr(q,"total_waiting",0.0) for q in queues])
     stations = list(getattr(env, "stations", {}).values())
     station_stats = []
-    station_stats += _stats([s.locker_load_kg / max(s.locker_capacity_kg,1.0) for s in stations])
+    station_stats += _stats([(s.locker_load_kg + getattr(s, "locker_reserved_kg", 0.0)) / max(s.locker_capacity_kg,1.0) for s in stations])
     station_stats += _stats([sum(d.status == "AVAILABLE" for d in getattr(s,"drone_states",[])) for s in stations])
     station_stats += _stats([sum(b.status == "FULL" for b in getattr(s,"battery_states",[])) for s in stations])
     station_stats += _stats([sum(b.status == "CHARGING" for b in getattr(s,"battery_states",[]))/max(getattr(s,"charging_slots",1),1) for s in stations])

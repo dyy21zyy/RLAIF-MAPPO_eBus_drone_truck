@@ -217,9 +217,9 @@ def build_assignment_features(env: Any, parcel: Any) -> list[float]:
             _drone_time(env, station_id, parcel.parcel_id)
             / max(float(env.config["network"]["max_drone_round_trip_min"]), 1.0),
             float(env._station_can_serve_by_drone(parcel, station_id)),
-            max(0.0, station.locker_capacity_kg - station.locker_load_kg)
+            max(0.0, station.locker_capacity_kg - station.locker_load_kg - station.locker_reserved_kg)
             / max(station.locker_capacity_kg, 1.0),
-            station.locker_load_kg / max(station.locker_capacity_kg, 1.0),
+            (station.locker_load_kg + station.locker_reserved_kg) / max(station.locker_capacity_kg, 1.0),
             sum(value <= env.now_min for value in station.drone_available_min) / max(station.drones, 1),
             station.full_batteries / max(float(env.config["station"]["initial_full_batteries"]), 1.0),
             _station_power_margin(env, station) / max(station.power_capacity_kw, 1.0),
@@ -298,7 +298,7 @@ def build_candidate_action_features(env: Any, parcel: Any, action_id: int, feasi
         station_id = env.station_ids[station_index]
         station = env.stations[station_id]
         estimated_drone_time = _drone_time(env, station_id, parcel.parcel_id)
-        estimated_locker_load = station.locker_load_kg + parcel.weight_kg
+        estimated_locker_load = station.locker_load_kg + station.locker_reserved_kg + parcel.weight_kg
         estimated_power_margin = _station_power_margin(env, station)
         if not parcel.drone_feasible:
             reasons.append("parcel_not_drone_feasible")
@@ -521,7 +521,7 @@ def build_station_decision_surface(env: Any, station_id: str) -> DecisionSurface
                 "charge_start_count": float(len(cand.battery_ids_to_start_charging)),
                 "estimated_time_norm": (max(cand.estimated_return_times) if cand.estimated_return_times else env.now_min) / horizon,
                 "estimated_lateness_norm": (sum(cand.estimated_parcel_lateness) / max(len(cand.estimated_parcel_lateness), 1)) / horizon,
-                "capacity_after_norm": max(0.0, station.locker_capacity_kg - station.locker_load_kg) / max(station.locker_capacity_kg, 1.0),
+                "capacity_after_norm": max(0.0, station.locker_capacity_kg - station.locker_load_kg - station.locker_reserved_kg) / max(station.locker_capacity_kg, 1.0),
                 "resource_margin_norm": cand.power_margin / max(station.power_capacity_kw, 1.0),
                 "full_batteries_remaining": float(cand.full_batteries_remaining),
                 "depleted_batteries_remaining": float(cand.depleted_batteries_remaining),
@@ -558,7 +558,7 @@ def build_station_decision_surface(env: Any, station_id: str) -> DecisionSurface
         features=[
             env.now_min / horizon, len(waiting), min(deadlines) if deadlines else 0.0,
             available_drones, busy_drones, full, depleted, charging, max(0, slots - charging),
-            station.locker_load_kg, station.locker_capacity_kg, active_bus,
+            station.locker_load_kg + station.locker_reserved_kg, station.locker_capacity_kg, active_bus,
             float(getattr(station, "base_load_kw", env.config["station"].get("base_load_kw", 0.0))),
             station.power_capacity_kw - load, future_returns, future_completions,
         ],
@@ -590,7 +590,7 @@ def build_system_summary(env: Any, parcel: Any) -> dict[str, Any]:
         ),
         "average_bus_freight_remaining_capacity": fmean(remaining_capacities) if remaining_capacities else 0.0,
         "global_locker_occupancy_mean": fmean(
-            station.locker_load_kg / max(station.locker_capacity_kg, 1.0) for station in stations
+            (station.locker_load_kg + station.locker_reserved_kg) / max(station.locker_capacity_kg, 1.0) for station in stations
         ),
         "global_idle_drones": sum(sum(value <= env.now_min for value in station.drone_available_min) for station in stations),
         "global_full_batteries": sum(station.full_batteries for station in stations),
@@ -611,8 +611,8 @@ def build_station_states(env: Any, parcel: Any) -> list[dict[str, Any]]:
             "distance_customer_to_station": distance,
             "drone_round_trip_time": _drone_time(env, station_id, parcel.parcel_id),
             "drone_feasible_from_station": env._station_can_serve_by_drone(parcel, station_id),
-            "locker_remaining_capacity": station.locker_capacity_kg - station.locker_load_kg,
-            "locker_occupancy_ratio": station.locker_load_kg / max(station.locker_capacity_kg, 1.0),
+            "locker_remaining_capacity": station.locker_capacity_kg - station.locker_load_kg - station.locker_reserved_kg,
+            "locker_occupancy_ratio": (station.locker_load_kg + station.locker_reserved_kg) / max(station.locker_capacity_kg, 1.0),
             "idle_drones": sum(value <= env.now_min for value in station.drone_available_min),
             "full_batteries": station.full_batteries,
             "station_power_margin": _station_power_margin(env, station),

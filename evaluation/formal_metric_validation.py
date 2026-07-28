@@ -8,7 +8,7 @@ REQUIRED_FORMAL_METRICS = (
  'fulfillment_rate','on_time_over_all_released','on_time_over_delivered','urgent_on_time_fulfillment','average_lateness','maximum_lateness','undelivered_parcels',
  'truck_distance','truck_weight_utilization','truck_volume_utilization','parcels_per_truck_route','bus_freight_utilization','bus_propulsion_energy','bus_charging_energy','minimum_bus_soc','battery_safety_violations',
  'waiting_passenger_minutes','onboard_additional_delay_passenger_minutes','bus_operating_delay','drone_missions','full_battery_availability','depleted_battery_inventory','charging_slot_utilization','locker_occupancy',
- 'station_peak_load','overload_kw_min','overload_duration','environment_reward','rlaif_total_weighted','combined_reward_total','runtime')
+ 'station_peak_load','overload_kw_min','overload_duration','locker_overflow_amount','locker_overflow_duration','total_locker_reserved_kg','environment_reward','rlaif_total_weighted','combined_reward_total','runtime')
 RLAIF_FIELDS=tuple(f'rlaif_{a}_{kind}' for a in ('assignment','truck','bus','station') for kind in ('raw','weighted'))
 
 @dataclass(frozen=True)
@@ -53,5 +53,8 @@ def validate_formal_metrics(row:dict[str,Any], *, fail_on_missing:bool=True)->di
     if abs(total-float(out['rlaif_total_weighted']['value']))>1e-9: raise FormalMetricReconciliationError('RLAIF total does not reconcile')
     combined=float(out['environment_reward']['value'])+float(out['rlaif_total_weighted']['value'])
     if abs(combined-float(out['combined_reward_total']['value']))>1e-9: raise FormalMetricReconciliationError('combined reward does not reconcile')
+    for name in ('locker_overflow_amount','locker_overflow_duration','total_locker_reserved_kg'):
+        if float(out[name]['value']) > 1e-9:
+            raise FormalMetricValidationError(f'hard locker capacity gate failed: {name}')
     out['metric_source_map']={k:v['source'] for k,v in out.items()}
     return out

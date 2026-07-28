@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final
 
-OBSERVATION_SCHEMA_VERSION: Final[int] = 3
-CANDIDATE_SCHEMA_VERSION: Final[int] = 3
+OBSERVATION_SCHEMA_VERSION: Final[int] = 4
+CANDIDATE_SCHEMA_VERSION: Final[int] = 4
 EVENT_SCHEMA_VERSION: Final[int] = 2
 CHECKPOINT_SCHEMA_VERSION: Final[int] = 4
 AGENT_TYPES: Final[tuple[str,...]] = ("assignment","truck","bus","station")

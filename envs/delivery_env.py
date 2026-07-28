@@ -110,6 +110,7 @@ class StationState:
     battery_power_kw: float
     battery_charge_duration_min: float
     locker_load_kg: float = 0.0
+    locker_reserved_kg: float = 0.0
     active_bus_charges: list[float] = field(default_factory=list)
     active_battery_charges: list[tuple[float, float]] = field(default_factory=list)
     drone_available_min: list[float] = field(default_factory=list)
@@ -118,6 +119,13 @@ class StationState:
     battery_states: list[RuntimeBatteryState] = field(default_factory=list)
     depleted_batteries: int = 0
     charging_slots: int = 6
+
+
+@dataclass(frozen=True)
+class LockerReservation:
+    parcel_id: str
+    station_id: str
+    weight_kg: float
 
 
 @dataclass
@@ -379,6 +387,7 @@ class DynamicDeliveryEnv:
         self.passenger_onboard_delay_minutes = 0.0
         self.last_passenger_stop_result = None
         self.waiting_station_parcels: dict[str, list[str]] = {}
+        self.inbound_locker_reservations: dict[str, LockerReservation] = {}
         self.reward_total = 0.0
         self.reward_ledger = RewardLedger()
         self.current_transition_id = None
@@ -708,11 +717,87 @@ class DynamicDeliveryEnv:
         truck.route_history.append(route)
         parcel.truck_id = truck.truck_id
 
+    def _locker_available_capacity_kg(self, station_id: str) -> float:
+        if station_id not in self.stations:
+            raise KeyError(f"unknown station: {station_id}")
+        station = self.stations[station_id]
+        values = (station.locker_capacity_kg, station.locker_load_kg, station.locker_reserved_kg)
+        if not all(np.isfinite(value) for value in values) or any(value < -EPSILON for value in values):
+            raise RuntimeError(f"corrupted locker state at station {station_id}")
+        if station.locker_load_kg + station.locker_reserved_kg > station.locker_capacity_kg + EPSILON:
+            raise RuntimeError(f"locker capacity already exceeded at station {station_id}")
+        return station.locker_capacity_kg - station.locker_load_kg - station.locker_reserved_kg
+
+    def _reserve_locker_capacity(self, parcel_id: str, station_id: str) -> bool:
+        if parcel_id not in self.parcels:
+            raise KeyError(f"unknown parcel: {parcel_id}")
+        if station_id not in self.stations:
+            raise KeyError(f"unknown station: {station_id}")
+        if parcel_id in self.inbound_locker_reservations:
+            existing = self.inbound_locker_reservations[parcel_id]
+            kind = "duplicate" if existing.station_id == station_id else "conflicting"
+            raise RuntimeError(f"{kind} locker reservation for parcel {parcel_id}")
+        weight = self.parcels[parcel_id].weight_kg
+        if not np.isfinite(weight) or weight < 0.0:
+            raise ValueError(f"invalid parcel weight for locker reservation: {parcel_id}")
+        if self._locker_available_capacity_kg(station_id) + EPSILON < weight:
+            return False
+        station = self.stations[station_id]
+        station.locker_reserved_kg += weight
+        self.inbound_locker_reservations[parcel_id] = LockerReservation(parcel_id, station_id, weight)
+        return True
+
+    def _consume_locker_reservation(self, parcel_id: str, station_id: str) -> None:
+        reservation = self.inbound_locker_reservations.get(parcel_id)
+        if reservation is None:
+            raise RuntimeError(f"station arrival without locker reservation: {parcel_id}")
+        parcel = self.parcels.get(parcel_id)
+        if reservation.station_id != station_id:
+            raise RuntimeError(f"locker reservation station mismatch for {parcel_id}")
+        if parcel is None or abs(reservation.weight_kg - parcel.weight_kg) > EPSILON:
+            raise RuntimeError(f"locker reservation weight mismatch for {parcel_id}")
+        station = self.stations[station_id]
+        new_reserved = station.locker_reserved_kg - reservation.weight_kg
+        new_load = station.locker_load_kg + reservation.weight_kg
+        if new_reserved < -EPSILON or new_load > station.locker_capacity_kg + EPSILON:
+            raise RuntimeError(f"corrupted locker reservation consumption for {parcel_id}")
+        station.locker_reserved_kg = new_reserved
+        station.locker_load_kg = new_load
+        del self.inbound_locker_reservations[parcel_id]
+
+    def _cancel_locker_reservation(self, parcel_id: str, *, reason: str) -> bool:
+        reservation = self.inbound_locker_reservations.get(parcel_id)
+        if reservation is None:
+            return False
+        station = self.stations[reservation.station_id]
+        remaining = station.locker_reserved_kg - reservation.weight_kg
+        if remaining < -EPSILON:
+            raise RuntimeError(f"negative locker reservation after cancellation: {parcel_id}/{reason}")
+        station.locker_reserved_kg = remaining
+        del self.inbound_locker_reservations[parcel_id]
+        return True
+
+    def _release_locker_occupancy(self, parcel_id: str, station_id: str) -> None:
+        if parcel_id not in self.parcels or station_id not in self.stations:
+            raise KeyError(f"unknown locker occupancy: {parcel_id}/{station_id}")
+        parcel, station = self.parcels[parcel_id], self.stations[station_id]
+        if parcel.status != "WAITING_DRONE" or parcel.station_id != station_id:
+            raise RuntimeError(f"parcel is not physically waiting at station: {parcel_id}/{station_id}")
+        remaining = station.locker_load_kg - parcel.weight_kg
+        if remaining < -EPSILON:
+            raise RuntimeError(f"locker occupancy underflow: {parcel_id}/{station_id}")
+        station.locker_load_kg = remaining
+
+    def _fail_parcel(self, parcel_id: str, *, reason: str) -> None:
+        self._cancel_locker_reservation(parcel_id, reason=reason)
+        self.parcels[parcel_id].status = "FAILED"
+
     def _apply_assignment_decision(self, parcel_id: str, action: int) -> float:
         """Convert assignment choices into truck tasks for four-agent control."""
         parcel = self.parcels[parcel_id]
         parcel.action_id = action
         if action == 0:
+            self._cancel_locker_reservation(parcel_id, reason="reassigned_to_td")
             parcel.mode = "TD"
             depot = self.truck_location_index["depot_01"]
             customer = self.truck_location_index[parcel_id]
@@ -745,7 +830,10 @@ class DynamicDeliveryEnv:
                 min(parcel.deadline_min, self.horizon_min),
             )
             if trip is None:
-                parcel.status = "FAILED"
+                self._fail_parcel(parcel_id, reason="no_feasible_freight_trip")
+                return self._charge_cost("infeasible_action", 1.0)
+            if not self._reserve_locker_capacity(parcel_id, station_id):
+                self.infeasible_action_corrections += 1
                 return self._charge_cost("infeasible_action", 1.0)
             trip_id, _arrival = trip
             rows = self.trip_stop_times[trip_id]
@@ -774,6 +862,9 @@ class DynamicDeliveryEnv:
 
         parcel.mode = "TLD"
         station_id = self.station_ids[station_offset - len(self.station_ids)]
+        if not self._reserve_locker_capacity(parcel_id, station_id):
+            self.infeasible_action_corrections += 1
+            return self._charge_cost("infeasible_action", 1.0)
         parcel.status, parcel.station_id = "WAITING_TRUCK", station_id
         depot = self.truck_location_index["depot_01"]
         station = self.truck_location_index[station_id]
@@ -986,6 +1077,8 @@ class DynamicDeliveryEnv:
                 self.peak_station_load_kw = max(self.peak_station_load_kw, station_load_kw)
                 overload_kw = max(0.0, station_load_kw - station.power_capacity_kw)
                 overflow_kg = max(0.0, station.locker_load_kg - station.locker_capacity_kg)
+                if overflow_kg > EPSILON:
+                    raise RuntimeError(f"hard locker capacity exceeded at {station.station_id}")
                 power_amount += overload_kw * duration
                 locker_amount += overflow_kg * duration
                 if overload_kw > EPSILON:
@@ -1026,6 +1119,7 @@ class DynamicDeliveryEnv:
             mask.append(
                 has_capable_truck
                 and drone_feasible
+                and self._locker_available_capacity_kg(station_id) + EPSILON >= parcel.weight_kg
                 and self._next_freight_trip(
                     self.now_min, station_id, parcel.weight_kg, latest_arrival
                 ) is not None
@@ -1041,7 +1135,7 @@ class DynamicDeliveryEnv:
                 else float("inf")
             )
             locker_remaining = (
-                station_state.locker_capacity_kg - station_state.locker_load_kg
+                self._locker_available_capacity_kg(station_id)
                 if station_state is not None
                 else -1.0
             )
@@ -1386,8 +1480,8 @@ class DynamicDeliveryEnv:
 
     def _handle_station_arrival(self, parcel_id: str, station_id: str) -> float:
         parcel, station = self.parcels[parcel_id], self.stations[station_id]
+        self._consume_locker_reservation(parcel_id, station_id)
         parcel.status = "WAITING_DRONE"
-        station.locker_load_kg += parcel.weight_kg
         self.waiting_station_parcels.setdefault(station_id, []).append(parcel_id)
         self._push_station_operation(station_id, self.now_min)
         return 0.0
@@ -1430,7 +1524,7 @@ class DynamicDeliveryEnv:
         delivery, drone_return = self._drone_delivery_times(parcel_id, station_id, self.now_min)
         station.drone_available_min[drone_index] = drone_return
         self.drone_mission_count += 1
-        station.locker_load_kg = max(0.0, station.locker_load_kg - parcel.weight_kg)
+        self._release_locker_occupancy(parcel_id, station_id)
         if self.now_min <= self.horizon_min:
             self._push(drone_return, "drone_return", {"station_id": station_id, "drone_index": drone_index})
         parcel.status = "ONBOARD_DRONE"
@@ -1456,6 +1550,8 @@ class DynamicDeliveryEnv:
         if self.terminated:
             return 0.0
         self.now_min = min(max(self.now_min, self.horizon_min), self.horizon_min)
+        for parcel_id in list(self.inbound_locker_reservations):
+            self._cancel_locker_reservation(parcel_id, reason="episode_terminal")
         undelivered = sum(parcel.priority for parcel in self.parcels.values() if not is_delivered_status(parcel.status))
         self.terminated = True
         self.current_decision = None
@@ -1521,7 +1617,7 @@ class DynamicDeliveryEnv:
         awaiting = sum(parcel.status == "PENDING_ASSIGNMENT" for parcel in self.parcels.values())
         in_transit = sum(parcel.status == "ONBOARD_TRUCK" for parcel in self.parcels.values())
         battery_capacity = max(float(self.config["bus"]["bus_battery_kwh"]), 1.0)
-        locker_ratios = [station.locker_load_kg / max(station.locker_capacity_kg, 1.0) for station in self.stations.values()]
+        locker_ratios = [(station.locker_load_kg + station.locker_reserved_kg) / max(station.locker_capacity_kg, 1.0) for station in self.stations.values()]
         battery_counts = [station.full_batteries / max(float(self.config["station"]["initial_full_batteries"]), 1.0) for station in self.stations.values()]
         return [
             self.now_min / max(self.horizon_min, 1.0),
@@ -1562,6 +1658,9 @@ class DynamicDeliveryEnv:
             "power_overload_duration": self.accumulated_power_overload_duration,
             "locker_overflow_amount": self.accumulated_locker_overflow,
             "locker_overflow_duration": self.accumulated_locker_overflow_duration,
+            "total_locker_reserved_kg": sum(s.locker_reserved_kg for s in self.stations.values()),
+            "total_physical_locker_load_kg": sum(s.locker_load_kg for s in self.stations.values()),
+            "locker_reservation_count": len(self.inbound_locker_reservations),
             "truck_total_distance": sum(truck.total_distance for truck in self.trucks),
             "truck_dispatch_count": self.truck_dispatch_count,
             "average_weight_utilization": self.truck_weight_utilization_sum / max(self.truck_dispatch_count, 1),
@@ -1661,13 +1760,37 @@ class DynamicDeliveryEnv:
         if self.now_min < -EPSILON or self.now_min > self.horizon_min + EPSILON:
             errors.append("simulation time is outside the delivery horizon")
         for station in self.stations.values():
+            if not np.isfinite(station.locker_capacity_kg) or station.locker_capacity_kg < -EPSILON:
+                errors.append(f"{station.station_id} has invalid locker capacity")
+            if not np.isfinite(station.locker_load_kg):
+                errors.append(f"{station.station_id} physical locker load is not finite")
+            if not np.isfinite(station.locker_reserved_kg):
+                errors.append(f"{station.station_id} reserved locker load is not finite")
             if station.locker_load_kg < -EPSILON:
                 errors.append(f"{station.station_id} has negative locker load")
+            if station.locker_reserved_kg < -EPSILON:
+                errors.append(f"{station.station_id} has negative reserved locker load")
+            if station.locker_load_kg > station.locker_capacity_kg + EPSILON:
+                errors.append(f"{station.station_id} physical locker load exceeds capacity")
+            if station.locker_load_kg + station.locker_reserved_kg > station.locker_capacity_kg + EPSILON:
+                errors.append(f"{station.station_id} effective locker load exceeds capacity")
+            registered = sum(r.weight_kg for r in self.inbound_locker_reservations.values() if r.station_id == station.station_id)
+            if abs(registered - station.locker_reserved_kg) > EPSILON:
+                errors.append(f"{station.station_id} reservation registry total mismatch")
+            occupied = sum(p.weight_kg for p in self.parcels.values() if p.status == "WAITING_DRONE" and p.station_id == station.station_id)
+            if abs(occupied - station.locker_load_kg) > EPSILON:
+                errors.append(f"{station.station_id} occupied locker load mismatch")
             if station.full_batteries < 0:
                 errors.append(f"{station.station_id} has negative full-battery count")
             if len(station.drone_available_min) != station.drones:
                 errors.append(f"{station.station_id} drone availability vector has the wrong size")
         errors.extend(self.bus_invariant_warnings)
+        for parcel in self.parcels.values():
+            reserved = parcel.parcel_id in self.inbound_locker_reservations
+            if parcel.status == "WAITING_DRONE" and parcel.station_id not in self.stations:
+                errors.append(f"{parcel.parcel_id} waiting for drone without valid station")
+            if reserved and parcel.status in {"FAILED", "DELIVERED", "ONBOARD_DRONE", "WAITING_DRONE"}:
+                errors.append(f"{parcel.parcel_id} status {parcel.status} is inconsistent with inbound reservation")
         for trip_id, state in getattr(self, "runtime_trip_states", {}).items():
             if state.visited_stop_indices != sorted(state.visited_stop_indices):
                 errors.append(f"{state.physical_bus_id}/{trip_id} stop visits are not monotonic")

@@ -25,6 +25,9 @@ def collect_formal_metrics(env, *, runtime_seconds: float, transition_count: int
         "waiting_passenger_minutes": 0.0, "onboard_additional_delay_passenger_minutes": 0.0, "passengers_boarded": m.get("passenger_boardings_at_ordinary_stops", 0), "passengers_alighted": m.get("passenger_alightings_at_ordinary_stops", 0), "remaining_passenger_queues": 0,
         "drone_missions": m.get("drone_deliveries", 0), "full_battery_availability": 0, "depleted_battery_inventory": 0, "charging_batteries": 0, "charging_slot_utilization": 0.0, "locker_occupancy": 0.0,
         "station_peak_load": m.get("power_overload_amount", 0.0), "overload_kw_min": m.get("power_overload_amount", 0.0), "overload_duration": m.get("power_overload_duration", 0.0), "battery_charging_energy": 0.0,
+        "locker_overflow_amount": m.get("locker_overflow_amount", 0.0),
+        "locker_overflow_duration": m.get("locker_overflow_duration", 0.0),
+        "total_locker_reserved_kg": m.get("total_locker_reserved_kg", 0.0),
         # Legacy Stage-9 metric names retained for compatibility.
         "environment_reward": env_reward,
         "combined_reward_total": env_reward + rtot,

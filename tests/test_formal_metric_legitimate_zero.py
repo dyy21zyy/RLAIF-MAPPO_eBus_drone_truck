@@ -4,6 +4,7 @@ def full():
     d={k:{'value':1.0,'availability':'available','source':k,'legitimate_zero':False} for k in REQUIRED_FORMAL_METRICS+RLAIF_FIELDS}
     for k in RLAIF_FIELDS: d[k]={'value':0.0,'availability':'available','source':k,'legitimate_zero':True}
     d['rlaif_total_weighted']={'value':0.0,'availability':'available','source':'sum','legitimate_zero':True}; d['combined_reward_total']={'value':1.0,'availability':'available','source':'sum','legitimate_zero':False}; d['environment_reward']={'value':1.0,'availability':'available','source':'env','legitimate_zero':False}
+    for k in ('locker_overflow_amount','locker_overflow_duration','total_locker_reserved_kg'): d[k]={'value':0.0,'availability':'available','source':'DynamicDeliveryEnv.metrics','legitimate_zero':True}
     return d
 def test_missing_fails_and_zero_ok():
     d=full(); d.pop('runtime')

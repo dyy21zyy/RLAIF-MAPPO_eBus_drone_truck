@@ -231,6 +231,9 @@ def evaluate_policy_on_frozen_scenario(*, scenario, method_spec, policy, reward_
         runtime=time.perf_counter()-started
         if transitions <= 0: raise RuntimeError("successful rollout requires env.step transition_count > 0")
         metrics, sources = collect_formal_metrics(env, runtime_seconds=runtime, transition_count=transitions, rlaif=rlaif)
+        invariant_errors = env.check_invariants()
+        if invariant_errors:
+            raise RuntimeError("hard locker invariant failure: " + "; ".join(invariant_errors))
         flat={k:v for k,v in metrics.items()}
         validate_formal_metrics(flat)
         return FormalEpisodeResult("success", metrics, sources, rlaif, runtime, transitions, None, None)
