@@ -25,3 +25,14 @@ def test_plan_hash_changes_with_plan():
     root=Path("results/run")
     plan=build_plan(output_root=root,commit="a")
     assert plan_hash(plan) != plan_hash(plan[:-1])
+
+
+def test_plan_uses_assignment_jsonl_and_paired_script():
+ root=Path('results/formal/hard_locker_rerun_deadbeef')
+ plan=build_plan(output_root=root,commit='deadbeef')
+ phase2=' '.join(word for cmd in plan[2].commands for word in cmd)
+ phase9=' '.join(word for cmd in plan[9].commands for word in cmd)
+ assert '--agents assignment' in phase2
+ assert 'preferences/preferences/preference_assignment.jsonl' in phase2
+ assert 'analyze_hard_locker_paired_results' in phase9
+ assert plan[8].outputs == (root/'benchmark'/'episode_results.jsonl',)

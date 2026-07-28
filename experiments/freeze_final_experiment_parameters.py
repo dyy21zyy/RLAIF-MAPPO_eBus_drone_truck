@@ -20,7 +20,7 @@ def build_artifact(config:dict, config_path:str)->dict:
         'source_config_hashes':{config_path:_file_hash(Path(config_path)), str(contract):_file_hash(contract)},
         'scenario_bank_hashes':{k:config['scenario_protocol'][k]['value'] for k in ('train_bank_hash','validation_bank_hash','test_bank_hash')},
         'reward_scale_hash':config['reward_reference_scale']['artifact_hash']['value'],
-        'reward_checkpoint_hashes':{a:v.get('checkpoint_hash') for a,v in config['rlaif_parameters']['methods']['mappo_rlaif_all']['agents'].items()},
+        'reward_checkpoint_hashes':{a:v.get('checkpoint_hash') for a,v in config['rlaif_parameters']['methods'].get('mappo_rlaif_all', config['rlaif_parameters']['methods']['mappo_rlaif_assignment'])['agents'].items()},
         'validation_report':report,
     }
     artifact['freeze_hash']=canonical_hash({k:v for k,v in artifact.items() if k!='freeze_hash'})

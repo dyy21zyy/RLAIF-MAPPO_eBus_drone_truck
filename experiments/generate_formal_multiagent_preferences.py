@@ -121,8 +121,23 @@ def _select_rollout_action(state: dict[str,Any], rng) -> int:
     if not feasible: raise RuntimeError('no feasible rollout actions')
     return feasible[rng.randrange(len(feasible))]
 
-def _progress_identity(bank_hash: str, scenario_hash: str, seed: int, policy: str) -> dict[str,Any]:
-    return {'bank_hash':bank_hash,'scenario_hash':scenario_hash,'collection_seed':seed,'collection_policy_id':policy,'observation_schema_version':OBSERVATION_SCHEMA_VERSION,'candidate_schema_version':CANDIDATE_SCHEMA_VERSION,'event_schema_version':EVENT_SCHEMA_VERSION}
+def parse_agent_scope(value: str | list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
+    """Return a canonical, non-empty agent scope (the CLI accepts comma/space lists)."""
+    if value is None:
+        return tuple(AGENT_TYPES)
+    raw = value if isinstance(value, (list, tuple)) else value.replace(",", " ").split()
+    scope = tuple(dict.fromkeys(str(item).strip().lower() for item in raw if str(item).strip()))
+    unknown = sorted(set(scope) - set(AGENT_TYPES))
+    if not scope:
+        raise ValueError("selected agent scope must not be empty")
+    if unknown:
+        raise ValueError(f"unknown agent(s) {unknown}; expected one or more of {list(AGENT_TYPES)}")
+    return tuple(agent for agent in AGENT_TYPES if agent in scope)
+
+
+def _progress_identity(bank_hash: str, scenario_hash: str, seed: int, policy: str,
+                       selected_agents: tuple[str, ...] = tuple(AGENT_TYPES)) -> dict[str,Any]:
+    return {'bank_hash':bank_hash,'scenario_hash':scenario_hash,'collection_seed':seed,'collection_policy_id':policy,'selected_agents':list(selected_agents),'observation_schema_version':OBSERVATION_SCHEMA_VERSION,'candidate_schema_version':CANDIDATE_SCHEMA_VERSION,'event_schema_version':EVENT_SCHEMA_VERSION}
 
 def _collect_scenario(scenario, bank_hash: str, seed: int, policy_id: str) -> list[dict[str,Any]]:
     import random
@@ -151,7 +166,8 @@ def _collect_from_injected(config: dict[str, Any], manifest: Path) -> list[dict[
     if not out: raise RuntimeError('no decision states found in injected state manifest')
     return out
 
-def collect_decision_states(config: dict[str, Any], *, output_root: Path|None=None, resume: bool=False) -> list[dict[str,Any]]:
+def collect_decision_states(config: dict[str, Any], *, output_root: Path|None=None, resume: bool=False,
+                            selected_agents: tuple[str, ...] = tuple(AGENT_TYPES)) -> list[dict[str,Any]]:
     sb=config.get('scenario_bank',{}); manifest=Path(sb.get('final_train_manifest',''))
     if not manifest.is_file(): raise RuntimeError(f'formal train scenario-bank manifest missing: {manifest}')
     source_mode=sb.get('source_mode','frozen_scenario_rollout')
@@ -164,7 +180,7 @@ def collect_decision_states(config: dict[str, Any], *, output_root: Path|None=No
     progress_root=(output_root or Path('results/formal/rlaif'))/'collection_progress'; progress_root.mkdir(parents=True,exist_ok=True)
     states=[]; counts={}
     for sc in bank.scenarios:
-        ident=_progress_identity(bank.bank_hash, sc.scenario_content_hash or sc.instance_hash, seed, policy_id)
+        ident=_progress_identity(bank.bank_hash, sc.scenario_content_hash or sc.instance_hash, seed, policy_id, selected_agents)
         pf=progress_root/f'{sc.scenario_id}.json'; sf=progress_root/f'{sc.scenario_id}.states.jsonl'
         if resume and pf.is_file():
             pr=json.loads(pf.read_text())
@@ -179,7 +195,8 @@ def collect_decision_states(config: dict[str, Any], *, output_root: Path|None=No
         except Exception as exc:
             pf.write_text(json.dumps({'identity':ident,'scenario_id':sc.scenario_id,'scenario_hash':ident['scenario_hash'],'bank_hash':bank.bank_hash,'collection_seed':seed,'completed':False,'failure_status':'failed','failure_reason':str(exc)},indent=2,sort_keys=True)); raise
     for st in states: counts[st['event_type']]=counts.get(st['event_type'],0)+1
-    for agent, req in REQUIRED_EVENT_COVERAGE.items():
+    for agent in selected_agents:
+        req = REQUIRED_EVENT_COVERAGE[agent]
         miss=req-set(counts)
         if miss: raise RuntimeError(f'{agent} missing event coverage {sorted(miss)}; scenarios traversed={len(bank.scenarios)}; decision counts by event={counts}')
     config['_scenario_bank_manifest_data']={'path':str(manifest),'bank_hash':bank.bank_hash,'manifest_file_hash':bank_sha256_file(manifest),'split':m.get('split'),'scenario_count':m.get('scenario_count')}
@@ -196,8 +213,8 @@ def build_prompt(state: dict[str,Any], a: dict[str,Any], b: dict[str,Any], cfg: 
     ctx={'agent_type':agent,'event_type':event,'scenario_id':state['scenario_id'],'simulation_time':state['simulation_time'],'state_features':dict(zip(state['state_feature_names'],state['state_features'])),'candidate_A':a,'candidate_B':b,'consequence_A':a.get('consequence',{}),'consequence_B':b.get('consequence',{})}
     return 'Compare candidate A and B for the active operational decision. Consider: '+focus+f". Event type is {event}. Return only JSON with preferred (A/B/equal), confidence, criteria, reason. Do not mention learning algorithms. Context: "+json.dumps(ctx,sort_keys=True)
 
-def cache_key(state:dict[str,Any], a:dict[str,Any], b:dict[str,Any], settings:APISettings, cfg:dict[str,Any]) -> str:
-    return sha_json({'agent_type':state['agent_type'],'event_type':state['event_type'],'scenario_hash':state['scenario_hash'],'decision_state_hash':sha_json({'id':state['state_id'],'features':state['state_features']}),'candidate_pair_hash':sha_json(sorted([_candidate_id(a),_candidate_id(b)])),'prompt_version':cfg['evaluator'].get('prompt_version',PROMPT_VERSION),'response_schema_version':cfg['evaluator'].get('structured_output_schema_version',RESPONSE_SCHEMA_VERSION),'evaluator_model':settings.model_name,'temperature':settings.temperature})
+def cache_key(state:dict[str,Any], a:dict[str,Any], b:dict[str,Any], settings:APISettings, cfg:dict[str,Any], selected_agents: tuple[str,...] = tuple(AGENT_TYPES)) -> str:
+    return sha_json({'agent_type':state['agent_type'],'event_type':state['event_type'],'scenario_hash':state['scenario_hash'],'decision_state_hash':sha_json({'id':state['state_id'],'features':state['state_features']}),'candidate_pair_hash':sha_json(sorted([_candidate_id(a),_candidate_id(b)])),'prompt_version':cfg['evaluator'].get('prompt_version',PROMPT_VERSION),'response_schema_version':cfg['evaluator'].get('structured_output_schema_version',RESPONSE_SCHEMA_VERSION),'evaluator_model':settings.model_name,'temperature':settings.temperature,'selected_agents':list(selected_agents),'observation_schema_version':OBSERVATION_SCHEMA_VERSION,'candidate_schema_version':CANDIDATE_SCHEMA_VERSION,'event_schema_version':EVENT_SCHEMA_VERSION})
 
 def make_preference_record(state:dict[str,Any], a:dict[str,Any], b:dict[str,Any], response:dict[str,Any], split:str, settings:APISettings, cfg:dict[str,Any]) -> dict[str,Any]:
     aid,bid=_candidate_id(a),_candidate_id(b); outcome={'A':'candidate_a','B':'candidate_b','equal':'tie'}[response['preferred']]
@@ -267,21 +284,22 @@ def _coverage_satisfied(agent:str, rows:list[dict[str,Any]], cfg:dict[str,Any]) 
     have={(r['agent_type'],r['event_type'],r.get('dataset_split')) for r in binary}
     return _required_strata(agent,cfg) <= have
 
-def generate(config_path:Path, output_root:Path, *, resume:bool=False, dry_run:bool=False, api_call:Callable[[str,APISettings],str]|None=None) -> dict[str,Any]:
+def generate(config_path:Path, output_root:Path, *, resume:bool=False, dry_run:bool=False, api_call:Callable[[str,APISettings],str]|None=None, agents: str | list[str] | tuple[str,...] | None=None, cache_dir: Path | None=None) -> dict[str,Any]:
     cfg=load_yaml(config_path); settings=None if dry_run else evaluator_settings(cfg)
-    states=collect_decision_states(cfg, output_root=output_root, resume=resume)
+    selected_agents=parse_agent_scope(agents)
+    states=collect_decision_states(cfg, output_root=output_root, resume=resume, selected_agents=selected_agents)
     split_cfg=cfg.get('preference_split',{}); split=grouped_split(states, split_cfg.get('train_fraction',.7), split_cfg.get('validation_fraction',.15), split_cfg.get('test_fraction',.15), split_cfg.get('seed',1), 'scenario')
     split_by_state={s['state_id']:name for name,rs in split['records'].items() for s in rs}
     seed=int(split_cfg.get('seed',1))
     pool, pool_counts=_build_pair_pool(states, split_by_state, seed)
-    prefs_dir=output_root/'preferences'; failed_dir=output_root/'failed'; cache_dir=Path(cfg.get('evaluator',{}).get('cache_dir') or output_root/'evaluator_cache')
+    prefs_dir=output_root/'preferences'; failed_dir=output_root/'failed'; cache_dir=cache_dir or Path(cfg.get('evaluator',{}).get('cache_dir') or output_root/'evaluator_cache')
     if not dry_run:
         failed_dir.mkdir(parents=True,exist_ok=True); cache_dir.mkdir(parents=True,exist_ok=True)
-    manifest={'status':'dry_run' if dry_run else 'complete','agents':{},'split_hash':split['hash'],'scenario_bank_manifest':str(cfg['scenario_bank']['final_train_manifest']),'scenario_bank':cfg.get('_scenario_bank_manifest_data',{}),'collection':cfg.get('_collection',{})}
+    manifest={'status':'dry_run' if dry_run else 'complete','selected_agents':list(selected_agents),'agent_scope_hash':sha_json(list(selected_agents)),'agents':{},'split_hash':split['hash'],'scenario_bank_manifest':str(cfg['scenario_bank']['final_train_manifest']),'scenario_bank':cfg.get('_scenario_bank_manifest_data',{}),'collection':cfg.get('_collection',{}),'cache_directory':str(cache_dir)}
     default_budget={'assignment':600,'truck':480,'bus':600,'station':480}
     report_lines=[]
     call=api_call or _default_api_call
-    for agent in AGENT_TYPES:
+    for agent in selected_agents:
         acfg=cfg.get('agents',{}).get(agent,{})
         target=int(acfg.get('target_valid_pair_count',0)); budget=int(acfg.get('max_api_attempts', default_budget[agent]))
         selected=_select_agent_pairs(agent,pool,budget,seed)
@@ -300,7 +318,7 @@ def generate(config_path:Path, output_root:Path, *, resume:bool=False, dry_run:b
         for p in selected:
             if len([r for r in rows if r.get('original_outcome') in {'candidate_a','candidate_b'}]) >= target and _coverage_satisfied(agent,rows,cfg): break
             st,a,b=p['state'],p['a'],p['b']
-            ck=cache_key(st,a,b,settings,cfg); cp=cache_dir/f'{ck}.json'; raw=''; err=''
+            ck=cache_key(st,a,b,settings,cfg,selected_agents); cp=cache_dir/f'{ck}.json'; raw=''; err=''
             try:
                 if cp.is_file():
                     resp=validate_structured_response(json.loads(cp.read_text())['raw_response']); cache_hits+=1
@@ -331,8 +349,8 @@ def generate(config_path:Path, output_root:Path, *, resume:bool=False, dry_run:b
     return manifest
 
 def main(argv=None)->int:
-    ap=argparse.ArgumentParser(); ap.add_argument('--config',type=Path,required=True); ap.add_argument('--output-root',type=Path,default=Path('results/formal/rlaif')); ap.add_argument('--resume',action='store_true'); ap.add_argument('--dry-run',action='store_true')
+    ap=argparse.ArgumentParser(); ap.add_argument('--config',type=Path,required=True); ap.add_argument('--output-root',type=Path,default=Path('results/formal/rlaif')); ap.add_argument('--agents',nargs='+'); ap.add_argument('--cache-dir',type=Path); ap.add_argument('--resume',action='store_true'); ap.add_argument('--dry-run',action='store_true')
     ns=ap.parse_args(argv)
-    try: print(json.dumps(generate(ns.config,ns.output_root,resume=ns.resume,dry_run=ns.dry_run),indent=2,sort_keys=True)); return 0
+    try: print(json.dumps(generate(ns.config,ns.output_root,resume=ns.resume,dry_run=ns.dry_run,agents=ns.agents,cache_dir=ns.cache_dir),indent=2,sort_keys=True)); return 0
     except Exception as exc: print(f'formal preference generation failed: {exc}',file=sys.stderr); return 2
 if __name__=='__main__': raise SystemExit(main())
