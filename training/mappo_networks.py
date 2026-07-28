@@ -143,10 +143,11 @@ class CandidateScoringActor(nn.Module):
             candidate_features = event_type_id
             event_type_id = 0
         with torch.no_grad():
-            obs = torch.as_tensor(observation, dtype=torch.float32)
-            candidates = torch.as_tensor(candidate_features, dtype=torch.float32)
-            mask = torch.as_tensor(action_mask, dtype=torch.bool)
-            event_ids = torch.tensor([int(event_type_id)], dtype=torch.long)
+            device = next(self.parameters()).device
+            obs = torch.as_tensor(observation, dtype=torch.float32, device=device)
+            candidates = torch.as_tensor(candidate_features, dtype=torch.float32, device=device)
+            mask = torch.as_tensor(action_mask, dtype=torch.bool, device=device)
+            event_ids = torch.tensor([int(event_type_id)], dtype=torch.long, device=device)
             distribution = self.distribution(obs, event_ids, candidates, mask)
             action = distribution.probs.argmax(dim=-1) if deterministic else distribution.sample()
             log_prob = distribution.log_prob(action)

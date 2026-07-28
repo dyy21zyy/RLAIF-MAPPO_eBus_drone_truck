@@ -10,13 +10,14 @@ LOGGER=logging.getLogger(__name__)
 FULL=set(AGENT_TYPES)
 
 class RewardRegistry:
-    def __init__(self, config:dict[str,Any]):
+    def __init__(self, config:dict[str,Any], device=None):
         r=config.get("rlaif",config)
         self.enabled=bool(r.get("enabled",False))
         self.scope=str(r.get("scope", "none" if not self.enabled else "assignment"))
         self.formal_mode=str(config.get("run_classification", r.get("run_classification", "formal")))=="formal"
         self.fallback=bool(r.get("fallback_to_env_reward",False))
         self.fail=bool(r.get("fail_on_invalid_reward_model",True))
+        self.device = device or config.get("training", {}).get("device", "cpu")
         if self.formal_mode and self.enabled and (self.fallback or not self.fail):
             raise ValueError("formal RLAIF requires fallback_to_env_reward=false and fail_on_invalid_reward_model=true")
         self.agents:dict[str,dict[str,Any]]={}
@@ -47,7 +48,7 @@ class RewardRegistry:
                 raise RewardModelCheckpointError(f"Missing reward checkpoint for {agent}")
             self.models[agent]=RuntimeAgentRewardModel.from_checkpoint(
                 cfg["checkpoint"], expected_agent_type=agent, expected_event_types=sorted(REQUIRED_EVENT_COVERAGE[agent]),
-                expected_checkpoint_hash=cfg.get("checkpoint_hash"), formal_mode=self.formal_mode)
+                expected_checkpoint_hash=cfg.get("checkpoint_hash"), formal_mode=self.formal_mode, device=self.device)
         return self.models[agent]
 
     def score_transition(self,*,agent_type:str,event_type:str,environment_reward:float,state_features:Sequence[float],candidate_features:Sequence[float],selected_action_index:int=0,formal_mode:bool|None=None)->RewardContribution:

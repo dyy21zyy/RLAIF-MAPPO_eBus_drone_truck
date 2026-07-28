@@ -201,6 +201,8 @@ def resolve_mappo_training_config(config: dict[str, Any], *, seed_override: int 
     tr["entropy_coef"]=_positive("training.entropy_coef", _need(tr,"entropy_coef"), allow_zero=True)
     tr["value_coef"]=_positive("training.value_coef", _need(tr,"value_coef"), allow_zero=True)
     tr["optimizer"] = str(_need(tr,"optimizer"))
+    tr["device"] = str(tr.get("device", "auto"))
+    tr["require_cuda"] = bool(tr.get("require_cuda", False))
     for k in ["assignment_hidden_dims","truck_hidden_dims","bus_hidden_dims","station_hidden_dims","critic_hidden_dims"]:
         if not isinstance(_need(net,k), list) or not net[k]: raise TrainingConfigError(f"networks.{k} must be non-empty list")
     rlaif.setdefault("enabled", mode == "rlaif_reward"); rlaif.setdefault("fallback_to_env_reward", False); rlaif.setdefault("fail_on_invalid_reward_model", True)
@@ -267,4 +269,3 @@ def validate_reward_artifacts(
     config["resolved_training_config_hash"] = (
         resolved_training_config_hash(config)
     )
-

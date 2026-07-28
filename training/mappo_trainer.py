@@ -6,6 +6,8 @@ import csv
 import json
 import math
 import random
+import time
+import hashlib
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -33,6 +35,7 @@ from training.scenario_sampler import ScenarioSampler
 from training.reward_model_wrapper import RewardModelWrapper
 from envs.status import is_delivered_status
 from rlaif.reward_registry import RewardRegistry
+from training.device import resolve_torch_device
 
 AGENT_IDS = ("assignment", "truck", "bus", "station")
 FEATURE_SCHEMA_VERSION = 3
@@ -164,7 +167,9 @@ def collect_episode(
         if agent_id == "bus" and action_payload.get("action_type") == "charge":
             bus_charging_count += 1
         with torch.no_grad():
-            value = float(critic(torch.tensor(global_state, dtype=torch.float32)).item())
+            parameter = next(critic.parameters(), None)
+            critic_device = parameter.device if parameter is not None else torch.device("cpu")
+            value = float(critic(torch.tensor(global_state, dtype=torch.float32, device=critic_device)).item())
 
         action_features = candidate_features[action] if agent_id in RLAIF_AGENT_TYPES else None
         next_observation, env_reward, terminated, truncated, info = env.step(action)
@@ -229,7 +234,7 @@ def _mean(values: list[float]) -> float:
     return float(np.mean(values)) if values else 0.0
 
 
-def _padded_candidate_batch(items: Sequence[AsyncTransition]) -> tuple[torch.Tensor, torch.Tensor]:
+def _padded_candidate_batch(items: Sequence[AsyncTransition], device: torch.device | None = None) -> tuple[torch.Tensor, torch.Tensor]:
     if not items:
         raise ValueError("Cannot build an empty candidate batch")
     feature_names = items[0].candidate_feature_names
@@ -243,7 +248,7 @@ def _padded_candidate_batch(items: Sequence[AsyncTransition]) -> tuple[torch.Ten
         rows = np.asarray(item.candidate_features, dtype=np.float32)
         candidates[row_index, : rows.shape[0], :] = rows
         masks[row_index, : len(item.action_mask)] = np.asarray(item.action_mask, dtype=bool)
-    return torch.tensor(candidates, dtype=torch.float32), torch.tensor(masks, dtype=torch.bool)
+    return torch.tensor(candidates, dtype=torch.float32, device=device), torch.tensor(masks, dtype=torch.bool, device=device)
 
 
 def update_mappo(
@@ -255,6 +260,7 @@ def update_mappo(
     training: dict[str, Any],
     rng: np.random.Generator,
 ) -> dict[str, float]:
+    device = next(critic.parameters()).device
     buffer.compute_returns_and_advantages(
         float(training["gamma"]),
         float(training["gae_lambda"]),
@@ -282,15 +288,15 @@ def update_mappo(
                 batch = indices[start:start + int(training["batch_size"])]
                 items = [buffer.transitions[i] for i in batch]
                 observations = torch.tensor(
-                    np.asarray([item.local_obs for item in items]), dtype=torch.float32
+                    np.asarray([item.local_obs for item in items]), dtype=torch.float32, device=device
                 )
-                candidate_features, masks = _padded_candidate_batch(items)
-                event_type_ids = torch.tensor([int(item.event_type_id) for item in items], dtype=torch.long)
+                candidate_features, masks = _padded_candidate_batch(items, device)
+                event_type_ids = torch.tensor([int(item.event_type_id) for item in items], dtype=torch.long, device=device)
                 assert event_type_ids.shape[0] == len(items) and event_type_ids.dtype == torch.long
                 assert bool(((event_type_ids >= 0) & (event_type_ids <= 4)).all())
-                actions = torch.tensor([item.action for item in items], dtype=torch.long)
-                old_log_probs = torch.tensor([item.log_prob for item in items], dtype=torch.float32)
-                advantages = torch.tensor(buffer.advantages[batch], dtype=torch.float32)
+                actions = torch.tensor([item.action for item in items], dtype=torch.long, device=device)
+                old_log_probs = torch.tensor([item.log_prob for item in items], dtype=torch.float32, device=device)
+                advantages = torch.tensor(buffer.advantages[batch], dtype=torch.float32, device=device)
                 new_log_probs, entropy = actor.evaluate_actions(
                     observations, event_type_ids, candidate_features, masks, actions
                 )
@@ -315,9 +321,9 @@ def update_mappo(
                 )
         for batch in buffer.minibatch_indices(int(training["batch_size"]), rng):
             states = torch.tensor(
-                np.asarray([buffer.transitions[i].global_state for i in batch]), dtype=torch.float32
+                np.asarray([buffer.transitions[i].global_state for i in batch]), dtype=torch.float32, device=device
             )
-            returns = torch.tensor(buffer.returns[batch], dtype=torch.float32)
+            returns = torch.tensor(buffer.returns[batch], dtype=torch.float32, device=device)
             value_loss = nn.functional.mse_loss(critic(states), returns)
             critic_optimizer.zero_grad()
             (float(training.get("value_coef", training.get("vf_coef"))) * value_loss).backward()
@@ -351,6 +357,7 @@ def save_checkpoint(
     critic_optimizer: torch.optim.Optimizer,
     config: dict[str, Any],
     metrics: list[dict[str, Any]],
+    optimizer_updates: int | None = None,
 ) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -398,6 +405,8 @@ def save_checkpoint(
             **_scenario_lineage(config),
             "code_commit": _code_commit(),
             "training_metrics": metrics,
+            "optimizer_updates": int(optimizer_updates if optimizer_updates is not None else len(metrics)),
+            "torch_device": str(next(critic.parameters()).device),
             "actor_specs": _actor_specs(actors),
             "dimensions": {
                 "actors": _actor_specs(actors),
@@ -596,6 +605,9 @@ def _models(env, config):
 def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, Any]:
     training, seed = config["training"], int(config["training"]["seed"])
     set_seed(seed)
+    device = resolve_torch_device(training.get("device", "auto"), require_cuda=bool(training.get("require_cuda", False)))
+    started = time.monotonic()
+    if device.type == "cuda": torch.cuda.reset_peak_memory_stats(device)
     factory = None
     sampler = None
     env_cfg = config.get("env", {})
@@ -612,13 +624,14 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
             raise ValueError("formal MAPPO training requires env.scenario_bank_manifest")
         env = create_environment(config, output_root=output_root)
     actors, critic = _models(env, config)
+    actors.to(device); critic.to(device)
     actor_optimizers = {
         agent: torch.optim.Adam(actor.parameters(), lr=float(training["lr_actor"]))
         for agent, actor in actors.items()
     }
     critic_optimizer = torch.optim.Adam(critic.parameters(), lr=float(training["lr_critic"]))
     wrapper = (
-        RewardRegistry(config)
+        RewardRegistry(config, device=device)
         if "agents" in config.get("rlaif", {})
         else RewardModelWrapper(
             config["rlaif"].get("reward_model_checkpoint"),
@@ -630,6 +643,7 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
         )
     )
     buffer, rng, rows = AsyncMAPPOBuffer(), np.random.default_rng(seed), []
+    optimizer_updates = 0
     rollout_episodes = int(training["rollout_episodes"])
     for start in range(0, int(training["total_episodes"]), rollout_episodes):
         summaries = []
@@ -657,6 +671,7 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
             training,
             rng,
         )
+        optimizer_updates += 1
         rows.extend({"episode": start + offset + 1, **summary, **update} for offset, summary in enumerate(summaries))
         buffer.clear()
     path = Path(config["output"]["training_log_path"])
@@ -686,8 +701,16 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
         critic_optimizer,
         config,
         rows,
+        optimizer_updates,
     )
-    return {"rows": rows, "checkpoint_path": config["output"]["checkpoint_path"], "models": (actors, critic)}
+    checkpoint_path = Path(config["output"]["checkpoint_path"])
+    def digest(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    lineage = _scenario_lineage(config)
+    manifest = {"manifest_schema_version":1,"status":"complete","method_id":_algorithm_identity(config),"seed":seed,"code_commit":_code_commit(),"resolved_training_config_path":config["output"].get("resolved_config_path"),"resolved_training_config_hash":config.get("resolved_training_config_hash"),"checkpoint_path":str(checkpoint_path),"checkpoint_file_sha256":digest(checkpoint_path),"checkpoint_schema_version":CHECKPOINT_SCHEMA_VERSION,"optimizer_updates":optimizer_updates,"train_scenario_bank_path":config.get("env",{}).get("scenario_bank_manifest"),"train_scenario_bank_hash":lineage.get("training_scenario_bank_hash"),"reward_scale_artifact_path":config.get("reward",{}).get("scale_artifact"),"reward_scale_artifact_hash":config.get("reward",{}).get("scale_artifact_hash"),"reward_checkpoint_paths":_reward_checkpoint_paths(config),"reward_checkpoint_hashes":config.get("rlaif",{}).get("reward_checkpoint_hashes",{}),"requested_device":training.get("device","auto"),"torch_device":str(device),"cuda_available":torch.cuda.is_available(),"cuda_device_name":torch.cuda.get_device_name(device) if device.type=="cuda" else None,"peak_allocated_cuda_bytes":torch.cuda.max_memory_allocated(device) if device.type=="cuda" else 0,"elapsed_training_seconds":time.monotonic()-started}
+    manifest_root = Path(config["output"].get("output_root", checkpoint_path.parent))
+    manifest_root.mkdir(parents=True, exist_ok=True)
+    (manifest_root/"training_run_manifest.json").write_text(json.dumps(manifest,indent=2,sort_keys=True)+"\n")
+    return {"rows": rows, "checkpoint_path": str(checkpoint_path), "models": (actors, critic), "optimizer_updates": optimizer_updates, "training_run_manifest": manifest}
 
 
 def evaluate_mappo_async(config: dict[str, Any], checkpoint_path, *, output_root=None, episodes: int = 1):
