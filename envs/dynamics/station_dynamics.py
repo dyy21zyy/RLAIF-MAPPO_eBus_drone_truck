@@ -28,7 +28,8 @@ def dispatch_drone(env, station, drone, parcel, battery, now):
     delivery, ret, resource, _ = drone_mission_times(env, station.station_id, parcel.parcel_id, now)
     drone.status="IN_MISSION"; drone.active_parcel_id=parcel.parcel_id; drone.active_battery_id=battery.battery_id; drone.available_time_min=resource
     battery.status="IN_USE"; battery.assigned_drone_id=drone.drone_id
-    parcel.status="ONBOARD_DRONE"; station.locker_load_kg=max(0.0, station.locker_load_kg-parcel.weight_kg)
+    env._release_locker_occupancy(parcel.parcel_id, station.station_id)
+    parcel.status="ONBOARD_DRONE"
     env.drone_mission_count = getattr(env, "drone_mission_count", 0) + 1
     env._push(delivery, "parcel_delivery", {"parcel_id": parcel.parcel_id})
     env._push(ret, "drone_return", {"station_id": station.station_id, "drone_id": drone.drone_id, "battery_id": battery.battery_id})
