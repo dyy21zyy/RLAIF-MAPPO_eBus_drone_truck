@@ -834,6 +834,7 @@ class DynamicDeliveryEnv:
                 return self._charge_cost("infeasible_action", 1.0)
             if not self._reserve_locker_capacity(parcel_id, station_id):
                 self.infeasible_action_corrections += 1
+                self._fail_parcel(parcel_id, reason="locker_capacity_unavailable_at_action_time")
                 return self._charge_cost("infeasible_action", 1.0)
             trip_id, _arrival = trip
             rows = self.trip_stop_times[trip_id]
@@ -864,6 +865,7 @@ class DynamicDeliveryEnv:
         station_id = self.station_ids[station_offset - len(self.station_ids)]
         if not self._reserve_locker_capacity(parcel_id, station_id):
             self.infeasible_action_corrections += 1
+            self._fail_parcel(parcel_id, reason="locker_capacity_unavailable_at_action_time")
             return self._charge_cost("infeasible_action", 1.0)
         parcel.status, parcel.station_id = "WAITING_TRUCK", station_id
         depot = self.truck_location_index["depot_01"]
@@ -1221,12 +1223,17 @@ class DynamicDeliveryEnv:
         parcel = self.parcels[parcel_id]
         parcel.action_id = action
         if action == 0:
+            self._cancel_locker_reservation(parcel_id, reason="legacy_reassigned_to_td")
             parcel.mode = "TD"
             return self._execute_direct_truck_task(self._earliest_truck(), parcel)
         station_offset = action - 1
         if station_offset < len(self.station_ids):
             parcel.mode = "TBD"
             parcel.station_id = self.station_ids[station_offset]
+            if not self._reserve_locker_capacity(parcel_id, parcel.station_id):
+                self.infeasible_action_corrections += 1
+                self._fail_parcel(parcel_id, reason="locker_capacity_unavailable_at_action_time")
+                return self._charge_cost("infeasible_action", 1.0)
             parcel.status = "WAITING_TRUCK"
             self.pending_truck_tasks.append({
                 "kind": "bus_terminal_feeder",
@@ -1239,6 +1246,10 @@ class DynamicDeliveryEnv:
             return 0.0
         parcel.mode = "TLD"
         parcel.station_id = self.station_ids[station_offset - len(self.station_ids)]
+        if not self._reserve_locker_capacity(parcel_id, parcel.station_id):
+            self.infeasible_action_corrections += 1
+            self._fail_parcel(parcel_id, reason="locker_capacity_unavailable_at_action_time")
+            return self._charge_cost("infeasible_action", 1.0)
         return self._execute_station_feeder_task(self._earliest_truck(), parcel, parcel.station_id)
 
 
@@ -1759,6 +1770,34 @@ class DynamicDeliveryEnv:
         errors = []
         if self.now_min < -EPSILON or self.now_min > self.horizon_min + EPSILON:
             errors.append("simulation time is outside the delivery horizon")
+        listed_at: dict[str, str] = {}
+        waiting_weights: dict[str, float] = {station_id: 0.0 for station_id in self.stations}
+        for station_id, parcel_ids in self.waiting_station_parcels.items():
+            if station_id not in self.stations:
+                errors.append(f"waiting parcel index has unknown station {station_id}")
+            local_seen: set[str] = set()
+            for parcel_id in parcel_ids:
+                if parcel_id in local_seen:
+                    errors.append(f"{parcel_id} is duplicated in {station_id} waiting list")
+                    continue
+                local_seen.add(parcel_id)
+                if parcel_id in listed_at:
+                    errors.append(f"{parcel_id} appears in multiple station waiting lists")
+                    continue
+                listed_at[parcel_id] = station_id
+                parcel = self.parcels.get(parcel_id)
+                if parcel is None:
+                    errors.append(f"unknown parcel {parcel_id} in {station_id} waiting list")
+                    continue
+                if parcel.status != "WAITING_DRONE":
+                    errors.append(f"{parcel_id} status {parcel.status} is stale in {station_id} waiting list")
+                if parcel.station_id != station_id:
+                    errors.append(f"{parcel_id} is in the wrong station waiting list")
+                if station_id in waiting_weights:
+                    waiting_weights[station_id] += parcel.weight_kg
+                if parcel_id in self.inbound_locker_reservations:
+                    errors.append(f"{parcel_id} is both reserved and physically waiting")
+
         for station in self.stations.values():
             if not np.isfinite(station.locker_capacity_kg) or station.locker_capacity_kg < -EPSILON:
                 errors.append(f"{station.station_id} has invalid locker capacity")
@@ -1777,7 +1816,7 @@ class DynamicDeliveryEnv:
             registered = sum(r.weight_kg for r in self.inbound_locker_reservations.values() if r.station_id == station.station_id)
             if abs(registered - station.locker_reserved_kg) > EPSILON:
                 errors.append(f"{station.station_id} reservation registry total mismatch")
-            occupied = sum(p.weight_kg for p in self.parcels.values() if p.status == "WAITING_DRONE" and p.station_id == station.station_id)
+            occupied = waiting_weights[station.station_id]
             if abs(occupied - station.locker_load_kg) > EPSILON:
                 errors.append(f"{station.station_id} occupied locker load mismatch")
             if station.full_batteries < 0:
@@ -1789,6 +1828,8 @@ class DynamicDeliveryEnv:
             reserved = parcel.parcel_id in self.inbound_locker_reservations
             if parcel.status == "WAITING_DRONE" and parcel.station_id not in self.stations:
                 errors.append(f"{parcel.parcel_id} waiting for drone without valid station")
+            if parcel.status == "WAITING_DRONE" and listed_at.get(parcel.parcel_id) != parcel.station_id:
+                errors.append(f"{parcel.parcel_id} is missing from its station waiting list")
             if reserved and parcel.status in {"FAILED", "DELIVERED", "ONBOARD_DRONE", "WAITING_DRONE"}:
                 errors.append(f"{parcel.parcel_id} status {parcel.status} is inconsistent with inbound reservation")
         for trip_id, state in getattr(self, "runtime_trip_states", {}).items():

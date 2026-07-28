@@ -265,9 +265,9 @@ def test_locker_overflow_is_integrated_over_elapsed_time(
     station = environment.stations[environment.station_ids[0]]
     station.locker_load_kg = station.locker_capacity_kg + 2.0
 
-    environment._integrate_station_penalties(0.0, 5.0)
-
-    assert environment.accumulated_locker_overflow == pytest.approx(10.0)
+    with pytest.raises(RuntimeError, match="hard locker capacity"):
+        environment._integrate_station_penalties(0.0, 5.0)
+    assert environment.accumulated_locker_overflow == 0.0
 
 
 def test_locker_overflow_duration_only_counts_positive_intervals(
@@ -277,9 +277,9 @@ def test_locker_overflow_duration_only_counts_positive_intervals(
     station = environment.stations[environment.station_ids[0]]
     environment._integrate_station_penalties(0.0, 3.0)
     station.locker_load_kg = station.locker_capacity_kg + 1.0
-    environment._integrate_station_penalties(3.0, 8.0)
-
-    assert environment.accumulated_locker_overflow_duration == pytest.approx(5.0)
+    with pytest.raises(RuntimeError, match="hard locker capacity"):
+        environment._integrate_station_penalties(3.0, 8.0)
+    assert environment.accumulated_locker_overflow_duration == 0.0
 
 
 def test_drone_dispatch_never_creates_negative_locker_load(
@@ -292,6 +292,7 @@ def test_drone_dispatch_never_creates_negative_locker_load(
     station_id = environment.station_ids[0]
     _make_station_drone_reachable(environment, parcel.parcel_id, station_id)
 
+    assert environment._reserve_locker_capacity(parcel.parcel_id, station_id)
     environment._handle_station_arrival(parcel.parcel_id, station_id)
 
     assert environment.stations[station_id].locker_load_kg >= 0.0
@@ -310,6 +311,7 @@ def test_locker_load_persists_until_delayed_drone_dispatch(
     station.full_batteries = 0
     station.battery_ready_min = [environment.now_min + 5.0]
 
+    assert environment._reserve_locker_capacity(parcel.parcel_id, station_id)
     environment._handle_station_arrival(parcel.parcel_id, station_id)
 
     assert station.locker_load_kg == pytest.approx(parcel.weight_kg)
@@ -324,15 +326,14 @@ def test_metrics_expose_station_penalty_amounts_and_durations(
     station = environment.stations[environment.station_ids[0]]
     station.power_capacity_kw = float(environment.config["station"]["base_load_kw"])
     station.active_bus_charges = [2.0]
-    station.locker_load_kg = station.locker_capacity_kg + 1.0
     environment._integrate_station_penalties(0.0, 2.0)
 
     metrics = environment.get_metrics()
 
     assert metrics["power_overload_amount"] > 0.0
     assert metrics["power_overload_duration"] == pytest.approx(2.0)
-    assert metrics["locker_overflow_amount"] == pytest.approx(2.0)
-    assert metrics["locker_overflow_duration"] == pytest.approx(2.0)
+    assert metrics["locker_overflow_amount"] == 0.0
+    assert metrics["locker_overflow_duration"] == 0.0
 
 
 def test_earliest_available_truck_is_selected(environment: DynamicDeliveryEnv) -> None:
