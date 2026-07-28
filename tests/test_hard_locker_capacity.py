@@ -88,3 +88,60 @@ def test_formal_hard_gate_rejects_positive_values():
     row["locker_overflow_amount"]["value"] = 1.0
     with pytest.raises(FormalMetricValidationError, match="hard locker"):
         validate_formal_metrics(row)
+
+
+def test_waiting_index_invariants(env):
+    parcel = current(env); station = env.stations[env.station_ids[0]]
+    parcel.station_id = station.station_id
+    assert env._reserve_locker_capacity(parcel.parcel_id, station.station_id)
+    env._handle_station_arrival(parcel.parcel_id, station.station_id)
+    assert env.check_invariants() == []
+    env.waiting_station_parcels[station.station_id].append(parcel.parcel_id)
+    assert any("duplicated" in error for error in env.check_invariants())
+
+
+def test_missing_and_wrong_waiting_index_are_rejected(env):
+    parcel = current(env); station_id = env.station_ids[0]
+    parcel.status, parcel.station_id = "WAITING_DRONE", station_id
+    env.stations[station_id].locker_load_kg = parcel.weight_kg
+    assert any("missing" in error for error in env.check_invariants())
+    other = env.station_ids[1]
+    env.waiting_station_parcels[other] = [parcel.parcel_id]
+    assert any("wrong station" in error for error in env.check_invariants())
+
+
+def test_legacy_td_cancels_and_tbd_reserves(env):
+    parcel = current(env); station_id = env.station_ids[0]
+    assert env._reserve_locker_capacity(parcel.parcel_id, station_id)
+    env._apply_assignment(parcel.parcel_id, 0)
+    assert parcel.parcel_id not in env.inbound_locker_reservations
+
+    parcel2 = list(env.parcels.values())[1]
+    env._apply_assignment(parcel2.parcel_id, 1)
+    assert parcel2.parcel_id in env.inbound_locker_reservations
+    assert any(task["parcel_id"] == parcel2.parcel_id for task in env.pending_truck_tasks)
+
+
+def test_legacy_capacity_failure_is_terminal_and_atomic(env):
+    parcel = current(env); station = env.stations[env.station_ids[0]]
+    station.locker_load_kg = station.locker_capacity_kg
+    before = env.infeasible_action_corrections
+    env._apply_assignment(parcel.parcel_id, 1)
+    assert parcel.status == "FAILED"
+    assert parcel.parcel_id not in env.inbound_locker_reservations
+    assert not any(task.get("parcel_id") == parcel.parcel_id for task in env.pending_truck_tasks)
+    assert env.infeasible_action_corrections == before + 1
+
+
+def test_action_time_capacity_failure_is_terminal_and_atomic(env, monkeypatch):
+    parcel = current(env); station = env.stations[env.station_ids[0]]
+    parcel.drone_feasible = True
+    env.drone_distance_m[env.drone_row_index[station.station_id], env.drone_column_index[parcel.parcel_id]] = 0
+    assert env._assignment_mask(parcel)[1 + len(env.station_ids)]
+    station.locker_load_kg = station.locker_capacity_kg
+    before = env.infeasible_action_corrections
+    env._apply_assignment_decision(parcel.parcel_id, 1 + len(env.station_ids))
+    assert parcel.status == "FAILED"
+    assert parcel.parcel_id not in env.inbound_locker_reservations
+    assert not any(task.get("parcel_id") == parcel.parcel_id for task in env.pending_truck_tasks)
+    assert env.infeasible_action_corrections == before + 1
