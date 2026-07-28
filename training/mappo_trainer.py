@@ -392,6 +392,9 @@ def save_checkpoint(
             "reward_scale_artifact_version": config.get("reward", {}).get("scale_artifact_version", 1),
             "reward_scale_estimator": config.get("reward", {}).get("scale_estimator"),
             "training_seed": config.get("training", {}).get("seed"),
+            "resolved_training_config_hash": config.get(
+                "resolved_training_config_hash"
+            ),
             **_scenario_lineage(config),
             "code_commit": _code_commit(),
             "training_metrics": metrics,
