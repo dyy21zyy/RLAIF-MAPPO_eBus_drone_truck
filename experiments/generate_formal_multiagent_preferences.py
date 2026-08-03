@@ -7,7 +7,7 @@ labels; tests may inject a deterministic evaluator callable.
 """
 from __future__ import annotations
 
-import argparse, hashlib, json, math, os, sys, time
+import argparse, hashlib, json, math, os, sys, tempfile, time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -18,6 +18,7 @@ from rlaif.ai_evaluator import APISettings, _default_api_call
 from rlaif.grouped_split import grouped_split
 from rlaif.preference_dataset import write_jsonl, read_jsonl
 from envs import DynamicDeliveryEnv
+from envs.reward_components import REWARD_COMPONENTS
 from evaluation.scenario_bank import load_scenario_bank, load_frozen_instance, load_bank_manifest, sha256_file as bank_sha256_file
 from training.event_schema import (AGENT_TYPES, CANDIDATE_SCHEMA_VERSION, DECISION_EVENT_SPECS,
     EVENT_SCHEMA_VERSION, OBSERVATION_SCHEMA_VERSION, REQUIRED_EVENT_COVERAGE,
@@ -121,6 +122,24 @@ def _select_rollout_action(state: dict[str,Any], rng) -> int:
     if not feasible: raise RuntimeError('no feasible rollout actions')
     return feasible[rng.randrange(len(feasible))]
 
+
+def prepare_preference_collection_environment(instance_path: str | Path) -> DynamicDeliveryEnv:
+    """Load an instance for raw, unscaled preference-trajectory collection."""
+    # Preference collection needs state/action/consequence trajectories, not normalized
+    # rewards. Phase 3 separately estimates final train-bank scales for MAPPO configs.
+    instance_path = Path(instance_path)
+    manifest_path = instance_path / "instance.json" if instance_path.is_dir() else instance_path
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    runtime_config = json.loads(json.dumps(manifest.get("config_snapshot")))
+    runtime_config.setdefault("reward", {})["apply_reference_scales"] = False
+    with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8") as config_file:
+        json.dump(runtime_config, config_file)
+        config_file.flush()
+        env = DynamicDeliveryEnv(instance_path, config_path=config_file.name)
+    env.config.setdefault("reward", {})["apply_reference_scales"] = False
+    env.reward_reference_scales = {component: 1.0 for component in REWARD_COMPONENTS}
+    return env
+
 def parse_agent_scope(value: str | list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
     """Return a canonical, non-empty agent scope (the CLI accepts comma/space lists)."""
     if value is None:
@@ -142,7 +161,7 @@ def _progress_identity(bank_hash: str, scenario_hash: str, seed: int, policy: st
 def _collect_scenario(scenario, bank_hash: str, seed: int, policy_id: str) -> list[dict[str,Any]]:
     import random
     load_frozen_instance(scenario)
-    env=DynamicDeliveryEnv(Path(scenario.instance_path))
+    env=prepare_preference_collection_environment(Path(scenario.instance_path))
     obs,_=env.reset(seed=seed)
     rng=random.Random(sha_json([bank_hash, scenario.scenario_id, seed, policy_id]))
     rows=[]; decision=0

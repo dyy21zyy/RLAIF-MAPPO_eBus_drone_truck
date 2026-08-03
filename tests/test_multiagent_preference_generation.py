@@ -2,6 +2,7 @@ import json, pytest
 from pathlib import Path
 from rlaif.ai_evaluator import APISettings
 from experiments.generate_formal_multiagent_preferences import route_event, feasible_pairs, validate_structured_response, cache_key, generate
+from envs.reward_components import REWARD_COMPONENTS
 
 
 def test_four_agent_event_routing_and_bus_dual_events():
@@ -94,6 +95,66 @@ def test_real_frozen_scenario_rollout_collects_four_agents(tmp_path, monkeypatch
     assert {'BUS_TERMINAL_DEPARTURE','BUS_STATION_ARRIVAL'} <= {s['event_type'] for s in states}
     assert all(s['scenario_split']=='train' and s['scenario_bank_hash'] for s in states)
     assert any(feasible_pairs(s) for s in states)
+
+
+def test_preference_environment_ignores_missing_legacy_reward_scales(tmp_path):
+    from experiments.build_scenario_bank import build_bank
+    from experiments.generate_formal_multiagent_preferences import (
+        _validate_real_observation, prepare_preference_collection_environment,
+    )
+
+    build_bank('configs/shanghai_small.yaml', 'train', 1, 123, tmp_path/'train',
+               fallback=False, run_classification='diagnostic', force=True)
+    manifest = json.loads((tmp_path/'train'/'scenario_bank_manifest.json').read_text())
+    instance_path = Path(manifest['scenarios'][0]['instance_path'])
+    instance = json.loads(instance_path.read_text())
+    instance['config_snapshot'].setdefault('reward', {}).update({
+        'apply_reference_scales': True,
+        'scale_artifact': str(tmp_path/'missing-legacy-scales.json'),
+    })
+    instance_path.write_text(json.dumps(instance, indent=2, sort_keys=True))
+    frozen_bytes = instance_path.read_bytes()
+
+    env = prepare_preference_collection_environment(instance_path)
+    observation, _ = env.reset(seed=7)
+
+    assert env.config['reward']['apply_reference_scales'] is False
+    assert env.reward_reference_scales == {component: 1.0 for component in REWARD_COMPONENTS}
+    assert all(scale > 0 for scale in env.reward_reference_scales.values())
+    assert instance_path.read_bytes() == frozen_bytes
+    decision_state = _validate_real_observation(observation)
+    assert decision_state['event_type']
+    assert decision_state['state_features']
+    assert decision_state['candidate_actions']
+    assert decision_state['candidate_features']
+    assert decision_state['action_mask']
+    assert decision_state['observation_schema_version'] == 4
+
+
+def test_preference_reward_override_is_applied_before_reset(tmp_path, monkeypatch):
+    import experiments.generate_formal_multiagent_preferences as preference_generation
+
+    observed = {}
+    class RecordingEnvironment:
+        def __init__(self, instance_path, config_path=None):
+            self.config = json.loads(Path(config_path).read_text())
+            self.reward_reference_scales = {}
+
+        def reset(self, *, seed):
+            observed['apply_reference_scales'] = self.config['reward']['apply_reference_scales']
+            observed['scales'] = dict(self.reward_reference_scales)
+            return {'agent': 'terminal'}, {}
+
+    # The helper reads only the manifest's runtime config copy; the frozen file is not edited.
+    instance = tmp_path/'instance.json'
+    instance.write_text(json.dumps({'config_snapshot': {'reward': {
+        'apply_reference_scales': True, 'scale_artifact': 'missing.json'}}}))
+    monkeypatch.setattr(preference_generation, 'DynamicDeliveryEnv', RecordingEnvironment)
+    env = preference_generation.prepare_preference_collection_environment(instance)
+    env.reset(seed=1)
+
+    assert observed['apply_reference_scales'] is False
+    assert observed['scales'] == {component: 1.0 for component in REWARD_COMPONENTS}
 
 
 def _state(ev, scenario, idx, cand=3):
