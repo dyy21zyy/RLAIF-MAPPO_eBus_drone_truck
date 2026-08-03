@@ -7,6 +7,7 @@ import json
 import math
 import random
 import time
+from datetime import datetime, timezone
 import hashlib
 from pathlib import Path
 from typing import Any, Sequence
@@ -709,7 +710,18 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
     checkpoint_path = Path(config["output"]["checkpoint_path"])
     def digest(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
     lineage = _scenario_lineage(config)
-    manifest = {"manifest_schema_version":1,"status":"complete","method_id":_algorithm_identity(config),"seed":seed,"code_commit":_code_commit(),"resolved_training_config_path":config["output"].get("resolved_config_path"),"resolved_training_config_hash":config.get("resolved_training_config_hash"),"checkpoint_path":str(checkpoint_path),"checkpoint_file_sha256":digest(checkpoint_path),"checkpoint_schema_version":CHECKPOINT_SCHEMA_VERSION,"optimizer_updates":optimizer_updates,"train_scenario_bank_path":config.get("env",{}).get("scenario_bank_manifest"),"train_scenario_bank_hash":lineage.get("training_scenario_bank_hash"),"reward_scale_artifact_path":config.get("reward",{}).get("scale_artifact"),"reward_scale_artifact_hash":config.get("reward",{}).get("reward_scale_artifact_hash"),"reward_checkpoint_paths":_reward_checkpoint_paths(config),"reward_checkpoint_hashes":config.get("rlaif",{}).get("reward_checkpoint_hashes",{}),"requested_device":training.get("device","auto"),"torch_device":str(device),"cuda_available":torch.cuda.is_available(),"cuda_device_name":torch.cuda.get_device_name(device) if device.type=="cuda" else None,"peak_allocated_cuda_bytes":torch.cuda.max_memory_allocated(device) if device.type=="cuda" else 0,"elapsed_training_seconds":time.monotonic()-started}
+    method_id = "mappo_env" if _rlaif_scope(config) == "none" else "mappo_rlaif_assignment"
+    reward_paths = _reward_checkpoint_paths(config)
+    reward_hashes = config.get("rlaif", {}).get("reward_checkpoint_hashes", {})
+    manifest = {"manifest_schema_version":1,"status":"complete","method_id":method_id,
+      "training_seed":seed,"code_commit":_code_commit(),
+      "resolved_config_path":config["output"].get("resolved_config_path"),"resolved_config_hash":config.get("resolved_training_config_hash"),
+      "checkpoint_path":str(checkpoint_path),"checkpoint_file_sha256":digest(checkpoint_path),"checkpoint_schema_version":CHECKPOINT_SCHEMA_VERSION,"optimizer_updates":optimizer_updates,
+      "scenario_bank_path":config.get("env",{}).get("scenario_bank_manifest"),"scenario_bank_hash":lineage.get("training_scenario_bank_hash"),
+      "reward_scale_path":config.get("reward",{}).get("scale_artifact"),"reward_scale_artifact_hash":config.get("reward",{}).get("reward_scale_artifact_hash"),
+      "reward_model_path":reward_paths.get("assignment"),"reward_model_hash":reward_hashes.get("assignment"),
+      "start_time":datetime.fromtimestamp(time.time()-(time.monotonic()-started),timezone.utc).isoformat(),"completion_time":datetime.now(timezone.utc).isoformat(),
+      "requested_device":training.get("device","auto"),"torch_device":str(device),"cuda_available":torch.cuda.is_available(),"cuda_device_name":torch.cuda.get_device_name(device) if device.type=="cuda" else None,"peak_allocated_cuda_bytes":torch.cuda.max_memory_allocated(device) if device.type=="cuda" else 0,"elapsed_training_seconds":time.monotonic()-started}
     manifest_root = Path(config["output"].get("output_root", checkpoint_path.parent))
     manifest_root.mkdir(parents=True, exist_ok=True)
     (manifest_root/"training_run_manifest.json").write_text(json.dumps(manifest,indent=2,sort_keys=True)+"\n")
