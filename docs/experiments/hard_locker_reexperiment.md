@@ -138,3 +138,55 @@ python -m experiments.run_hard_locker_reexperiment --execute --resume --through 
 python -m experiments.run_hard_locker_reexperiment --execute --resume --through 8 --device cuda:0
 python -m experiments.run_hard_locker_reexperiment --execute --resume --through 9 --device cuda:0
 ```
+
+## Safe, content-addressed resume
+
+The formal rerun now reconstructs an explicit typed experiment context rather than
+relying on process-local dictionaries.  On a skipped phase it revalidates scenario
+banks, the assignment preference manifest and JSONL, assignment reward checkpoint
+lineage, canonical reward-scale lineage, resolved training configurations, and all
+six policy checkpoints.  Phase 7 either validates every checkpoint hash referenced
+by the benchmark configuration or deterministically regenerates that configuration
+and the final-freeze configuration.
+
+Each phase marker records the commit and plan hash, assignment-only agent scope,
+all declared input and output paths and SHA-256 hashes, schema versions, validation
+status, and completion time.  Resume fails closed if provenance, the clean Git
+commit, scope, a hash, validation, the marker chain, or placeholder-free executable
+configuration contract does not match.  Markers are written only after validation.
+
+Formal checkpoint discovery requires exactly these files:
+
+```
+<run-root>/{mappo_env,mappo_rlaif_assignment}/seed_{1,2,3}/training_run_manifest.json
+```
+
+Each manifest binds the method and seed to the code and resolved-config hashes,
+optimizer update count, scenario bank, reward scale, final checkpoint, timestamps,
+and (only for RLAIF-MAPPO) assignment reward model.  Formal mode deliberately does
+not recursively search for `*.pt`: an unrelated, stale, intermediate, or partially
+written checkpoint must never be selected by filename coincidence.
+
+Use the following controls (the run root defaults to the current commit-specific
+location and can be supplied explicitly with `--run-root`):
+
+```bash
+python -m experiments.run_hard_locker_reexperiment --execute --resume --through 9
+python -m experiments.run_hard_locker_reexperiment --inspect-resume --through 9
+python -m experiments.run_hard_locker_reexperiment --execute --resume --restart-from 3 --through 9
+```
+
+`--inspect-resume` executes no phase and prints `HARD_LOCKER_RESUME_STATE_VALID`
+only for a completely valid requested chain.  `--restart-from` removes only phase
+markers from that phase onward, prints the exact phase numbers, and preserves all
+artifacts, including large checkpoints.  Valid upstream artifacts may be reused;
+changes to commit, plan, assignment scope, scenario banks, resolved configs, reward
+artifacts, training manifests, checkpoint bytes, or templates invalidate dependent
+markers. Invalid expensive phases are never overwritten automatically.
+
+Subprocess evidence is retained in `<run-root>/logs/`.  A failure additionally
+creates `<run-root>/failures/phase_<n>_<timestamp>.json` with the command, exit code,
+log paths, exception, known outputs, and partial-artifact presence.  Successful
+phase validation atomically updates `<run-root>/experiment_artifact_manifest.json`;
+a temporary-file write, flush/fsync, and replace prevents a failed update from
+corrupting the previous experiment-level inventory.
