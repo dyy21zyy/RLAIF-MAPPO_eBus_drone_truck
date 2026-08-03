@@ -216,17 +216,19 @@ def materialize_initial_configs(root: Path, device: str = "cuda") -> Path:
     """Materialize only the reward-model config, whose inputs are already known."""
     destination = root / "resolved_configs" / "train_reward_assignment.yaml"
     config = _load_data(Path("configs/paper/train_reward_assignment.yaml"))
-    config.setdefault("training", {}).update({"device": device, "require_cuda": True})
+    config.setdefault("training", {}).update({"device": device, "require_cuda": device != "cpu"})
     _dump_yaml(destination, config)
     return destination
 
-def gpu_readiness(path: Path, requested: str) -> dict[str, Any]:
+def gpu_readiness(path: Path, requested: str, *, require_cuda: bool = True) -> dict[str, Any]:
     import torch
     from training.device import resolve_torch_device
-    device=resolve_torch_device(requested, require_cuda=True)
-    index=device.index; props=torch.cuda.get_device_properties(device)
-    a=torch.ones((8,8),device=device); smoke=float((a@a).sum().item())
-    record={"marker":"FORMAL_CUDA_READY","requested_device":requested,"resolved_device":str(device),"torch_version":torch.__version__,"cuda_runtime_version":torch.version.cuda,"cuda_available":torch.cuda.is_available(),"cuda_device_count":torch.cuda.device_count(),"selected_cuda_device_index":index,"cuda_device_name":props.name,"compute_capability":list(torch.cuda.get_device_capability(device)),"total_device_memory":props.total_memory,"tensor_smoke_result":smoke}
+    device=resolve_torch_device(requested, require_cuda=require_cuda)
+    index=device.index if device.type == "cuda" else None; props=torch.cuda.get_device_properties(device) if device.type == "cuda" else None
+    smoke_status="not_required_cpu"
+    if device.type == "cuda":
+        a=torch.ones((8,8),device=device); smoke=float((a@a).sum().item()); smoke_status="passed"
+    record={"marker":"FORMAL_CUDA_READY" if device.type == "cuda" else None,"requested_device":requested,"resolved_device":str(device),"require_cuda":require_cuda,"torch_version":torch.__version__,"cuda_runtime_version":torch.version.cuda,"cuda_available":torch.cuda.is_available(),"device_count":torch.cuda.device_count(),"device_index":index,"device_name":props.name if props else None,"compute_capability":list(torch.cuda.get_device_capability(device)) if props else None,"total_memory_bytes":props.total_memory if props else None,"smoke_status":smoke_status}
     path.write_text(json.dumps(record,indent=2,sort_keys=True)+"\n"); return record
 
 
@@ -235,7 +237,7 @@ def resolve_training_configs(root: Path, banks: dict[str, dict[str, Any]], rewar
     outputs = []
     for method, template in (("mappo_env", "train_mappo_env.yaml"), ("mappo_rlaif_assignment", "train_mappo_rlaif_assignment.yaml")):
         cfg = _load_data(Path("configs/paper") / template)
-        cfg.setdefault("training", {}).update({"device":device,"require_cuda":True})
+        cfg.setdefault("training", {}).update({"device":device,"require_cuda":device != "cpu"})
         cfg["scenario_bank"] = {"manifest": banks["train"]["path"], "bank_hash": banks["train"]["bank_hash"]}
         cfg.setdefault("env", {}).update({"scenario_bank_manifest": banks["train"]["path"], "expected_split":"train", "expected_bank_hash":banks["train"]["bank_hash"], "scenario_sampling_mode":"shuffled_cycle"})
         cfg["reward"]["scale_artifact"] = scale["path"]
@@ -586,7 +588,7 @@ def _run_command(command: Sequence[str],phase: PhaseSpec,root: Path,index: int) 
 def _run_execute_phase(phase: PhaseSpec, context: ExperimentContext, digest: str) -> None:
     root=context.run_root
     try:
-        if phase.phase==0: materialize_initial_configs(root,context.device); gpu_readiness(root/"gpu_readiness.json",context.device); restore_phase_0_context(context)
+        if phase.phase==0: materialize_initial_configs(root,context.device); gpu_readiness(root/"gpu_readiness.json",context.device,require_cuda=context.device != "cpu"); restore_phase_0_context(context)
         elif phase.phase==1: _run_command(phase.commands[0],phase,root,0); (root/"verification.json").write_text(json.dumps({"status":"pass"})+"\n")
         elif phase.phase==2:
             _run_command(phase.commands[0],phase,root,0); context.preference_artifact=validate_assignment_preferences(root/"preferences"); _run_command(phase.commands[1],phase,root,1); context.reward_model_artifact=validate_reward_checkpoint(root/"reward_models"/"reward_assignment.pt",context.preference_artifact)
@@ -640,7 +642,10 @@ def main(argv: Sequence[str]|None=None) -> None:
         report=inspect_resume(root,selected,commit=commit,digest=digest); print(json.dumps(report,indent=2))
         if report["can_safely_resume"] and not report["invalid_markers"]: print("HARD_LOCKER_RESUME_STATE_VALID")
         return
-    summary={"output_root":str(root),"provenance":provenance,"plan":[asdict(p) for p in selected],"training_jobs":6,"benchmark_rows":600,"markers":["HARD_LOCKER_RERUN_PLAN_ISOLATED","ASSIGNMENT_PREFERENCE_PATH_VALID","ARTIFACT_AWARE_CONFIG_RESOLUTION_ENABLED","PAIRED_STATISTICS_PHASE_CONFIGURED","GPU_BACKED_FORMAL_TRAINING_CONFIGURED"]}; print(json.dumps(summary,indent=2,default=str))
+    summary={"output_root":str(root),"provenance":provenance,"plan":[asdict(p) for p in selected],"training_jobs":6,"benchmark_rows":600,
+             "requested_device":args.device,"require_cuda":args.device != "cpu","gpu_readiness_output":str(root/"gpu_readiness.json"),
+             "reward_model_device":args.device,"mappo_device":args.device,
+             "markers":["HARD_LOCKER_RERUN_PLAN_ISOLATED","ASSIGNMENT_PREFERENCE_PATH_VALID","ARTIFACT_AWARE_CONFIG_RESOLUTION_ENABLED","PAIRED_STATISTICS_PHASE_CONFIGURED","GPU_BACKED_FORMAL_TRAINING_CONFIGURED"]}; print(json.dumps(summary,indent=2,default=str))
     if not args.execute: return
     if _git("status","--porcelain"): raise SystemExit("hard-locker rerun requires a clean repository")
     if args.resume:

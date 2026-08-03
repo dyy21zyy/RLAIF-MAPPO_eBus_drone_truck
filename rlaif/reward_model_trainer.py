@@ -65,9 +65,10 @@ def _git_sha():
     except Exception: return 'unknown'
 
 def train_agent_reward_model(*, agent_type:str, train_dataset:RewardPairDataset, validation_dataset:RewardPairDataset, test_dataset:RewardPairDataset, state_normalization:FeatureNormalization, candidate_normalization:FeatureNormalization, config:dict, output_path:str)->RewardTrainingResult:
-    tr=config.get('training',{}); seed=int(tr.get('seed',1)); gen=set_reward_training_seed(seed)
+    tr=config.get('training',{}); seed=int(tr.get('seed',1)); gen=set_reward_training_seed(seed); started=time.monotonic()
     from training.device import resolve_torch_device
     device=resolve_torch_device(tr.get('device','auto'), require_cuda=bool(tr.get('require_cuda',False)))
+    if device.type == 'cuda': torch.cuda.reset_peak_memory_stats(device)
     model_cfg=config.get('model',{}); model=AgentRewardModel(state_dim=train_dataset.state_dim,candidate_dim=train_dataset.candidate_dim,num_event_types=len(EVENT_NAME_TO_ID),event_embedding_dim=int(model_cfg.get('event_embedding_dim',16)),hidden_dims=tuple(model_cfg.get('hidden_dims',[64,64])),dropout=float(model_cfg.get('dropout',0.0))).to(device)
     opt=torch.optim.Adam(model.parameters(),lr=float(tr.get('learning_rate',1e-3)),weight_decay=float(tr.get('weight_decay',0.0)))
     best=None; best_loss=float('inf'); best_epoch=0; patience=0; hist=[]; epochs=int(tr.get('epochs',10)); batch_size=int(tr.get('batch_size',32)); minimp=float(tr.get('minimum_improvement',1e-4)); maxgn=float(tr.get('max_grad_norm',1.0))
@@ -93,6 +94,15 @@ def train_agent_reward_model(*, agent_type:str, train_dataset:RewardPairDataset,
         s=apply_feature_normalization(e.state_features[None],state_normalization,feature_names=train_dataset.state_feature_names).to(device); a=apply_feature_normalization(e.candidate_a_features[None],candidate_normalization,feature_names=train_dataset.candidate_feature_names).to(device); scores.append(float(model(s,torch.tensor([e.event_type_id],device=device),a).item()))
     mean=float(np.mean(scores)) if scores else 0.0; std=float(np.std(scores)) if scores and np.std(scores)>1e-8 else 1.0
     ck={'checkpoint_type':'agent_reward_model','checkpoint_schema_version':CHECKPOINT_SCHEMA_VERSION,'run_classification':config.get('run_classification','formal'),'validation_status':status,'agent_type':agent_type,'compatible_event_types':sorted(REQUIRED_EVENT_COVERAGE[agent_type]),'model_class':'AgentRewardModel','model_architecture':model_cfg,'model_state_dict':model.state_dict(),'state_feature_names':list(train_dataset.state_feature_names),'candidate_feature_names':list(train_dataset.candidate_feature_names),'state_feature_dim':train_dataset.state_dim,'candidate_feature_dim':train_dataset.candidate_dim,'observation_schema_version':OBSERVATION_SCHEMA_VERSION,'candidate_schema_version':CANDIDATE_SCHEMA_VERSION,'event_schema_version':EVENT_SCHEMA_VERSION,'event_name_to_id':dict(EVENT_NAME_TO_ID),'state_normalization_mean':list(state_normalization.mean),'state_normalization_std':list(state_normalization.std),'candidate_normalization_mean':list(candidate_normalization.mean),'candidate_normalization_std':list(candidate_normalization.std),'reward_output_training_mean':mean,'reward_output_training_std':std,'training_config':tr,'split_config':config.get('split',{}),'validation_config':config.get('validation',{}),'preference_file_hash':config.get('preference_file_hash'),'training_data_hash':dataset_hash(train_dataset),'split_manifest_hash':config.get('split_manifest_hash'),'best_epoch':best_epoch,'last_epoch':epoch,'best_validation_loss':best_loss,'train_metrics':train_m,'validation_metrics':val_m,'test_metrics':test_m,'per_event_metrics':per,'excluded_label_counts':dict(train_dataset.report.excluded_outcomes),'label_source_counts':train_m['counts_by_label_source'],'training_seed':seed,'actual_device':str(device),'cuda_available':torch.cuda.is_available(),'torch_deterministic_algorithms':torch.are_deterministic_algorithms_enabled(),'code_commit_sha':_git_sha(),'PyTorch_version':torch.__version__,'creation_timestamp':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
+    ck.update({'requested_device':tr.get('device','auto'),'resolved_device':str(device),'require_cuda':bool(tr.get('require_cuda',False)),
+               'cuda_device_name':torch.cuda.get_device_name(device) if device.type=='cuda' else None,
+               'cuda_device_index':device.index if device.type=='cuda' else None,
+               'peak_cuda_memory_bytes':torch.cuda.max_memory_allocated(device) if device.type=='cuda' else None,
+               'elapsed_training_seconds':time.monotonic()-started,
+               'reproducibility':{'python_random_seed':seed,'numpy_seed':seed,'torch_cpu_seed':seed,'torch_cuda_seed':seed,
+                                  'deterministic_algorithms':torch.are_deterministic_algorithms_enabled(),
+                                  'cudnn_deterministic':torch.backends.cudnn.deterministic,'cudnn_benchmark':torch.backends.cudnn.benchmark,
+                                  'cuda_matmul_allow_tf32':torch.backends.cuda.matmul.allow_tf32,'cudnn_allow_tf32':torch.backends.cudnn.allow_tf32}})
     out=Path(output_path); out.parent.mkdir(parents=True,exist_ok=True); torch.save(ck,out)
     if hist:
       with (out.parent/'training_history.csv').open('w',newline='') as f: w=csv.DictWriter(f,fieldnames=list(hist[0])); w.writeheader(); w.writerows(hist)
