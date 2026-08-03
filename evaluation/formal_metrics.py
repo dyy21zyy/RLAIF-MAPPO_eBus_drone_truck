@@ -9,6 +9,7 @@ def rec(value: float|int, source: str, formula: str="runtime instrumentation") -
 
 def collect_formal_metrics(env, *, runtime_seconds: float, transition_count: int, rlaif: dict[str, float]) -> tuple[dict[str, Any], dict[str, Any]]:
     m = env.get_formal_runtime_metrics()
+    invariant_errors = env.check_invariants()
     released = int(m.get("delivered_parcels", 0) + m.get("undelivered_parcels", 0))
     delivered = int(m.get("delivered_parcels", 0)); undelivered = int(m.get("undelivered_parcels", 0))
     env_reward = float(m.get("total_reward", 0.0)); rtot = float(rlaif.get("rlaif_total_weighted", 0.0))
@@ -28,6 +29,7 @@ def collect_formal_metrics(env, *, runtime_seconds: float, transition_count: int
         "locker_overflow_amount": m.get("locker_overflow_amount", 0.0),
         "locker_overflow_duration": m.get("locker_overflow_duration", 0.0),
         "total_locker_reserved_kg": m.get("total_locker_reserved_kg", 0.0),
+        "invariant_failure_count": len(invariant_errors),
         # Legacy Stage-9 metric names retained for compatibility.
         "environment_reward": env_reward,
         "combined_reward_total": env_reward + rtot,

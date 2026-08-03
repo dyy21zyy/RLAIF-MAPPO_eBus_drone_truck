@@ -165,7 +165,7 @@ def validate_reward_scale(path: Path, train_bank_hash: str) -> dict[str, Any]:
     canonical = canonical_payload_hash(data)
     if data.get("artifact_hash") != canonical:
         raise ValueError("reward scale canonical artifact_hash mismatch")
-    return {"path": str(path), "artifact_hash": canonical, "hash": canonical, "file_sha256": sha256_file(path), "training_bank_hash": train_bank_hash,
+    return {"path": str(path), "reward_scale_artifact_hash": canonical, "hash": canonical, "reward_scale_file_sha256": sha256_file(path), "training_bank_hash": train_bank_hash,
             "validation_status": data["validation_status"]}
 
 
@@ -196,7 +196,7 @@ def resolve_training_configs(root: Path, banks: dict[str, dict[str, Any]], rewar
         cfg["scenario_bank"] = {"manifest": banks["train"]["path"], "bank_hash": banks["train"]["bank_hash"]}
         cfg.setdefault("env", {}).update({"scenario_bank_manifest": banks["train"]["path"], "expected_split":"train", "expected_bank_hash":banks["train"]["bank_hash"], "scenario_sampling_mode":"shuffled_cycle"})
         cfg["reward"]["scale_artifact"] = scale["path"]
-        cfg["reward"]["scale_artifact_hash"] = scale["hash"]
+        cfg["reward"]["reward_scale_artifact_hash"] = scale["hash"]
         cfg["reward"]["expected_training_scenario_bank_hash"] = banks["train"]["bank_hash"]
         cfg["output"]["output_root"] = str(root / method)
         if method == "mappo_env":

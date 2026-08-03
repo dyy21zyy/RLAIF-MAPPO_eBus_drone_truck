@@ -30,18 +30,23 @@ def sha256_file(path: Path) -> str:
  return h.hexdigest()
 
 
+def unwrap_formal_metric(row: dict[str,Any], metric_name: str) -> float:
+ formal=row.get("formal_metrics")
+ if not isinstance(formal,dict): raise ValueError("formal_metrics must be a mapping")
+ for alias in ALIASES.get(metric_name,(metric_name,)):
+  if alias in formal:
+   record=formal[alias]
+   available = record.get("available", record.get("availability") == "available") if isinstance(record,dict) else False
+   if not isinstance(record,dict) or available is not True or "value" not in record: raise ValueError(f"malformed or unavailable formal metric {metric_name}")
+   value=float(record["value"])
+   if not math.isfinite(value): raise ValueError(f"non-finite {metric_name}")
+   return value
+ raise ValueError(f"required formal metric {metric_name} is missing")
+
 def _metric(row: dict[str,Any], name: str) -> float:
  formal=row.get("formal_metrics")
  if formal is not None:
-  if not isinstance(formal,dict): raise ValueError("formal_metrics must be a mapping")
-  for alias in ALIASES.get(name,(name,)):
-   if alias in formal:
-    record=formal[alias]
-    if not isinstance(record,dict) or record.get("available") is not True or "value" not in record: raise ValueError(f"malformed or unavailable formal metric {name}")
-    value=float(record["value"])
-    if not math.isfinite(value): raise ValueError(f"non-finite {name}")
-    return value
-  raise ValueError(f"required formal metric {name} is missing")
+  return unwrap_formal_metric(row,name)
  sources=(row,row.get("metrics",{}),row.get("episode_metrics",{}),row.get("summary",{}))
  for alias in ALIASES.get(name,(name,)):
   for source in sources:

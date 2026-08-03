@@ -26,11 +26,12 @@ class FormalPolicySpec:
     expected_rlaif_scope: str = 'none'
     enabled_reward_agents: tuple[str,...] = ()
     reward_checkpoints: dict[str,str] | None = None
+    expected_reward_scale_artifact_hash: str | None = None
     training_seed: int | None = None
     formal_mode: bool = True
 
-    def with_checkpoint(self, checkpoint: str, *, training_seed:int|None=None, reward_checkpoints:dict[str,str]|None=None):
-        return replace(self, policy_checkpoint=checkpoint, training_seed=training_seed if training_seed is not None else self.training_seed, reward_checkpoints=reward_checkpoints if reward_checkpoints is not None else self.reward_checkpoints)
+    def with_checkpoint(self, checkpoint: str, *, training_seed:int|None=None, reward_checkpoints:dict[str,str]|None=None, reward_scale_artifact_hash:str|None=None):
+        return replace(self, policy_checkpoint=checkpoint, training_seed=training_seed if training_seed is not None else self.training_seed, reward_checkpoints=reward_checkpoints if reward_checkpoints is not None else self.reward_checkpoints, expected_reward_scale_artifact_hash=reward_scale_artifact_hash if reward_scale_artifact_hash is not None else self.expected_reward_scale_artifact_hash)
 
 FORMAL_METHOD_REGISTRY: dict[str, FormalPolicySpec] = {
  'truck_direct_heuristic': FormalPolicySpec('truck_direct_heuristic','Truck-direct heuristic','heuristic'),
@@ -80,11 +81,30 @@ def validate_policy_checkpoint(spec: FormalPolicySpec, metadata_or_path: dict[st
     if spec.training_seed is not None and int(meta.get('training_seed',-1)) != int(spec.training_seed): raise PolicyCheckpointValidationError('checkpoint training seed mismatch')
     for k in ('training_scenario_bank_hash','resolved_training_config_hash','code_commit'):
         if spec.formal_mode and not meta.get(k): raise PolicyCheckpointValidationError(f'missing checkpoint lineage field: {k}')
+    if spec.formal_mode:
+        if int(meta.get('optimizer_updates', 0)) <= 0:
+            raise PolicyCheckpointValidationError('checkpoint optimizer_updates must be > 0')
+        if not isinstance(meta.get('training_metrics'), list):
+            raise PolicyCheckpointValidationError('checkpoint training_metrics must be present')
+        if not meta.get('reward_scale_artifact_hash'):
+            raise PolicyCheckpointValidationError('missing checkpoint lineage field: reward_scale_artifact_hash')
+        if (spec.expected_reward_scale_artifact_hash is not None and
+                meta['reward_scale_artifact_hash'] != spec.expected_reward_scale_artifact_hash):
+            raise PolicyCheckpointValidationError('checkpoint reward-scale artifact hash mismatch')
+        if 'reward_scale_hash' in meta:
+            raise PolicyCheckpointValidationError('noncanonical reward_scale_hash field is not accepted')
     if meta.get('checkpoint_schema_version') is None: raise PolicyCheckpointValidationError('missing checkpoint schema version')
     if spec.formal_mode and meta.get('validation_status') in {'smoke_only','diagnostic_only'}: raise PolicyCheckpointValidationError('non-formal validation status rejected formally')
     r_hashes=meta.get('reward_checkpoint_hashes') or {}
     for a in spec.enabled_reward_agents:
         if not r_hashes.get(a): raise PolicyCheckpointValidationError(f'missing reward checkpoint hash for {a}')
+        paths=meta.get('reward_checkpoint_paths') or {}
+        if not paths.get(a): raise PolicyCheckpointValidationError(f'missing reward checkpoint path for {a}')
+        if spec.reward_checkpoints and a in spec.reward_checkpoints:
+            expected_path=spec.reward_checkpoints[a]
+            if str(paths[a]) != str(expected_path): raise PolicyCheckpointValidationError(f'reward checkpoint path mismatch for {a}')
+            if Path(expected_path).is_file() and r_hashes[a] != _sha(expected_path):
+                raise PolicyCheckpointValidationError(f'reward checkpoint hash mismatch for {a}')
     return meta
 
 def validate_unique_learned_checkpoints(specs: list[FormalPolicySpec]) -> None:

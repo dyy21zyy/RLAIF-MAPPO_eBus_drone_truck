@@ -66,4 +66,4 @@ reward:
   apply_reference_scales: true
   scale_artifact: results/formal/reward_scales/final_reward_reference_scales.json
   expected_training_scenario_bank_hash: REPLACE_WITH_FINAL_TRAIN_BANK_HASH
-  scale_artifact_hash: REPLACE_WITH_REAL_SCALE_HASH
+  reward_scale_artifact_hash: REPLACE_WITH_REAL_SCALE_HASH

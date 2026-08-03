@@ -36,7 +36,7 @@ def validate_readiness(config_path: str|Path)->dict[str,Any]:
     reward=cfg.get('reward',{})
     scale_status=None
     if reward.get('apply_reference_scales', False) or reward.get('scale_artifact'):
-        sp=reward.get('scale_artifact'); sh=reward.get('scale_artifact_hash'); bh=reward.get('expected_training_scenario_bank_hash')
+        sp=reward.get('scale_artifact'); sh=reward.get('reward_scale_artifact_hash'); bh=reward.get('expected_training_scenario_bank_hash')
         if not sp or not Path(str(sp)).is_file():
             missing.append(f'reward scale artifact missing: {sp}'); scale_status=BLOCKED_REWARD_SCALE_ARTIFACT_MISSING
         else:
