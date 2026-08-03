@@ -361,6 +361,9 @@ def save_checkpoint(
 ) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    completed_updates = int(optimizer_updates if optimizer_updates is not None else len(metrics))
+    if completed_updates <= 0:
+        raise ValueError("MAPPO checkpoint requires optimizer_updates > 0")
     torch.save(
         {
             "checkpoint_schema_version": CHECKPOINT_SCHEMA_VERSION,
@@ -394,7 +397,7 @@ def save_checkpoint(
             "reward_model_schema_versions": config.get("rlaif", {}).get("reward_model_schema_versions", {}),
             "formal_or_smoke": config.get("formal_or_smoke", "formal"),
             "reward_scale_artifact_path": config.get("reward", {}).get("scale_artifact"),
-            "reward_scale_artifact_hash": config.get("reward", {}).get("scale_artifact_hash", "unavailable"),
+            "reward_scale_artifact_hash": config.get("reward", {}).get("reward_scale_artifact_hash", "unavailable"),
             "reward_scale_training_scenario_bank_hash": config.get("reward", {}).get("expected_training_scenario_bank_hash"),
             "reward_scale_artifact_version": config.get("reward", {}).get("scale_artifact_version", 1),
             "reward_scale_estimator": config.get("reward", {}).get("scale_estimator"),
@@ -405,7 +408,7 @@ def save_checkpoint(
             **_scenario_lineage(config),
             "code_commit": _code_commit(),
             "training_metrics": metrics,
-            "optimizer_updates": int(optimizer_updates if optimizer_updates is not None else len(metrics)),
+            "optimizer_updates": completed_updates,
             "torch_device": str(next(critic.parameters()).device),
             "actor_specs": _actor_specs(actors),
             "dimensions": {
@@ -706,7 +709,7 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
     checkpoint_path = Path(config["output"]["checkpoint_path"])
     def digest(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
     lineage = _scenario_lineage(config)
-    manifest = {"manifest_schema_version":1,"status":"complete","method_id":_algorithm_identity(config),"seed":seed,"code_commit":_code_commit(),"resolved_training_config_path":config["output"].get("resolved_config_path"),"resolved_training_config_hash":config.get("resolved_training_config_hash"),"checkpoint_path":str(checkpoint_path),"checkpoint_file_sha256":digest(checkpoint_path),"checkpoint_schema_version":CHECKPOINT_SCHEMA_VERSION,"optimizer_updates":optimizer_updates,"train_scenario_bank_path":config.get("env",{}).get("scenario_bank_manifest"),"train_scenario_bank_hash":lineage.get("training_scenario_bank_hash"),"reward_scale_artifact_path":config.get("reward",{}).get("scale_artifact"),"reward_scale_artifact_hash":config.get("reward",{}).get("scale_artifact_hash"),"reward_checkpoint_paths":_reward_checkpoint_paths(config),"reward_checkpoint_hashes":config.get("rlaif",{}).get("reward_checkpoint_hashes",{}),"requested_device":training.get("device","auto"),"torch_device":str(device),"cuda_available":torch.cuda.is_available(),"cuda_device_name":torch.cuda.get_device_name(device) if device.type=="cuda" else None,"peak_allocated_cuda_bytes":torch.cuda.max_memory_allocated(device) if device.type=="cuda" else 0,"elapsed_training_seconds":time.monotonic()-started}
+    manifest = {"manifest_schema_version":1,"status":"complete","method_id":_algorithm_identity(config),"seed":seed,"code_commit":_code_commit(),"resolved_training_config_path":config["output"].get("resolved_config_path"),"resolved_training_config_hash":config.get("resolved_training_config_hash"),"checkpoint_path":str(checkpoint_path),"checkpoint_file_sha256":digest(checkpoint_path),"checkpoint_schema_version":CHECKPOINT_SCHEMA_VERSION,"optimizer_updates":optimizer_updates,"train_scenario_bank_path":config.get("env",{}).get("scenario_bank_manifest"),"train_scenario_bank_hash":lineage.get("training_scenario_bank_hash"),"reward_scale_artifact_path":config.get("reward",{}).get("scale_artifact"),"reward_scale_artifact_hash":config.get("reward",{}).get("reward_scale_artifact_hash"),"reward_checkpoint_paths":_reward_checkpoint_paths(config),"reward_checkpoint_hashes":config.get("rlaif",{}).get("reward_checkpoint_hashes",{}),"requested_device":training.get("device","auto"),"torch_device":str(device),"cuda_available":torch.cuda.is_available(),"cuda_device_name":torch.cuda.get_device_name(device) if device.type=="cuda" else None,"peak_allocated_cuda_bytes":torch.cuda.max_memory_allocated(device) if device.type=="cuda" else 0,"elapsed_training_seconds":time.monotonic()-started}
     manifest_root = Path(config["output"].get("output_root", checkpoint_path.parent))
     manifest_root.mkdir(parents=True, exist_ok=True)
     (manifest_root/"training_run_manifest.json").write_text(json.dumps(manifest,indent=2,sort_keys=True)+"\n")

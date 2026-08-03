@@ -84,18 +84,18 @@ def validate_run_classification(config: dict[str, Any], *, config_only: bool = F
     reward = config.get("reward", {})
     if reward.get("apply_reference_scales", False):
         path = reward.get("scale_artifact")
-        expected = reward.get("scale_artifact_hash")
+        expected = reward.get("reward_scale_artifact_hash")
         if _is_placeholder(path):
             raise _invalid(classification, "reward.scale_artifact", path, "nonempty artifact path")
         if _is_placeholder(expected):
-            raise _invalid(classification, "reward.scale_artifact_hash", expected, "non-placeholder hash")
+            raise _invalid(classification, "reward.reward_scale_artifact_hash", expected, "non-placeholder hash")
         if not config_only:
             p = Path(str(path))
             if not p.exists():
                 raise _invalid(classification, "reward.scale_artifact", str(p), "existing artifact file")
             actual = _canonical_json_hash(p)
             if str(expected) != actual:
-                raise _invalid(classification, "reward.scale_artifact_hash", expected, f"matching artifact hash {actual}")
+                raise _invalid(classification, "reward.reward_scale_artifact_hash", expected, f"matching artifact hash {actual}")
     env_cfg = _load_env_config(config)
     truck = dict(env_cfg.get("truck", {})); truck.update(config.get("truck", {}))
     reward_truck_weight = float(reward.get("truck_cost", 0.0) or 0.0)
@@ -128,7 +128,7 @@ def resolved_environment_parameter_report(config: dict[str, Any]) -> dict[str, A
         "truck_cost_coefficients": {k: truck.get(k, 0.0) for k in ("fixed_dispatch_cost", "cost_per_km", "cost_per_min")},
         "reward_weights": reward,
         "reward_scale_artifact": reward.get("scale_artifact"),
-        "reward_scale_artifact_hash": reward.get("scale_artifact_hash"),
+        "reward_scale_artifact_hash": reward.get("reward_scale_artifact_hash"),
         "parameter_sources": "runtime entity > resolved scenario config > explicit smoke/diagnostic fallback",
         "station_load_source": "station_base_load_profile",
         "drone_parameter_source": "resolved scenario config",
@@ -215,11 +215,29 @@ def resolve_mappo_training_config(config: dict[str, Any], *, seed_override: int 
     out["training_log_path"] = path_for("training_log_name_template","training_log_path")
     out["eval_path"] = path_for("eval_name_template","eval_path")
     out["resolved_config_path"] = path_for("resolved_config_name_template","resolved_config_path")
-    if "reward" in cfg: validate_nonzero_formal_reward(cfg)
+    if "reward" in cfg:
+        reward = cfg["reward"]
+        if "scale_artifact_hash" in reward:
+            if ("reward_scale_artifact_hash" in reward and
+                    reward["reward_scale_artifact_hash"] != reward["scale_artifact_hash"]):
+                raise TrainingConfigError("conflicting reward-scale artifact hashes")
+            reward["reward_scale_artifact_hash"] = reward.pop("scale_artifact_hash")
+        validate_nonzero_formal_reward(cfg)
     env_resolved={"config_path": str(_need(env,"config_path")), "fallback": bool(env.get("fallback", False))}
     for key in ("scenario_bank_manifest","expected_split","expected_bank_hash","scenario_sampling_mode","scenario_sampling_seed"):
         if key in env: env_resolved[key]=env[key]
-    resolved={"run_classification": cfg.get("run_classification", "formal" if "paper" in str(env.get("config_path", "")) else "smoke"), "mode": mode, "env": env_resolved, "training": tr, "networks": net, "rlaif": rlaif, "output": out, "reward": cfg.get("reward", {})}
+    bank_cfg = cfg.get("scenario_bank", {})
+    env_resolved.setdefault("scenario_bank_manifest", bank_cfg.get("manifest"))
+    env_resolved.setdefault("expected_split", bank_cfg.get("split", "train"))
+    env_resolved.setdefault("expected_bank_hash", bank_cfg.get("bank_hash") or bank_cfg.get("expected_bank_hash"))
+    classification = cfg.get("run_classification", "formal" if "paper" in str(env.get("config_path", "")) else "smoke")
+    if classification == "formal":
+        for key in ("scenario_bank_manifest", "expected_split", "expected_bank_hash"):
+            if _is_placeholder(env_resolved.get(key)):
+                raise TrainingConfigError(f"formal MAPPO config missing env.{key}")
+        if env_resolved["expected_split"] != "train":
+            raise TrainingConfigError("formal MAPPO training requires the train scenario bank")
+    resolved={"run_classification": classification, "mode": mode, "env": env_resolved, "training": tr, "networks": net, "rlaif": rlaif, "output": out, "reward": cfg.get("reward", {})}
     validate_run_classification(resolved, config_only=True)
     return resolved
 

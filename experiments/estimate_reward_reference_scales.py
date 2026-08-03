@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np, yaml
 from envs.delivery_env import DynamicDeliveryEnv
 from envs.reward_components import REWARD_COMPONENTS
-from envs.reward_scales import canonical_payload_hash, load_reward_scale_artifact
+from envs.reward_scales import canonical_payload_hash, load_reward_scale_artifact, reward_scale_file_sha256
 from evaluation.scenario_bank import load_bank_manifest, load_scenario_bank, verify_scenario_hashes, sha256_file, sha256_json
 from evaluation.reward_scale_reference_policies import get_reference_policies
 
@@ -195,7 +195,7 @@ def run_estimation(scenario_bank, config, output, *, run_classification=None, sc
     artifact={"artifact_type":"reward_reference_scales","artifact_version":1,"run_classification":classification,"validation_status":"passed" if passed else "blocked","component_order":list(REWARD_COMPONENTS),"training_scenario_bank_path":str(scenario_bank),"training_scenario_bank_hash":bank.bank_hash,"training_scenario_count":len(bank.scenarios),"reference_policy_suite":[p.metadata() for p in pols],"estimator":cfg.get("estimator", {"method":"percentile","percentile":95}),"components":components,"scales":scales,"source_episode_file_hash":sha256_file(ep_jsonl),"statistics_file_hash":sha256_file(stat_json),"resolved_config_hash":resolved_hash,"code_commit":_git(),"creation_timestamp":time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     artifact["artifact_hash"]=canonical_payload_hash(artifact)
     out.write_text(json.dumps(artifact, indent=2, sort_keys=True)+"\n")
-    (outdir/"reward_scale_manifest.json").write_text(json.dumps({"artifact":out.name,"artifact_hash":artifact["artifact_hash"],"file_sha256":sha256_file(out),"validation_status":artifact["validation_status"],"runtime_files":[ep_csv.name,ep_jsonl.name,stat_csv.name,stat_json.name,"reward_scale_failures.json"]}, indent=2, sort_keys=True))
+    (outdir/"reward_scale_manifest.json").write_text(json.dumps({"artifact":out.name,"reward_scale_artifact_hash":artifact["artifact_hash"],"reward_scale_file_sha256":reward_scale_file_sha256(out),"validation_status":artifact["validation_status"],"runtime_files":[ep_csv.name,ep_jsonl.name,stat_csv.name,stat_json.name,"reward_scale_failures.json"]}, indent=2, sort_keys=True))
     load_reward_scale_artifact(out, expected_hash=artifact["artifact_hash"], expected_training_bank_hash=bank.bank_hash, formal_mode=(classification=="formal"))
     return artifact
 

@@ -86,7 +86,7 @@ def _resolve_config(src: Path, dst: Path, manifests: dict[str, dict[str, Any]], 
         cfg['scenario_bank']['expected_count'] = manifests['test']['scenario_count']
     if 'reward' in cfg:
         cfg['reward']['scale_artifact'] = str(output_root/'reward_scales/final_reward_reference_scales.json')
-        cfg['reward']['scale_artifact_hash'] = scale['artifact_hash']
+        cfg['reward']['reward_scale_artifact_hash'] = scale['artifact_hash']
         cfg['reward']['expected_training_scenario_bank_hash'] = manifests['train']['bank_hash']
     if cfg.get('algorithm') == 'assignment_ppo':
         pass

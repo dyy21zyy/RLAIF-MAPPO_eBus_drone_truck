@@ -17,6 +17,14 @@ class RewardScaleArtifact:
     training_scenario_bank_hash: str | None = None
     estimator: dict | None = None
 
+def reward_scale_file_sha256(path: str | Path) -> str:
+    """Hash serialized bytes, independently of the canonical artifact hash."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
 def canonical_payload_hash(payload: dict) -> str:
     clean = json.loads(json.dumps(payload, sort_keys=True, default=str))
     clean.pop("artifact_hash", None)
@@ -73,5 +81,10 @@ def load_reward_scale_artifact(path: str | Path, *, expected_hash: str | None = 
         if isinstance(v, bool): raise ValueError(f"Invalid boolean reward scale for {k}")
         f = float(v)
         if not math.isfinite(f) or f <= 0: raise ValueError(f"Reward scale for {k} must be finite and > 0")
+        if meta.get("structural_zero") is True:
+            if int(meta.get("positive_count", -1)) != 0:
+                raise ValueError(f"Structural-zero reward component {k} must have positive_count == 0")
+            if float(meta.get("scale", f)) != f:
+                raise ValueError(f"Structural-zero reward component {k} scale disagrees with scales registry")
         out[k] = f
     return RewardScaleArtifact(version, stored, out, p, classification, bank_hash, payload.get("estimator"))

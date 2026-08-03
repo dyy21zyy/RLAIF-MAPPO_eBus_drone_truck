@@ -125,9 +125,9 @@ def _inject_artifacts(template_path: Path, output_path: Path, manifest: dict[str
     if scale.exists():
         scale_payload=json.loads(scale.read_text())
         if scale_payload.get("training_scenario_bank_hash") != bank_hash: raise RuntimeError("reward scale train-bank lineage mismatch")
-        tpl["reward"]["scale_artifact_hash"] = scale_payload.get("artifact_hash") or _hash_json(scale)
+        tpl["reward"]["reward_scale_artifact_hash"] = scale_payload.get("artifact_hash") or _hash_json(scale)
     else:
-        tpl["reward"]["scale_artifact_hash"] = manifest.get("reward_scale_hash", bank_hash)
+        tpl["reward"]["reward_scale_artifact_hash"] = manifest.get("reward_scale_hash", bank_hash)
     tpl.setdefault("rlaif", {})["fallback_to_env_reward"] = False
     tpl["rlaif"]["fail_on_invalid_reward_model"] = True
     for agent in AGENT_TYPES:

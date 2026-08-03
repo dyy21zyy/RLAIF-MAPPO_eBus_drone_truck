@@ -293,7 +293,7 @@ reward.scale_artifact:
   category: project_extension
   source: Phase 1 runtime reward validation and normalization contract.
   notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
-reward.scale_artifact_hash:
+reward.reward_scale_artifact_hash:
   category: project_extension
   source: Phase 1 runtime reward validation and normalization contract.
   notes: Project-extension formal runtime parameter; not literature-derived unless separately documented.
