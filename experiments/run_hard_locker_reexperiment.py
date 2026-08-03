@@ -514,8 +514,29 @@ def _git(*args: str) -> str: return subprocess.check_output(["git",*args],text=T
 
 
 def _scenario_banks() -> dict[str, Path]:
-    candidates={"train":(Path("results/formal/scenario_banks/train/manifest.json"),Path("results/formal/scenarios/train/scenario_bank_manifest.json")),"validation":(Path("results/formal/scenario_banks/validation/manifest.json"),Path("results/formal/scenarios/validation/scenario_bank_manifest.json")),"test":(Path("results/formal/scenario_banks/test/manifest.json"),Path("data/scenarios/test/scenario_bank_manifest.json"))}
-    return {split:next((p for p in paths if p.is_file()),paths[0]) for split,paths in candidates.items()}
+    def candidates(split: str) -> tuple[Path, ...]:
+        return (
+            Path(f"results/formal/scenarios/{split}/scenario_bank_manifest.json"),
+            Path(f"results/formal/scenarios/{split}/manifest.json"),
+            Path(f"results/formal/scenario_banks/{split}/manifest.json"),
+            Path(f"results/formal/scenario_banks/{split}/scenario_bank_manifest.json"),
+            Path(f"data/scenarios/{split}/scenario_bank_manifest.json"),
+            Path(f"data/scenarios/{split}/manifest.json"),
+        )
+
+    selected = {}
+    for split in ("train", "validation", "test"):
+        ordered_candidates = candidates(split)
+        path = next((candidate for candidate in ordered_candidates if candidate.is_file()), None)
+        if path is None:
+            formatted = "\n".join(f"  - {candidate}" for candidate in ordered_candidates)
+            raise FileNotFoundError(
+                f"No formal scenario bank manifest exists for split {split!r}. "
+                f"Checked these candidates in order:\n{formatted}\n"
+                "A formal scenario bank must be generated or supplied at one of these paths."
+            )
+        selected[split] = path
+    return selected
 
 
 def restore_phase_0_context(context: ExperimentContext, bank_paths: dict[str,Path]|None=None) -> None:
