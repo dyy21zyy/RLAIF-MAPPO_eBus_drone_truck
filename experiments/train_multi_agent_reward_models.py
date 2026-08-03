@@ -40,6 +40,10 @@ def main(argv=None):
         print(json.dumps({'validation_status':'validated_inputs','split_counts':{'train':len(train),'validation':len(val),'test':len(test)}})); return 0
     out=ns.output or f'results/{cfg.get("run_classification","formal")}/reward_models/reward_{ns.agent}.pt'
     res=train_agent_reward_model(agent_type=ns.agent,train_dataset=train,validation_dataset=val,test_dataset=test,state_normalization=sn,candidate_normalization=cn,config=cfg,output_path=out)
-    Path(out).with_name('resolved_config.yaml').write_text(yaml.safe_dump(cfg)); Path(out).with_name('reward_model_run_manifest.json').write_text(json.dumps({'agent':ns.agent,'checkpoint_path':out,'validation_status':res.validation_status,'best_epoch':res.best_epoch},indent=2))
+    checkpoint=torch.load(out,map_location='cpu',weights_only=False)
+    manifest={'agent':ns.agent,'checkpoint_path':out,'validation_status':res.validation_status,'best_epoch':res.best_epoch}
+    for key in ('requested_device','resolved_device','require_cuda','cuda_available','cuda_device_name','cuda_device_index','peak_cuda_memory_bytes','elapsed_training_seconds','reproducibility'):
+        manifest[key]=checkpoint.get(key)
+    Path(out).with_name('resolved_config.yaml').write_text(yaml.safe_dump(cfg)); Path(out).with_name('reward_model_run_manifest.json').write_text(json.dumps(manifest,indent=2))
     print(json.dumps(res.__dict__,default=str)); return 0 if res.validation_status in ('passed','smoke_only') else 2
 if __name__=='__main__': raise SystemExit(main())

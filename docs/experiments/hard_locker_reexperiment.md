@@ -108,7 +108,9 @@ contract remain invalid.
 ### GPU prerequisite and operation
 
 Formal templates request `training.device: cuda` and `require_cuda: true`. Select a
-specific device with `--device cuda:0` (or use `--device cuda`). CUDA unavailability,
+specific device with `--device cuda:0` (or use `--device cuda`). The shared resolver
+also accepts `auto`, `cpu`, and any valid `cuda:<index>`; an explicit CPU selection
+is useful only for diagnostic execution, not the default formal CUDA experiment. CUDA unavailability,
 or an invalid index, fails closed in Phase 0. Inspect
 `<run_root>/gpu_readiness.json` for the actual CUDA allocation/matrix smoke, device
 name, capability, and memory. Per-seed `training_run_manifest.json` reports actual
@@ -118,6 +120,10 @@ Discrete-event simulation intentionally remains sequential on CPU. Actors, criti
 PPO minibatches, and the assignment reward model use CUDA, so utilization can be
 bursty. The six scientifically fixed seed runs execute sequentially on one GPU; they
 are not parallelized and AMP is not enabled.
+
+Checkpoints contain device provenance but tensors can always be restored with
+`torch.load(path, map_location="cpu")`; resuming does not require the same GPU model
+or index that originally produced the checkpoint.
 
 Dry plan (does not allocate CUDA, call an evaluator, or train):
 

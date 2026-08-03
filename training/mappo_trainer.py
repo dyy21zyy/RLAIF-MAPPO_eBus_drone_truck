@@ -74,6 +74,23 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+
+
+def reproducibility_state(seed: int) -> dict[str, Any]:
+    return {
+        "python_random_seed": seed, "numpy_seed": seed, "torch_cpu_seed": seed,
+        "torch_cuda_seed": seed, "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+        "cudnn_deterministic": torch.backends.cudnn.deterministic,
+        "cudnn_benchmark": torch.backends.cudnn.benchmark,
+        "cuda_matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+        "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+    }
 
 
 def _candidate_payload(observation: dict[str, Any], action: int) -> dict[str, Any]:
@@ -167,7 +184,7 @@ def collect_episode(
         action_payload = _candidate_payload(observation, action)
         if agent_id == "bus" and action_payload.get("action_type") == "charge":
             bus_charging_count += 1
-        with torch.no_grad():
+        with torch.inference_mode():
             parameter = next(critic.parameters(), None)
             critic_device = parameter.device if parameter is not None else torch.device("cpu")
             value = float(critic(torch.tensor(global_state, dtype=torch.float32, device=critic_device)).item())
@@ -411,6 +428,11 @@ def save_checkpoint(
             "training_metrics": metrics,
             "optimizer_updates": completed_updates,
             "torch_device": str(next(critic.parameters()).device),
+            "device_provenance": {
+                "requested_device": config.get("training", {}).get("device", "auto"),
+                "resolved_device": str(next(critic.parameters()).device),
+                "require_cuda": bool(config.get("training", {}).get("require_cuda", False)),
+            },
             "actor_specs": _actor_specs(actors),
             "dimensions": {
                 "actors": _actor_specs(actors),
@@ -721,7 +743,11 @@ def train_mappo_async(config: dict[str, Any], *, output_root=None) -> dict[str, 
       "reward_scale_path":config.get("reward",{}).get("scale_artifact"),"reward_scale_artifact_hash":config.get("reward",{}).get("reward_scale_artifact_hash"),
       "reward_model_path":reward_paths.get("assignment"),"reward_model_hash":reward_hashes.get("assignment"),
       "start_time":datetime.fromtimestamp(time.time()-(time.monotonic()-started),timezone.utc).isoformat(),"completion_time":datetime.now(timezone.utc).isoformat(),
-      "requested_device":training.get("device","auto"),"torch_device":str(device),"cuda_available":torch.cuda.is_available(),"cuda_device_name":torch.cuda.get_device_name(device) if device.type=="cuda" else None,"peak_allocated_cuda_bytes":torch.cuda.max_memory_allocated(device) if device.type=="cuda" else 0,"elapsed_training_seconds":time.monotonic()-started}
+      "requested_device":training.get("device","auto"),"resolved_device":str(device),"require_cuda":bool(training.get("require_cuda",False)),
+      "cuda_available":torch.cuda.is_available(),"cuda_device_name":torch.cuda.get_device_name(device) if device.type=="cuda" else None,
+      "cuda_device_index":device.index if device.type=="cuda" else None,
+      "peak_cuda_memory_bytes":torch.cuda.max_memory_allocated(device) if device.type=="cuda" else None,
+      "elapsed_training_seconds":time.monotonic()-started,"reproducibility":reproducibility_state(seed)}
     manifest_root = Path(config["output"].get("output_root", checkpoint_path.parent))
     manifest_root.mkdir(parents=True, exist_ok=True)
     (manifest_root/"training_run_manifest.json").write_text(json.dumps(manifest,indent=2,sort_keys=True)+"\n")
