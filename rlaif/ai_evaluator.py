@@ -41,6 +41,8 @@ class APISettings:
     model_name: str
     temperature: float = 0.0
     max_retries: int = 3
+    enable_thinking: bool = False
+    timeout_seconds: float = 60.0
 
 
 def load_api_settings(config_path: str | Path | None = None) -> APISettings:
@@ -167,6 +169,7 @@ def _default_api_call(
         {
             "model": settings.model_name,
             "temperature": settings.temperature,
+            "enable_thinking": settings.enable_thinking,
             "messages": [{"role": "user", "content": prompt_text}],
         }
     ).encode()
@@ -178,7 +181,10 @@ def _default_api_call(
             "Content-Type": "application/json",
         },
     )
-    with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+    with urllib.request.urlopen(
+        request,
+        timeout=settings.timeout_seconds,
+    ) as response:  # noqa: S310
         payload = json.load(response)
     return str(payload["choices"][0]["message"]["content"])
 

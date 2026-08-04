@@ -24,8 +24,17 @@ def test_legacy_aliases(alias,canonical): assert canonicalize_criteria([alias],l
 def test_criteria_contract_and_string_migration():
     assert canonicalize_criteria(["delivery_time"])[0] == ["delivery_time"]
     assert canonicalize_criteria("delivery time, lateness",legacy=True)[0] == ["delivery_time","expected_lateness"]
-    for bad in ({"delivery_time":"A"}, [], ["energy"], ["delivery_time","delivery_time"]):
-        with pytest.raises(ValueError): canonicalize_criteria(bad)
+    for bad in ({"delivery_time":"A"}, [], ["energy"]):
+        with pytest.raises(ValueError):
+            canonicalize_criteria(bad)
+
+    assert canonicalize_criteria(
+        ["delivery_time", "delivery_time"]
+    )[0] == ["delivery_time"]
+
+    assert canonicalize_criteria(
+        ["delivery_time", "estimated_delivery_time_norm"]
+    )[0] == ["delivery_time"]
 
 def test_direction_equality_and_applicability():
     a=candidate("TLD",expected_lateness=1,station_power_margin=4,drone_time=0)

@@ -40,6 +40,7 @@ evaluator:
   metric_comparison_tolerance: 1.0e-9
   temperature: 0.0
   max_retries: 3
+  enable_thinking: false
   timeout_seconds: 60
   failure_policy: fail_closed_no_fake_labels
   cache_dir: results/formal/rlaif/evaluator_cache_v2

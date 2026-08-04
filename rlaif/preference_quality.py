@@ -27,12 +27,57 @@ def _aliases(canonical: str, *values: str) -> dict[str, str]:
     return {v: canonical for v in (canonical, *values)}
 
 CRITERIA_ALIASES = {
-    **_aliases("delivery_time", "delivery time", "estimated_delivery_time", "estimated_delivery_time_norm"),
-    **_aliases("expected_lateness", "lateness", "expected lateness", "estimated_lateness", "estimated_lateness_norm"),
-    **_aliases("locker_congestion", "locker load", "locker congestion", "estimated_locker_load_after_assignment_norm"),
-    **_aliases("station_power_margin", "power margin", "station power margin", "estimated_station_power_margin_norm"),
-    **{c: c for c in CANONICAL_CRITERIA},
+    **_aliases(
+        "delivery_time",
+        "delivery time",
+        "estimated delivery time",
+        "estimated_delivery_time",
+        "estimated_delivery_time_norm",
+    ),
+    **_aliases(
+        "expected_lateness",
+        "lateness",
+        "expected lateness",
+        "estimated_lateness",
+        "estimated_lateness_norm",
+    ),
+    **_aliases(
+        "truck_distance",
+        "truck distance",
+        "estimated_truck_distance",
+        "estimated_truck_distance_norm",
+    ),
+    **_aliases(
+        "truck_time",
+        "truck time",
+        "estimated_truck_time",
+        "estimated_truck_time_norm",
+    ),
+    **_aliases(
+        "drone_time",
+        "drone time",
+        "estimated_drone_time",
+        "estimated_drone_time_norm",
+    ),
+    **_aliases(
+        "locker_congestion",
+        "locker load",
+        "locker congestion",
+        "locker_load",
+        "estimated_locker_load",
+        "estimated_locker_load_after_assignment",
+        "estimated_locker_load_after_assignment_norm",
+    ),
+    **_aliases(
+        "station_power_margin",
+        "power margin",
+        "station power margin",
+        "station_power_margin_norm",
+        "estimated_station_power_margin_norm",
+    ),
+    **{criterion: criterion for criterion in CANONICAL_CRITERIA},
 }
+
 
 @dataclass(frozen=True)
 class Metric:
@@ -99,10 +144,9 @@ def canonicalize_criteria(value: Any, *, legacy: bool = False) -> tuple[list[str
         canonical = CRITERIA_ALIASES.get(key)
         if canonical is None or canonical in FORBIDDEN_CRITERIA:
             raise ValueError(f"illegal or ambiguous criterion: {item}")
-        if not legacy and key != canonical:
-            raise ValueError(f"assignment v2 criterion is not canonical: {item}")
         if canonical in result:
-            raise ValueError(f"duplicate criterion: {canonical}")
+            actions.append(f"deduplicated:{item}->{canonical}")
+            continue
         result.append(canonical)
         if key != canonical:
             actions.append(f"canonicalized:{item}->{canonical}")
@@ -155,9 +199,27 @@ def validate_evidence(evidence: Any, a: Mapping[str, Any], b: Mapping[str, Any],
     for item in evidence:
         if not isinstance(item, Mapping) or set(item) != {"metric", "better_candidate"}:
             raise ValueError("each evidence item must contain only metric and better_candidate")
-        metric, claimed = item["metric"], item["better_candidate"]
-        if metric not in CANONICAL_CRITERIA or claimed not in {"A", "B", "equal"}:
+        raw_metric = item["metric"]
+        claimed = item["better_candidate"]
+
+        if not isinstance(raw_metric, str):
             raise ValueError("invalid evidence metric or direction")
+
+        metric_key = re.sub(
+            r"\\s+",
+            " ",
+            raw_metric.strip().lower(),
+        )
+        metric = CRITERIA_ALIASES.get(metric_key)
+
+        if (
+            metric is None
+            or metric in FORBIDDEN_CRITERIA
+            or metric not in CANONICAL_CRITERIA
+            or claimed not in {"A", "B", "equal"}
+        ):
+            raise ValueError("invalid evidence metric or direction")
+
         actual = compare_metric(a, b, metric, tolerance)
         if actual != claimed:
             raise ValueError(f"evidence direction error for {metric}: claimed {claimed}, actual {actual}")

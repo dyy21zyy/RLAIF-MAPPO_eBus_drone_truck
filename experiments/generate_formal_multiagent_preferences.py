@@ -44,11 +44,58 @@ def load_yaml(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text()) or {}
 
 def evaluator_settings(cfg: dict[str, Any]) -> APISettings:
-    ev=cfg.get('evaluator', {})
-    vals={k: os.environ.get(str(ev.get(f'{k}_env') or d), '').strip() for k,d in [('api_key','OPENAI_API_KEY'),('base_url','OPENAI_BASE_URL'),('model','OPENAI_MODEL')]}
-    if not vals['api_key'] or not vals['base_url'] or not vals['model']:
-        raise RuntimeError('missing API configuration: set OPENAI_API_KEY, OPENAI_BASE_URL, and OPENAI_MODEL')
-    return APISettings(vals['api_key'], vals['base_url'], vals['model'], float(ev.get('temperature',0.0)), int(ev.get('max_retries',3)))
+    ev = cfg.get("evaluator", {})
+
+    vals = {
+        key: os.environ.get(
+            str(ev.get(f"{key}_env") or default),
+            "",
+        ).strip()
+        for key, default in (
+            ("api_key", "OPENAI_API_KEY"),
+            ("base_url", "OPENAI_BASE_URL"),
+            ("model", "OPENAI_MODEL"),
+        )
+    }
+
+    if not vals["api_key"] or not vals["base_url"] or not vals["model"]:
+        raise RuntimeError(
+            "missing API configuration: set OPENAI_API_KEY, "
+            "OPENAI_BASE_URL, and OPENAI_MODEL"
+        )
+
+    enable_thinking = ev.get("enable_thinking", False)
+
+    if not isinstance(enable_thinking, bool):
+        raise ValueError("evaluator.enable_thinking must be boolean")
+
+    if enable_thinking is not False:
+        raise ValueError(
+            "formal assignment evaluation requires enable_thinking=false"
+        )
+
+    timeout_seconds = float(ev.get("timeout_seconds", 60))
+
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError(
+            "evaluator.timeout_seconds must be positive and finite"
+        )
+
+    max_retries = int(ev.get("max_retries", 3))
+
+    if max_retries < 1:
+        raise ValueError("evaluator.max_retries must be at least 1")
+
+    return APISettings(
+        api_key=vals["api_key"],
+        api_base_url=vals["base_url"],
+        model_name=vals["model"],
+        temperature=float(ev.get("temperature", 0.0)),
+        max_retries=max_retries,
+        enable_thinking=enable_thinking,
+        timeout_seconds=timeout_seconds,
+    )
+
 
 def validate_structured_response(raw: str) -> dict[str, Any]:
     try: data=json.loads(raw)
@@ -233,17 +280,112 @@ def collect_decision_states(config: dict[str, Any], *, output_root: Path|None=No
     config['_collection']={'collection_policy_id':policy_id,'collection_seed':seed}
     return states
 
-def build_prompt(state: dict[str,Any], a: dict[str,Any], b: dict[str,Any], cfg: dict[str,Any]) -> str:
-    agent=state['agent_type']; event=state['event_type']
-    focus={
-      'assignment':'delivery feasibility, delivery time, expected lateness, truck distance/time, mode-applicable bus wait/linehaul, drone time, locker congestion, and station power margin',
-      'truck':'route feasibility, parcel urgency, weight and volume capacity, travel distance and time, truck cost, downstream delivery feasibility, expected lateness',
-      'bus':'BUS_TERMINAL_DEPARTURE freight loading/passenger-service implications; BUS_STATION_ARRIVAL charging duration, state of charge, passenger delay, operating delay, station load, future trip feasibility',
-      'station':'parcel urgency, locker occupancy, drone availability, battery availability, charging-slot state, station power load, expected lateness, future congestion'}[agent]
-    ctx={'agent_type':agent,'event_type':event,'scenario_id':state['scenario_id'],'simulation_time':state['simulation_time'],'state_features':dict(zip(state['state_feature_names'],state['state_features'])),'candidate_A':a,'candidate_B':b,'consequence_A':a.get('consequence',{}),'consequence_B':b.get('consequence',{})}
-    schema = 'Return only JSON with preferred (A/B/equal), numeric confidence, nonempty canonical criteria list, nonempty evidence list of {metric, better_candidate}, and reason.' if _assignment_v2_enabled(cfg,agent) else 'Return only JSON with preferred (A/B/equal), confidence, criteria, reason.'
-    consequence = 'Candidate payloads are estimated candidate attributes, not simulated downstream consequences. ' if agent=='assignment' else ''
-    return 'Compare candidate A and B for the active operational decision. '+consequence+'Consider: '+focus+f". Event type is {event}. {schema} Do not mention learning algorithms. Context: "+json.dumps(ctx,sort_keys=True)
+def build_prompt(
+    state: dict[str, Any],
+    a: dict[str, Any],
+    b: dict[str, Any],
+    cfg: dict[str, Any],
+) -> str:
+    agent = state["agent_type"]
+    event = state["event_type"]
+
+    focus = {
+        "assignment": (
+            "delivery feasibility, delivery time, expected lateness, "
+            "truck distance/time, mode-applicable bus wait/linehaul, "
+            "drone time, locker congestion, and station power margin"
+        ),
+        "truck": (
+            "route feasibility, parcel urgency, weight and volume "
+            "capacity, travel distance and time, truck cost, "
+            "downstream delivery feasibility, expected lateness"
+        ),
+        "bus": (
+            "BUS_TERMINAL_DEPARTURE freight loading/passenger-service "
+            "implications; BUS_STATION_ARRIVAL charging duration, "
+            "state of charge, passenger delay, operating delay, "
+            "station load, future trip feasibility"
+        ),
+        "station": (
+            "parcel urgency, locker occupancy, drone availability, "
+            "battery availability, charging-slot state, station power "
+            "load, expected lateness, future congestion"
+        ),
+    }[agent]
+
+    context = {
+        "agent_type": agent,
+        "event_type": event,
+        "scenario_id": state["scenario_id"],
+        "simulation_time": state["simulation_time"],
+        "state_features": dict(
+            zip(
+                state["state_feature_names"],
+                state["state_features"],
+            )
+        ),
+        "candidate_A": a,
+        "candidate_B": b,
+        "consequence_A": a.get("consequence", {}),
+        "consequence_B": b.get("consequence", {}),
+    }
+
+    if _assignment_v2_enabled(cfg, agent):
+        canonical = [
+            "delivery_feasibility",
+            "delivery_time",
+            "expected_lateness",
+            "deadline_risk",
+            "truck_distance",
+            "truck_time",
+            "truck_capacity",
+            "bus_wait_time",
+            "bus_linehaul_time",
+            "bus_freight_capacity",
+            "drone_time",
+            "drone_feasibility",
+            "locker_congestion",
+            "station_power_margin",
+            "downstream_congestion",
+        ]
+
+        schema = (
+            "Return only JSON with preferred (A/B/equal), numeric "
+            "confidence, a nonempty criteria list, a nonempty evidence "
+            "list of {metric, better_candidate}, and reason. "
+            "criteria must contain only these exact canonical names: "
+            + ", ".join(canonical)
+            + ". Candidate feature names must not be copied into criteria. "
+            "Evidence metrics must refer to observable candidate metrics. "
+            "TLD does not use a bus. "
+            "TD does not use a locker or drone. "
+            "Do not claim energy, emissions, fuel consumption, or "
+            "simulated downstream consequences unless directly provided."
+        )
+    else:
+        schema = (
+            "Return only JSON with preferred (A/B/equal), confidence, "
+            "criteria, reason."
+        )
+
+    consequence = (
+        "Candidate payloads are estimated candidate attributes, not "
+        "simulated downstream consequences. "
+        if agent == "assignment"
+        else ""
+    )
+
+    return (
+        "Compare candidate A and B for the active operational decision. "
+        + consequence
+        + "Consider: "
+        + focus
+        + f". Event type is {event}. "
+        + schema
+        + " Do not mention learning algorithms. Context: "
+        + json.dumps(context, sort_keys=True)
+    )
+
 
 def cache_key(state:dict[str,Any], a:dict[str,Any], b:dict[str,Any], settings:APISettings, cfg:dict[str,Any], selected_agents: tuple[str,...] = tuple(AGENT_TYPES)) -> str:
     prompt_version,response_version=resolve_versions(cfg,state['agent_type']); ev=cfg.get('evaluator',{})
@@ -254,7 +396,7 @@ def make_preference_record(state:dict[str,Any], a:dict[str,Any], b:dict[str,Any]
     cf_names=[str(x) for x in a.get('feature_names') or b.get('feature_names') or [f'f{i}' for i in range(len(_features(a)))]]
     pair_hash=sha_json([state['scenario_hash'], state['state_id'], sorted([aid,bid])]); state_hash=sha_json({'scenario_hash':state['scenario_hash'],'id':state['state_id'],'features':state['state_features']})
     pv,rv=resolve_versions(cfg,state['agent_type'])
-    return {'preference_id':sha_json([state['state_id'],aid,bid,settings.model_name]),'agent_type':state['agent_type'],'event_type':state['event_type'],'scenario_id':state['scenario_id'],'scenario_hash':state['scenario_hash'],'scenario_bank_hash':state.get('scenario_bank_hash'),'scenario_split':state.get('scenario_split','train'),'episode_id':state['episode_id'],'state_id':state['state_id'],'decision_id':state['decision_id'],'simulation_time':state['simulation_time'],'state_feature_schema_version':str(OBSERVATION_SCHEMA_VERSION),'state_feature_names':state['state_feature_names'],'state_features':state['state_features'],'candidate_a_id':aid,'candidate_b_id':bid,'original_candidate_a_id':aid,'original_candidate_b_id':bid,'displayed_first_candidate_id':aid,'displayed_second_candidate_id':bid,'candidate_a_feature_names':cf_names,'candidate_b_feature_names':cf_names,'candidate_a_features':_features(a),'candidate_b_features':_features(b),'candidate_a_id_features':a,'candidate_b_id_features':b,'candidate_a_consequence':a.get('consequence',{}),'candidate_b_consequence':b.get('consequence',{}),'action_mask':state.get('action_mask',[True]*len(state['candidates'])),'prompt_version':pv,'evaluator_prompt_version':pv,'response_schema_version':rv,'quality_gate_version':response.get('quality_gate_version'),'consequence_mode':response.get('consequence_mode'),'dataset_split':split,'state_hash':state_hash,'candidate_pair_hash':pair_hash,'reversed_candidate_pair_hash':pair_hash,'original_outcome':outcome,'label_source':'external_evaluator_api','evaluator_model':settings.model_name,'confidence':response['confidence'],'criteria':response.get('criteria',{}),'evidence':response.get('validated_evidence',response.get('evidence')),'raw_evaluator_reason':response.get('raw_evaluator_reason',response['reason']),'reason':response['reason'],'observation_schema_version':OBSERVATION_SCHEMA_VERSION,'candidate_schema_version':CANDIDATE_SCHEMA_VERSION,'event_schema_version':EVENT_SCHEMA_VERSION,'collection_policy_id':state.get('collection_policy_id'),'collection_seed':state.get('collection_seed'),'selected_rollout_action':state.get('selected_rollout_action'),'created_at':datetime.now(timezone.utc).isoformat()}
+    return {'preference_id':sha_json([state['state_id'],aid,bid,settings.model_name]),'agent_type':state['agent_type'],'event_type':state['event_type'],'scenario_id':state['scenario_id'],'scenario_hash':state['scenario_hash'],'scenario_bank_hash':state.get('scenario_bank_hash'),'scenario_split':state.get('scenario_split','train'),'episode_id':state['episode_id'],'state_id':state['state_id'],'decision_id':state['decision_id'],'simulation_time':state['simulation_time'],'state_feature_schema_version':str(OBSERVATION_SCHEMA_VERSION),'state_feature_names':state['state_feature_names'],'state_features':state['state_features'],'candidate_a_id':aid,'candidate_b_id':bid,'original_candidate_a_id':aid,'original_candidate_b_id':bid,'displayed_first_candidate_id':aid,'displayed_second_candidate_id':bid,'candidate_a_feature_names':cf_names,'candidate_b_feature_names':cf_names,'candidate_a_features':_features(a),'candidate_b_features':_features(b),'candidate_a_id_features':a,'candidate_b_id_features':b,'candidate_a_consequence':a.get('consequence',{}),'candidate_b_consequence':b.get('consequence',{}),'action_mask':state.get('action_mask',[True]*len(state['candidates'])),'prompt_version':pv,'evaluator_prompt_version':pv,'response_schema_version':rv,'quality_gate_version':response.get('quality_gate_version'),'consequence_mode':response.get('consequence_mode'),'dataset_split':split,'state_hash':state_hash,'candidate_pair_hash':pair_hash,'reversed_candidate_pair_hash':pair_hash,'original_outcome':outcome,'label_source':'external_evaluator_api','evaluator_model':settings.model_name,'evaluator_enable_thinking':settings.enable_thinking,'source_generation_enable_thinking':response.get('_source_generation_enable_thinking',settings.enable_thinking),'confidence':response['confidence'],'criteria':response.get('criteria',{}),'evidence':response.get('validated_evidence',response.get('evidence')),'raw_evaluator_reason':response.get('raw_evaluator_reason',response['reason']),'reason':response['reason'],'observation_schema_version':OBSERVATION_SCHEMA_VERSION,'candidate_schema_version':CANDIDATE_SCHEMA_VERSION,'event_schema_version':EVENT_SCHEMA_VERSION,'collection_policy_id':state.get('collection_policy_id'),'collection_seed':state.get('collection_seed'),'selected_rollout_action':state.get('selected_rollout_action'),'created_at':datetime.now(timezone.utc).isoformat()}
 
 def validate_split_isolation(rows:list[dict[str,Any]])->None:
     by={k:{} for k in ('scenario_id','scenario_hash','decision_id','state_hash','candidate_pair_hash','reversed_candidate_pair_hash')}
@@ -355,8 +497,31 @@ def generate(config_path:Path, output_root:Path, *, resume:bool=False, dry_run:b
             ck=cache_key(st,a,b,settings,cfg,selected_agents); cp=cache_dir/f'{ck}.json'; raw=''; err=''
             try:
                 if cp.is_file():
-                    raw=json.loads(cp.read_text())['raw_response']; parsed=validate_structured_response(raw)
-                    resp=validate_assignment_v2(parsed,a,b,tolerance=float(cfg.get('evaluator',{}).get('metric_comparison_tolerance',1e-9))) if _assignment_v2_enabled(cfg,agent) else parsed; cache_hits+=1
+                    cache_payload = json.loads(cp.read_text())
+                    raw = cache_payload["raw_response"]
+                    parsed = validate_structured_response(raw)
+                    resp = (
+                        validate_assignment_v2(
+                            parsed,
+                            a,
+                            b,
+                            tolerance=float(
+                                cfg.get("evaluator", {}).get(
+                                    "metric_comparison_tolerance",
+                                    1e-9,
+                                )
+                            ),
+                        )
+                        if _assignment_v2_enabled(cfg, agent)
+                        else parsed
+                    )
+                    resp["_source_generation_enable_thinking"] = (
+                        cache_payload.get(
+                            "enable_thinking",
+                            "legacy_unspecified",
+                        )
+                    )
+                    cache_hits += 1
                 else:
                     if external_calls >= budget: raise RuntimeError(f'{agent} maximum API-attempt budget exhausted ({budget}) before target was met')
                     for attempt in range(settings.max_retries):
@@ -364,8 +529,62 @@ def generate(config_path:Path, output_root:Path, *, resume:bool=False, dry_run:b
                         try:
                             raw=call(build_prompt(st,a,b,cfg),settings); external_calls+=1
                             parsed=validate_structured_response(raw)
-                            resp=validate_assignment_v2(parsed,a,b,tolerance=float(cfg.get('evaluator',{}).get('metric_comparison_tolerance',1e-9))) if _assignment_v2_enabled(cfg,agent) else parsed
-                            cp.write_text(json.dumps({'identity':ck,'raw_response':raw,'prompt_version':resolve_versions(cfg,agent)[0],'response_schema_version':resolve_versions(cfg,agent)[1],'quality_gate_version':QUALITY_GATE_VERSION if agent=='assignment' else None,'consequence_mode':CONSEQUENCE_MODE if agent=='assignment' else None},sort_keys=True)); break
+                            resp = (
+                                validate_assignment_v2(
+                                    parsed,
+                                    a,
+                                    b,
+                                    tolerance=float(
+                                        cfg.get("evaluator", {}).get(
+                                            "metric_comparison_tolerance",
+                                            1e-9,
+                                        )
+                                    ),
+                                )
+                                if _assignment_v2_enabled(cfg, agent)
+                                else parsed
+                            )
+                            resp["_source_generation_enable_thinking"] = (
+                                settings.enable_thinking
+                            )
+                            cp.write_text(
+                                json.dumps(
+                                    {
+                                        "identity": ck,
+                                        "raw_response": raw,
+                                        "prompt_version": resolve_versions(
+                                            cfg,
+                                            agent,
+                                        )[0],
+                                        "response_schema_version": resolve_versions(
+                                            cfg,
+                                            agent,
+                                        )[1],
+                                        "quality_gate_version": (
+                                            QUALITY_GATE_VERSION
+                                            if agent == "assignment"
+                                            else None
+                                        ),
+                                        "consequence_mode": (
+                                            CONSEQUENCE_MODE
+                                            if agent == "assignment"
+                                            else None
+                                        ),
+                                        "enable_thinking": (
+                                            settings.enable_thinking
+                                        ),
+                                        "timeout_seconds": (
+                                            settings.timeout_seconds
+                                        ),
+                                        "evaluator_model": (
+                                            settings.model_name
+                                        ),
+                                        "validation_status": "passed",
+                                    },
+                                    sort_keys=True,
+                                )
+                            )
+                            break
                         except Exception as exc:
                             err=str(exc); time.sleep(0.01*(attempt+1))
                     else: raise ValueError(err)
