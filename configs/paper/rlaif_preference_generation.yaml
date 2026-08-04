@@ -33,11 +33,36 @@ evaluator:
   model_env: OPENAI_MODEL
   prompt_version: four_agent_consequence_v1
   structured_output_schema_version: rlaif_preference_json_v1
+  assignment_prompt_version: assignment_grounded_preference_v2
+  assignment_structured_output_schema_version: rlaif_preference_json_v2
+  assignment_quality_gate_version: assignment_preference_quality_v1
+  assignment_consequence_mode: estimated_candidate_attributes
+  metric_comparison_tolerance: 1.0e-9
   temperature: 0.0
   max_retries: 3
   timeout_seconds: 60
   failure_policy: fail_closed_no_fake_labels
-  cache_dir: results/formal/rlaif/evaluator_cache
+  cache_dir: results/formal/rlaif/evaluator_cache_v2
+preference_quality:
+  fail_closed: true
+  require_nonempty_criteria: true
+  require_nonempty_evidence: true
+  require_grounded_support_for_preferred: true
+  reject_mode_semantic_errors: true
+  reject_forbidden_claims: true
+  reject_direction_errors: true
+  reject_strict_dominance: true
+  deterministic_canonical_reason: true
+pair_sampling:
+  mode: proportional_with_coverage_floors
+  min_total_per_present_pair_type: 30
+  min_per_split_per_present_pair_type: 5
+legacy_migration:
+  enabled: true
+  input_path_env: FORMAL_LEGACY_ASSIGNMENT_PREFERENCES
+  expected_count: 200
+  expected_sha256_env: FORMAL_LEGACY_ASSIGNMENT_PREFERENCES_SHA256
+  re_evaluate_quarantined: true
 agents:
   assignment:
     agent_type: assignment

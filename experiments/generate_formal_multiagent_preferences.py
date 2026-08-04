@@ -17,6 +17,8 @@ import yaml
 from rlaif.ai_evaluator import APISettings, _default_api_call
 from rlaif.grouped_split import grouped_split
 from rlaif.preference_dataset import write_jsonl, read_jsonl
+from rlaif.preference_quality import (ASSIGNMENT_PROMPT_VERSION, ASSIGNMENT_RESPONSE_SCHEMA_VERSION,
+    CONSEQUENCE_MODE, QUALITY_GATE_VERSION, assignment_pair_type, validate_assignment_v2)
 from envs import DynamicDeliveryEnv
 from envs.reward_components import REWARD_COMPONENTS
 from evaluation.scenario_bank import load_scenario_bank, load_frozen_instance, load_bank_manifest, sha256_file as bank_sha256_file
@@ -61,6 +63,15 @@ def validate_structured_response(raw: str) -> dict[str, Any]:
     if any(w in blob for w in FORBIDDEN_RESPONSE_WORDS): raise ValueError('response refers to hidden method names')
     data['confidence']=conf
     return data
+
+def _assignment_v2_enabled(cfg: dict[str, Any], agent: str) -> bool:
+    return agent == 'assignment' and cfg.get('evaluator',{}).get('assignment_structured_output_schema_version') == ASSIGNMENT_RESPONSE_SCHEMA_VERSION
+
+def resolve_versions(cfg: dict[str, Any], agent: str) -> tuple[str,str]:
+    ev=cfg.get('evaluator',{})
+    if _assignment_v2_enabled(cfg,agent):
+        return ev.get('assignment_prompt_version',ASSIGNMENT_PROMPT_VERSION), ev.get('assignment_structured_output_schema_version',ASSIGNMENT_RESPONSE_SCHEMA_VERSION)
+    return ev.get('prompt_version',PROMPT_VERSION), ev.get('structured_output_schema_version',RESPONSE_SCHEMA_VERSION)
 
 def route_event(event_type: object) -> str:
     return decision_event_agent(normalize_decision_event_type(event_type))
@@ -225,21 +236,25 @@ def collect_decision_states(config: dict[str, Any], *, output_root: Path|None=No
 def build_prompt(state: dict[str,Any], a: dict[str,Any], b: dict[str,Any], cfg: dict[str,Any]) -> str:
     agent=state['agent_type']; event=state['event_type']
     focus={
-      'assignment':'delivery feasibility, deadline risk, expected lateness, truck capacity, bus freight capacity, locker congestion, drone feasibility, energy and downstream congestion',
+      'assignment':'delivery feasibility, delivery time, expected lateness, truck distance/time, mode-applicable bus wait/linehaul, drone time, locker congestion, and station power margin',
       'truck':'route feasibility, parcel urgency, weight and volume capacity, travel distance and time, truck cost, downstream delivery feasibility, expected lateness',
       'bus':'BUS_TERMINAL_DEPARTURE freight loading/passenger-service implications; BUS_STATION_ARRIVAL charging duration, state of charge, passenger delay, operating delay, station load, future trip feasibility',
       'station':'parcel urgency, locker occupancy, drone availability, battery availability, charging-slot state, station power load, expected lateness, future congestion'}[agent]
     ctx={'agent_type':agent,'event_type':event,'scenario_id':state['scenario_id'],'simulation_time':state['simulation_time'],'state_features':dict(zip(state['state_feature_names'],state['state_features'])),'candidate_A':a,'candidate_B':b,'consequence_A':a.get('consequence',{}),'consequence_B':b.get('consequence',{})}
-    return 'Compare candidate A and B for the active operational decision. Consider: '+focus+f". Event type is {event}. Return only JSON with preferred (A/B/equal), confidence, criteria, reason. Do not mention learning algorithms. Context: "+json.dumps(ctx,sort_keys=True)
+    schema = 'Return only JSON with preferred (A/B/equal), numeric confidence, nonempty canonical criteria list, nonempty evidence list of {metric, better_candidate}, and reason.' if _assignment_v2_enabled(cfg,agent) else 'Return only JSON with preferred (A/B/equal), confidence, criteria, reason.'
+    consequence = 'Candidate payloads are estimated candidate attributes, not simulated downstream consequences. ' if agent=='assignment' else ''
+    return 'Compare candidate A and B for the active operational decision. '+consequence+'Consider: '+focus+f". Event type is {event}. {schema} Do not mention learning algorithms. Context: "+json.dumps(ctx,sort_keys=True)
 
 def cache_key(state:dict[str,Any], a:dict[str,Any], b:dict[str,Any], settings:APISettings, cfg:dict[str,Any], selected_agents: tuple[str,...] = tuple(AGENT_TYPES)) -> str:
-    return sha_json({'agent_type':state['agent_type'],'event_type':state['event_type'],'scenario_hash':state['scenario_hash'],'decision_state_hash':sha_json({'id':state['state_id'],'features':state['state_features']}),'candidate_pair_hash':sha_json(sorted([_candidate_id(a),_candidate_id(b)])),'prompt_version':cfg['evaluator'].get('prompt_version',PROMPT_VERSION),'response_schema_version':cfg['evaluator'].get('structured_output_schema_version',RESPONSE_SCHEMA_VERSION),'evaluator_model':settings.model_name,'temperature':settings.temperature,'selected_agents':list(selected_agents),'observation_schema_version':OBSERVATION_SCHEMA_VERSION,'candidate_schema_version':CANDIDATE_SCHEMA_VERSION,'event_schema_version':EVENT_SCHEMA_VERSION})
+    prompt_version,response_version=resolve_versions(cfg,state['agent_type']); ev=cfg.get('evaluator',{})
+    return sha_json({'agent_type':state['agent_type'],'event_type':state['event_type'],'scenario_hash':state['scenario_hash'],'decision_state_hash':sha_json({'id':state['state_id'],'features':state['state_features']}),'candidate_pair_hash':sha_json(sorted([_candidate_id(a),_candidate_id(b)])),'prompt_version':prompt_version,'response_schema_version':response_version,'quality_gate_version':ev.get('assignment_quality_gate_version') if state['agent_type']=='assignment' else None,'consequence_mode':ev.get('assignment_consequence_mode') if state['agent_type']=='assignment' else None,'evaluator_model':settings.model_name,'temperature':settings.temperature,'selected_agents':list(selected_agents),'observation_schema_version':OBSERVATION_SCHEMA_VERSION,'candidate_schema_version':CANDIDATE_SCHEMA_VERSION,'event_schema_version':EVENT_SCHEMA_VERSION})
 
 def make_preference_record(state:dict[str,Any], a:dict[str,Any], b:dict[str,Any], response:dict[str,Any], split:str, settings:APISettings, cfg:dict[str,Any]) -> dict[str,Any]:
     aid,bid=_candidate_id(a),_candidate_id(b); outcome={'A':'candidate_a','B':'candidate_b','equal':'tie'}[response['preferred']]
     cf_names=[str(x) for x in a.get('feature_names') or b.get('feature_names') or [f'f{i}' for i in range(len(_features(a)))]]
     pair_hash=sha_json([state['scenario_hash'], state['state_id'], sorted([aid,bid])]); state_hash=sha_json({'scenario_hash':state['scenario_hash'],'id':state['state_id'],'features':state['state_features']})
-    return {'preference_id':sha_json([state['state_id'],aid,bid,settings.model_name]),'agent_type':state['agent_type'],'event_type':state['event_type'],'scenario_id':state['scenario_id'],'scenario_hash':state['scenario_hash'],'scenario_bank_hash':state.get('scenario_bank_hash'),'scenario_split':state.get('scenario_split','train'),'episode_id':state['episode_id'],'state_id':state['state_id'],'decision_id':state['decision_id'],'simulation_time':state['simulation_time'],'state_feature_schema_version':str(OBSERVATION_SCHEMA_VERSION),'state_feature_names':state['state_feature_names'],'state_features':state['state_features'],'candidate_a_id':aid,'candidate_b_id':bid,'original_candidate_a_id':aid,'original_candidate_b_id':bid,'displayed_first_candidate_id':aid,'displayed_second_candidate_id':bid,'candidate_a_feature_names':cf_names,'candidate_b_feature_names':cf_names,'candidate_a_features':_features(a),'candidate_b_features':_features(b),'candidate_a_id_features':a,'candidate_b_id_features':b,'candidate_a_consequence':a.get('consequence',{}),'candidate_b_consequence':b.get('consequence',{}),'action_mask':state.get('action_mask',[True]*len(state['candidates'])),'prompt_version':cfg['evaluator'].get('prompt_version',PROMPT_VERSION),'evaluator_prompt_version':cfg['evaluator'].get('prompt_version',PROMPT_VERSION),'response_schema_version':cfg['evaluator'].get('structured_output_schema_version',RESPONSE_SCHEMA_VERSION),'dataset_split':split,'state_hash':state_hash,'candidate_pair_hash':pair_hash,'reversed_candidate_pair_hash':pair_hash,'original_outcome':outcome,'label_source':'external_evaluator_api','evaluator_model':settings.model_name,'confidence':response['confidence'],'criteria':response.get('criteria',{}),'reason':response['reason'],'observation_schema_version':OBSERVATION_SCHEMA_VERSION,'candidate_schema_version':CANDIDATE_SCHEMA_VERSION,'event_schema_version':EVENT_SCHEMA_VERSION,'collection_policy_id':state.get('collection_policy_id'),'collection_seed':state.get('collection_seed'),'selected_rollout_action':state.get('selected_rollout_action'),'created_at':datetime.now(timezone.utc).isoformat()}
+    pv,rv=resolve_versions(cfg,state['agent_type'])
+    return {'preference_id':sha_json([state['state_id'],aid,bid,settings.model_name]),'agent_type':state['agent_type'],'event_type':state['event_type'],'scenario_id':state['scenario_id'],'scenario_hash':state['scenario_hash'],'scenario_bank_hash':state.get('scenario_bank_hash'),'scenario_split':state.get('scenario_split','train'),'episode_id':state['episode_id'],'state_id':state['state_id'],'decision_id':state['decision_id'],'simulation_time':state['simulation_time'],'state_feature_schema_version':str(OBSERVATION_SCHEMA_VERSION),'state_feature_names':state['state_feature_names'],'state_features':state['state_features'],'candidate_a_id':aid,'candidate_b_id':bid,'original_candidate_a_id':aid,'original_candidate_b_id':bid,'displayed_first_candidate_id':aid,'displayed_second_candidate_id':bid,'candidate_a_feature_names':cf_names,'candidate_b_feature_names':cf_names,'candidate_a_features':_features(a),'candidate_b_features':_features(b),'candidate_a_id_features':a,'candidate_b_id_features':b,'candidate_a_consequence':a.get('consequence',{}),'candidate_b_consequence':b.get('consequence',{}),'action_mask':state.get('action_mask',[True]*len(state['candidates'])),'prompt_version':pv,'evaluator_prompt_version':pv,'response_schema_version':rv,'quality_gate_version':response.get('quality_gate_version'),'consequence_mode':response.get('consequence_mode'),'dataset_split':split,'state_hash':state_hash,'candidate_pair_hash':pair_hash,'reversed_candidate_pair_hash':pair_hash,'original_outcome':outcome,'label_source':'external_evaluator_api','evaluator_model':settings.model_name,'confidence':response['confidence'],'criteria':response.get('criteria',{}),'evidence':response.get('validated_evidence',response.get('evidence')),'raw_evaluator_reason':response.get('raw_evaluator_reason',response['reason']),'reason':response['reason'],'observation_schema_version':OBSERVATION_SCHEMA_VERSION,'candidate_schema_version':CANDIDATE_SCHEMA_VERSION,'event_schema_version':EVENT_SCHEMA_VERSION,'collection_policy_id':state.get('collection_policy_id'),'collection_seed':state.get('collection_seed'),'selected_rollout_action':state.get('selected_rollout_action'),'created_at':datetime.now(timezone.utc).isoformat()}
 
 def validate_split_isolation(rows:list[dict[str,Any]])->None:
     by={k:{} for k in ('scenario_id','scenario_hash','decision_id','state_hash','candidate_pair_hash','reversed_candidate_pair_hash')}
@@ -340,14 +355,17 @@ def generate(config_path:Path, output_root:Path, *, resume:bool=False, dry_run:b
             ck=cache_key(st,a,b,settings,cfg,selected_agents); cp=cache_dir/f'{ck}.json'; raw=''; err=''
             try:
                 if cp.is_file():
-                    resp=validate_structured_response(json.loads(cp.read_text())['raw_response']); cache_hits+=1
+                    raw=json.loads(cp.read_text())['raw_response']; parsed=validate_structured_response(raw)
+                    resp=validate_assignment_v2(parsed,a,b,tolerance=float(cfg.get('evaluator',{}).get('metric_comparison_tolerance',1e-9))) if _assignment_v2_enabled(cfg,agent) else parsed; cache_hits+=1
                 else:
                     if external_calls >= budget: raise RuntimeError(f'{agent} maximum API-attempt budget exhausted ({budget}) before target was met')
                     for attempt in range(settings.max_retries):
                         if external_calls >= budget: raise RuntimeError(f'{agent} maximum API-attempt budget exhausted ({budget}) before target was met')
                         try:
                             raw=call(build_prompt(st,a,b,cfg),settings); external_calls+=1
-                            resp=validate_structured_response(raw); cp.write_text(json.dumps({'identity':ck,'raw_response':raw},sort_keys=True)); break
+                            parsed=validate_structured_response(raw)
+                            resp=validate_assignment_v2(parsed,a,b,tolerance=float(cfg.get('evaluator',{}).get('metric_comparison_tolerance',1e-9))) if _assignment_v2_enabled(cfg,agent) else parsed
+                            cp.write_text(json.dumps({'identity':ck,'raw_response':raw,'prompt_version':resolve_versions(cfg,agent)[0],'response_schema_version':resolve_versions(cfg,agent)[1],'quality_gate_version':QUALITY_GATE_VERSION if agent=='assignment' else None,'consequence_mode':CONSEQUENCE_MODE if agent=='assignment' else None},sort_keys=True)); break
                         except Exception as exc:
                             err=str(exc); time.sleep(0.01*(attempt+1))
                     else: raise ValueError(err)
