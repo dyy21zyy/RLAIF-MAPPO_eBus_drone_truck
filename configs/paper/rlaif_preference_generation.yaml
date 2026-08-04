@@ -42,8 +42,8 @@ agents:
   assignment:
     agent_type: assignment
     supported_event_types: [PARCEL_RELEASE]
-    target_valid_pair_count: 200
-    max_api_attempts: 600
+    target_valid_pair_count: 1600
+    max_api_attempts: 3000
     scenario_allocation: proportional_final_train_bank
     output_preferences: results/formal/rlaif/preferences/preference_assignment.jsonl
     failed_requests: results/formal/rlaif/failed/assignment_failed.jsonl

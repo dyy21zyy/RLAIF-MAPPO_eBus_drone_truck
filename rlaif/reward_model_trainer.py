@@ -64,11 +64,17 @@ def _git_sha():
     try: return subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
     except Exception: return 'unknown'
 
+def _reset_peak_memory_stats(device:torch.device)->None:
+    if device.type != 'cuda':
+        return
+    torch.cuda.init()
+    torch.cuda.reset_peak_memory_stats(device)
+
 def train_agent_reward_model(*, agent_type:str, train_dataset:RewardPairDataset, validation_dataset:RewardPairDataset, test_dataset:RewardPairDataset, state_normalization:FeatureNormalization, candidate_normalization:FeatureNormalization, config:dict, output_path:str)->RewardTrainingResult:
     tr=config.get('training',{}); seed=int(tr.get('seed',1)); gen=set_reward_training_seed(seed); started=time.monotonic()
     from training.device import resolve_torch_device
     device=resolve_torch_device(tr.get('device','auto'), require_cuda=bool(tr.get('require_cuda',False)))
-    if device.type == 'cuda': torch.cuda.reset_peak_memory_stats(device)
+    _reset_peak_memory_stats(device)
     model_cfg=config.get('model',{}); model=AgentRewardModel(state_dim=train_dataset.state_dim,candidate_dim=train_dataset.candidate_dim,num_event_types=len(EVENT_NAME_TO_ID),event_embedding_dim=int(model_cfg.get('event_embedding_dim',16)),hidden_dims=tuple(model_cfg.get('hidden_dims',[64,64])),dropout=float(model_cfg.get('dropout',0.0))).to(device)
     opt=torch.optim.Adam(model.parameters(),lr=float(tr.get('learning_rate',1e-3)),weight_decay=float(tr.get('weight_decay',0.0)))
     best=None; best_loss=float('inf'); best_epoch=0; patience=0; hist=[]; epochs=int(tr.get('epochs',10)); batch_size=int(tr.get('batch_size',32)); minimp=float(tr.get('minimum_improvement',1e-4)); maxgn=float(tr.get('max_grad_norm',1.0))
