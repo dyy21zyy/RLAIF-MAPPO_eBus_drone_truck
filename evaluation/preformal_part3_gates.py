@@ -87,18 +87,60 @@ def validate_reconciliation(row:dict)->None:
     if row.get('method_id')=='mappo_env' and any(val(k)!=0 for k in ('assignment_rlaif_contribution','truck_rlaif_contribution','bus_rlaif_contribution','station_rlaif_contribution')): raise BenchmarkIntegrityError('environment MAPPO must have zero RLAIF')
     if row.get('method_id')=='mappo_rlaif_assignment' and any(val(k)!=0 for k in ('truck_rlaif_contribution','bus_rlaif_contribution','station_rlaif_contribution')): raise BenchmarkIntegrityError('assignment RLAIF leaked to other agents')
 
-def expected_row_report(methods:list[dict], scenarios:list[str]) -> dict:
-    exp=[]
-    for m in methods:
-        if not m.get('enabled',True): continue
-        seeds=m.get('training_seeds',[m.get('training_seed')])
-        if m.get('method_id') not in LEARNED_METHODS: seeds=[None]
-        for s in seeds:
-            for sc in scenarios: exp.append((m.get('method_id'),s,sc))
-    return {"expected_rows":len(exp),"expected_identities":exp}
+def expected_row_report(
+    methods: list[dict],
+    scenarios: list[str],
+    *,
+    training_seeds=None,
+) -> dict:
+    exp = []
 
-def validate_expected_rows(methods, scenarios, rows):
-    rep=expected_row_report(methods,scenarios); actual=[(r.get('method_id'),r.get('training_seed'),r.get('scenario_id')) for r in rows if r.get('status')=='success']; failed=[r for r in rows if r.get('status')!='success']
+    for method in methods:
+        if not method.get("enabled", True):
+            continue
+
+        seeds = (
+            method.get("training_seeds")
+            or training_seeds
+            or (
+                [method.get("training_seed")]
+                if method.get("training_seed") is not None
+                else [None]
+            )
+        )
+
+        if method.get("method_id") not in LEARNED_METHODS:
+            seeds = [None]
+
+        for seed in seeds:
+            for scenario in scenarios:
+                exp.append(
+                    (
+                        method.get("method_id"),
+                        seed,
+                        scenario,
+                    )
+                )
+
+    return {
+        "expected_rows": len(exp),
+        "expected_identities": exp,
+    }
+
+
+def validate_expected_rows(
+    methods,
+    scenarios,
+    rows,
+    *,
+    training_seeds=None,
+):
+    rep = expected_row_report(
+        methods,
+        scenarios,
+        training_seeds=training_seeds,
+    )
+    actual=[(r.get('method_id'),r.get('training_seed'),r.get('scenario_id')) for r in rows if r.get('status')=='success']; failed=[r for r in rows if r.get('status')!='success']
     rep.update({"actual_successful_rows":len(actual),"actual_failed_rows":len(failed),"missing_rows":[x for x in rep['expected_identities'] if x not in actual],"duplicate_rows":[x for x in set(actual) if actual.count(x)>1]}); return rep
 
 def validate_event_coverage(rows):

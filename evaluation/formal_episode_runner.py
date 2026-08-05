@@ -219,6 +219,30 @@ def evaluate_policy_on_frozen_scenario(*, scenario, method_spec, policy, reward_
     try:
         inst=load_frozen_instance(scenario)
         env=DynamicDeliveryEnv(Path(scenario.instance_path))
+
+        if isinstance(evaluation_config, dict):
+            scale_path = evaluation_config.get(
+                "reward_scale_artifact_path"
+            )
+            scale_hash = evaluation_config.get(
+                "reward_scale_artifact_hash"
+            )
+
+            if scale_path:
+                reward_config = env.config.setdefault(
+                    "reward",
+                    {},
+                )
+                reward_config["apply_reference_scales"] = True
+                reward_config["scale_artifact"] = str(
+                    scale_path
+                )
+
+                if scale_hash:
+                    reward_config[
+                        "scale_artifact_hash"
+                    ] = str(scale_hash)
+
         obs,_=env.reset(seed=training_seed)
         limit=int(evaluation_config.get("max_decisions", 10000)) if isinstance(evaluation_config, dict) else 10000
         while obs.get("agent_id") != "terminal" and transitions < limit:

@@ -284,6 +284,18 @@ def run_benchmark(config_path, *, validate_only=False, resume=False, method=None
     cfg=load_config(config_path); formal=cfg.get('run_classification')=='formal'
     readiness=validate_readiness(config_path)
     if formal and readiness['status']!=READY_FOR_FORMAL_EVALUATION: raise SystemExit(2)
+    evaluation_config = dict(
+        cfg.get("evaluation") or {}
+    )
+    evaluation_config.setdefault(
+        "reward_scale_artifact_path",
+        cfg.get("reward_scale_artifact_path"),
+    )
+    evaluation_config.setdefault(
+        "reward_scale_artifact_hash",
+        cfg.get("reward_scale_artifact_hash"),
+    )
+
     bank=load_scenario_bank(cfg['scenario_bank']['manifest'])
     if cfg.get('scenario_bank',{}).get('expected_count') and int(cfg['scenario_bank']['expected_count']) != len(bank.scenarios):
         raise SystemExit('scenario bank expected_count mismatch')
@@ -316,7 +328,7 @@ def run_benchmark(config_path, *, validate_only=False, resume=False, method=None
                     spec=dataclasses.replace(spec, formal_mode=formal)
                     if ck: validate_policy_checkpoint(spec, ck)
                     policy=_policy_for(mid, ck, spec)
-                    result=evaluate_policy_on_frozen_scenario(scenario=sc, method_spec=spec, policy=policy, reward_registry=_reward_registry(m, ck, spec, formal), evaluation_config=cfg.get('evaluation',{}), training_seed=seed)
+                    result=evaluate_policy_on_frozen_scenario(scenario=sc, method_spec=spec, policy=policy, reward_registry=_reward_registry(m, ck, spec, formal), evaluation_config=evaluation_config, training_seed=seed)
                     row.update({'formal_metrics':result.metrics,'metric_source_metadata':result.metric_sources,'rlaif_decomposition':result.rlaif_decomposition,'transition_count':result.transition_count,'runtime':result.runtime_seconds,'runtime_seconds':result.runtime_seconds,'status':result.status,'failure_reason':result.failure_reason or '', 'exception_type':result.exception_type, 'env_constructed': result.status == 'success', 'env_reset_called': result.status == 'success', 'env_step_called': result.transition_count > 0, 'terminal_reached': result.status == 'success', 'action_masks_respected': result.status == 'success', 'runtime_metrics_collected': bool(result.metrics)})
                     if row['status'] == 'success' and row.get('transition_count', 0) <= 0:
                         raise BenchmarkIntegrityError('successful benchmark row has no env.step transitions')
@@ -333,7 +345,12 @@ def run_benchmark(config_path, *, validate_only=False, resume=False, method=None
             row['status']='failed_metric_validation'; row['failure_stage']='metric_validation'; row['exception_type']=type(exc).__name__; row['failure_reason']=str(exc); gate_failures.append(row)
     validate_paired_scenarios(rows); _write_outputs(rows,out)
     scenarios=[sc.scenario_id for sc in bank.scenarios if not scenario_id or sc.scenario_id==scenario_id]
-    row_report=validate_expected_rows(cfg.get('methods',[]), scenarios, rows)
+    row_report=validate_expected_rows(
+        cfg.get('methods', []),
+        scenarios,
+        rows,
+        training_seeds=cfg.get('training_seeds'),
+    )
     report={'publication_eligible':False,'benchmark_config_hash':eval_hash,'scenario_bank_hash':bank.bank_hash,'row_counts':row_report,'failed_rows':[r for r in rows if r.get('status')!='success'],'gate_failure_count':len(gate_failures)}
     (out/'benchmark_gate_report.json').write_text(json.dumps(report,indent=2,sort_keys=True,default=str))
     return rows
