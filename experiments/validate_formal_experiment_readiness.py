@@ -18,6 +18,28 @@ def _spec_from_method(m):
     mid=aliases.get(mid,mid); base=get_formal_policy_spec(mid)
     return FormalPolicySpec(base.method_id,base.display_name,base.policy_type,m.get('checkpoint') or m.get('policy_checkpoint'),base.expected_algorithm,base.expected_rlaif_scope,base.enabled_reward_agents,m.get('reward_checkpoints') or ({'assignment':m.get('reward_model_checkpoint')} if m.get('reward_model_checkpoint') else {}),m.get('training_seed'),cfg_run_classification=='formal')
 
+
+def _specs_from_method(m, cfg):
+    base = _spec_from_method(m)
+    checkpoints = m.get('policy_checkpoints')
+
+    if not isinstance(checkpoints, dict):
+        return [base]
+
+    seeds = (
+        m.get('training_seeds')
+        or cfg.get('training_seeds')
+        or sorted(checkpoints, key=lambda value: int(value))
+    )
+
+    return [
+        base.with_checkpoint(
+            checkpoints.get(str(seed)),
+            training_seed=int(seed),
+        )
+        for seed in seeds
+    ]
+
 def validate_readiness(config_path: str|Path)->dict[str,Any]:
     global cfg_run_classification
     cfg=load_config(config_path); cfg_run_classification=cfg.get('run_classification',cfg.get('experiment',{}).get('run_classification','smoke' if 'smoke' in str(config_path) else 'formal'))
@@ -50,15 +72,30 @@ def validate_readiness(config_path: str|Path)->dict[str,Any]:
     specs=[]
     for m in _methods(cfg):
         try:
-            s=_spec_from_method(m); specs.append(s)
-            if s.policy_checkpoint:
-                if not Path(s.policy_checkpoint).is_file(): missing.append(f'policy checkpoint missing: {s.policy_checkpoint}')
-                else: validate_policy_checkpoint(s,s.policy_checkpoint)
-            elif s.policy_type not in ('heuristic',): missing.append(f'policy checkpoint missing for {s.method_id}')
-            for a in s.enabled_reward_agents:
-                ck=(s.reward_checkpoints or {}).get(a)
-                if not ck or not Path(ck).is_file(): missing.append(f'reward checkpoint missing for {s.method_id}/{a}: {ck}')
-                else: load_strict_agent_reward_checkpoint(ck,agent_type=a,formal=(cfg_run_classification=='formal'))
+            method_specs = _specs_from_method(m, cfg)
+            specs.extend(method_specs)
+
+            for s in method_specs:
+                if s.policy_checkpoint:
+                    if not Path(s.policy_checkpoint).is_file():
+                        missing.append(f'policy checkpoint missing: {s.policy_checkpoint}')
+                    else:
+                        validate_policy_checkpoint(s, s.policy_checkpoint)
+                elif s.policy_type not in ('heuristic',):
+                    suffix = f' seed {s.training_seed}' if s.training_seed is not None else ''
+                    missing.append(f'policy checkpoint missing for {s.method_id}{suffix}')
+
+            reward_spec = method_specs[0]
+            for a in reward_spec.enabled_reward_agents:
+                ck=(reward_spec.reward_checkpoints or {}).get(a)
+                if not ck or not Path(ck).is_file():
+                    missing.append(f'reward checkpoint missing for {reward_spec.method_id}/{a}: {ck}')
+                else:
+                    load_strict_agent_reward_checkpoint(
+                        ck,
+                        agent_type=a,
+                        formal=(cfg_run_classification=='formal'),
+                    )
         except (ValueError, PolicyCheckpointValidationError, RewardCheckpointError) as exc:
             incompatible.append(str(exc))
     try: validate_unique_learned_checkpoints(specs)
