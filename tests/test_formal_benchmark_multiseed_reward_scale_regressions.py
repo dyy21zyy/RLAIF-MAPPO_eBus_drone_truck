@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import evaluation.formal_episode_runner as episode_runner
+import experiments.run_paper_benchmark as benchmark_runner
 from evaluation.preformal_part3_gates import validate_expected_rows
 
 
@@ -82,6 +83,9 @@ def test_formal_episode_uses_frozen_reward_scale_before_environment_reset(
         evaluation_config={
             "reward_scale_artifact_path": str(frozen_scale),
             "reward_scale_artifact_hash": "frozen-scale-hash",
+            "reward_scale_training_bank_hash": (
+                "frozen-training-bank-hash"
+            ),
         },
         training_seed=1,
     )
@@ -94,6 +98,61 @@ def test_formal_episode_uses_frozen_reward_scale_before_environment_reset(
     assert (
         observed_reward_config["scale_artifact_hash"]
         == "frozen-scale-hash"
+    )
+    assert (
+        observed_reward_config[
+            "expected_training_scenario_bank_hash"
+        ]
+        == "frozen-training-bank-hash"
+    )
+
+
+def test_benchmark_evaluation_config_derives_reward_scale_training_bank_hash(
+    monkeypatch,
+    tmp_path,
+):
+    scale_path = tmp_path / "final_reward_reference_scales.json"
+    scale_path.write_text("{}", encoding="utf-8")
+
+    observed = {}
+
+    class FakeArtifact:
+        training_scenario_bank_hash = "resolved-training-bank-hash"
+
+    def fake_load_reward_scale_artifact(
+        path,
+        *,
+        expected_hash=None,
+        formal_mode=False,
+    ):
+        observed["path"] = str(path)
+        observed["expected_hash"] = expected_hash
+        observed["formal_mode"] = formal_mode
+        return FakeArtifact()
+
+    monkeypatch.setattr(
+        benchmark_runner,
+        "load_reward_scale_artifact",
+        fake_load_reward_scale_artifact,
+        raising=False,
+    )
+
+    resolved = benchmark_runner._resolved_evaluation_config(
+        {
+            "reward_scale_artifact_path": str(scale_path),
+            "reward_scale_artifact_hash": "resolved-scale-hash",
+        },
+        formal=True,
+    )
+
+    assert observed == {
+        "path": str(scale_path),
+        "expected_hash": "resolved-scale-hash",
+        "formal_mode": True,
+    }
+    assert (
+        resolved["reward_scale_training_bank_hash"]
+        == "resolved-training-bank-hash"
     )
 
 

@@ -12,6 +12,7 @@ from rlaif.reward_registry import RewardRegistry
 from evaluation.policies import TruckDirectHeuristicPolicy, IntegratedRuleBasedPolicy, AssignmentPPOPolicy, MAPPOPolicy
 from evaluation.formal_policy_registry import validate_policy_checkpoint, validate_unique_learned_checkpoints, PolicyCheckpointValidationError
 from evaluation.paired_evaluation import validate_paired_scenarios
+from envs.reward_scales import load_reward_scale_artifact
 from evaluation.preformal_part3_gates import BenchmarkIntegrityError, validate_benchmark_row, validate_reconciliation, validate_expected_rows
 from experiments.validate_formal_experiment_readiness import validate_readiness, READY_FOR_FORMAL_EVALUATION
 
@@ -280,20 +281,47 @@ def _method_specs(cfg, formal_mode):
     validate_unique_learned_checkpoints(specs)
     return specs
 
+def _resolved_evaluation_config(cfg, *, formal):
+    evaluation_config = dict(
+        cfg.get("evaluation") or {}
+    )
+
+    scale_path = cfg.get(
+        "reward_scale_artifact_path"
+    )
+    scale_hash = cfg.get(
+        "reward_scale_artifact_hash"
+    )
+
+    evaluation_config.setdefault(
+        "reward_scale_artifact_path",
+        scale_path,
+    )
+    evaluation_config.setdefault(
+        "reward_scale_artifact_hash",
+        scale_hash,
+    )
+
+    if scale_path:
+        artifact = load_reward_scale_artifact(
+            scale_path,
+            expected_hash=scale_hash,
+            formal_mode=formal,
+        )
+        evaluation_config[
+            "reward_scale_training_bank_hash"
+        ] = artifact.training_scenario_bank_hash
+
+    return evaluation_config
+
+
 def run_benchmark(config_path, *, validate_only=False, resume=False, method=None, policy_seed=None, scenario_id=None, output_root=None, continue_on_error=False):
     cfg=load_config(config_path); formal=cfg.get('run_classification')=='formal'
     readiness=validate_readiness(config_path)
     if formal and readiness['status']!=READY_FOR_FORMAL_EVALUATION: raise SystemExit(2)
-    evaluation_config = dict(
-        cfg.get("evaluation") or {}
-    )
-    evaluation_config.setdefault(
-        "reward_scale_artifact_path",
-        cfg.get("reward_scale_artifact_path"),
-    )
-    evaluation_config.setdefault(
-        "reward_scale_artifact_hash",
-        cfg.get("reward_scale_artifact_hash"),
+    evaluation_config = _resolved_evaluation_config(
+        cfg,
+        formal=formal,
     )
 
     bank=load_scenario_bank(cfg['scenario_bank']['manifest'])

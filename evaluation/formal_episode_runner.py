@@ -243,6 +243,17 @@ def evaluate_policy_on_frozen_scenario(*, scenario, method_spec, policy, reward_
                         "scale_artifact_hash"
                     ] = str(scale_hash)
 
+                training_bank_hash = (
+                    evaluation_config.get(
+                        "reward_scale_training_bank_hash"
+                    )
+                )
+
+                if training_bank_hash:
+                    reward_config[
+                        "expected_training_scenario_bank_hash"
+                    ] = str(training_bank_hash)
+
         obs,_=env.reset(seed=training_seed)
         limit=int(evaluation_config.get("max_decisions", 10000)) if isinstance(evaluation_config, dict) else 10000
         while obs.get("agent_id") != "terminal" and transitions < limit:
