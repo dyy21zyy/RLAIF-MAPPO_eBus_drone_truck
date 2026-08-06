@@ -9,7 +9,7 @@ def build_plan(through=11):
     if through not in range(12): raise ValueError("--through must be 0..11")
     return [{"phase":i,"description":PHASES[i],"execute":False} for i in range(through+1)]
 def main(argv=None):
-    p=argparse.ArgumentParser(); p.add_argument("--through",type=int,default=11); p.add_argument("--device",default="cuda"); p.add_argument("--execute",action="store_true")
+    p=argparse.ArgumentParser(); p.add_argument("--through",type=int,default=11); p.add_argument("--device",default="cuda"); p.add_argument("--execute",action="store_true"); p.add_argument("--resume", action="store_true")
     a=p.parse_args(argv)
     if a.execute: raise SystemExit("Formal execution requires separately validated phase-specific commands; this orchestrator is dry-plan only")
     print("Isolated formal post-training dry plan")
@@ -18,7 +18,11 @@ def main(argv=None):
     print("9 training jobs (3 methods × seeds 1/2/3)")
     print("900 benchmark rows (3 methods × 3 seeds × 100 common scenarios)")
     print("Bradley–Terry Reward Model")
-    print("DPO disabled/not implemented")
+    print("DPO not used")
+    print("primary comparison:")
+    print("mappo_rlaif_assignment_post")
+    print("vs")
+    print("mappo_env_post_continued")
     print(f"output root: {OUTPUT_ROOT}/<commit>/")
     print("DRY RUN: evaluator, RM/MAPPO training, checkpoints, and benchmark were not executed")
 if __name__=="__main__": main()

@@ -42,3 +42,19 @@ def test_benchmark_cartesian_product():
 def test_preregistered_confirmatory_comparison():
  assert len(COMPARISONS)==3
  assert COMPARISONS[0]=={'comparison_id':'rlaif_post_vs_env_continued','treatment':'mappo_rlaif_assignment_post','baseline':'mappo_env_post_continued','inference':'confirmatory'}
+
+@pytest.mark.parametrize("field", ["total_episodes","rollout_episodes","lr_actor","lr_critic","gamma","gae_lambda","clip_eps","ppo_epochs","batch_size","entropy_coef","value_coef","max_grad_norm","network_architecture","scenario_bank","reward_scale_artifact"])
+def test_every_budget_and_hyperparameter_mismatch_fails_closed(field):
+ b,c,r=_configs(); r["training"][field] = "tampered"
+ with pytest.raises(ReadinessError,match=field): validate_seed_pair(b,c,r)
+
+@pytest.mark.parametrize("field,value", [("load_critic",False),("load_optimizers",True)])
+def test_initialization_tampering_fails_closed(field,value):
+ b,c,r=_configs(); r["training"]["initialization"][field]=value
+ with pytest.raises(ReadinessError): validate_seed_pair(b,c,r)
+
+def test_parent_hash_and_parent_seed_tampering_fail_closed():
+ b,c,r=_configs(); c["parent_checkpoint_sha256"]="tampered"
+ with pytest.raises(ReadinessError,match="parent hashes"): validate_seed_pair(b,c,r)
+ b,c,r=_configs(); r["parent_training_seed"]=2
+ with pytest.raises(ReadinessError,match="parent seed"): validate_seed_pair(b,c,r)
