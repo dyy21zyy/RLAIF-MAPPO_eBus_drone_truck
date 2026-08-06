@@ -1,0 +1,7 @@
+schema_version: 4
+agent_type: assignment
+source_policy_method_id: mappo_env_post_base
+source_policy_seeds: [1, 2, 3]
+group_split_by: scenario_id
+dataset_splits: [train, validation, test]
+event_types: [TD, TBD, TLD]

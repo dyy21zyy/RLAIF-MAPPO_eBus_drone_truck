@@ -1,0 +1,6 @@
+schema_version: 1
+phases: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+method_ids: [mappo_env_post_base, mappo_env_post_continued, mappo_rlaif_assignment_post]
+reward_model: bradley_terry
+DPO: disabled_not_implemented
+output_root: results/formal_post_training/<commit>
