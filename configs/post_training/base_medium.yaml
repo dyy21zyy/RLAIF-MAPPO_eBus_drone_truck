@@ -1,0 +1,4 @@
+schema_version: 1
+scenario_bank: configs/paper/scenario_banks.yaml
+event_time_reference_min: 5.0
+network_architecture: {actor_hidden_sizes: [256, 256], critic_hidden_sizes: [256, 256]}

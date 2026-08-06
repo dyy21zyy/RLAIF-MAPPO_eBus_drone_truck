@@ -1,0 +1,5 @@
+algorithm: bradley_terry_reward_model
+agent_type: assignment
+loss: negative_log_sigmoid_reward_difference
+dpo: {enabled: false, implemented: false}
+validation: {require_pairwise_validation_accuracy: true, require_pairwise_test_accuracy: true, require_validation_loss: true, require_scenario_group_split: true, fail_closed: true}

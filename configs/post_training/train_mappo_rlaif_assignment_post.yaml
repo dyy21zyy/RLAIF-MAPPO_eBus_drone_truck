@@ -1,0 +1,43 @@
+method_id: mappo_rlaif_assignment_post
+algorithm: four_agent_asynchronous_mappo_rlaif_assignment_post
+training_stage: rlaif_post_training
+training:
+  total_episodes: 3000
+  rollout_episodes: 10
+  lr_actor: 0.0003
+  lr_critic: 0.001
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  ppo_epochs: 10
+  batch_size: 64
+  entropy_coef: 0.01
+  value_coef: 0.5
+  max_grad_norm: 0.5
+  event_time_reference_min: 5.0
+  device_policy: cuda
+  initialization:
+    mode: pretrained_policy
+    checkpoint_path: <resolved-per-seed>
+    manifest_path: <resolved-per-seed>
+    load_actors: true
+    load_critic: true
+    load_optimizers: false
+    strict: true
+rlaif:
+  enabled: true
+  scope: assignment
+  fallback_to_env_reward: false
+  fail_on_invalid_reward_model: true
+  agents:
+    assignment:
+      enabled: true
+      checkpoint: <validated-reward-checkpoint>
+      lambda: 0.1
+      reward_clip: 5.0
+    truck:
+      enabled: false
+    bus:
+      enabled: false
+    station:
+      enabled: false

@@ -1,0 +1,5 @@
+methods: [mappo_env_post_base, mappo_env_post_continued, mappo_rlaif_assignment_post]
+training_seeds: [1, 2, 3]
+common_test_scenarios: 100
+expected_rows: 900
+output_root: results/formal_post_training

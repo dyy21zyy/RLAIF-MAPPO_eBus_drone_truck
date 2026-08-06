@@ -1,0 +1,1 @@
+"""Isolated post-training namespace."""
