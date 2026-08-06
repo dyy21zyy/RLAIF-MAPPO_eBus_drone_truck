@@ -18,6 +18,10 @@ def validate_seed_pair(base:dict[str,Any],continued:dict[str,Any],rlaif:dict[str
     for key in INIT_FIELDS:
       if ci.get(key)!=ri.get(key): raise ReadinessError(f"initialization fairness mismatch: {key}")
     if ci.get("load_optimizers") is not False or ri.get("load_optimizers") is not False: raise ReadinessError("child optimizers must be reset")
+    if ci.get("load_actors") is not True or ri.get("load_actors") is not True or ci.get("load_critic") is not True or ri.get("load_critic") is not True:
+      raise ReadinessError("both children must load parent actors and critic")
+    for child in (continued,rlaif):
+      if child.get("parent_training_seed", seeds[0]) != seeds[0]: raise ReadinessError("child parent seed must equal base training seed")
     cr=continued.get("rlaif",{})
     if cr.get("enabled") is not False or cr.get("reward_model_path") or cr.get("agents"): raise ReadinessError("continued control must not carry a Reward Model")
     rr=rlaif.get("rlaif",{})
